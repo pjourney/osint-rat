@@ -114,6 +114,11 @@ pub const COMMANDS: &[Command] = &[
         hint: "",
     },
     Command {
+        id: "open_artifacts",
+        title: "Open Artifacts",
+        hint: "",
+    },
+    Command {
         id: "doctor",
         title: "Doctor",
         hint: "d",

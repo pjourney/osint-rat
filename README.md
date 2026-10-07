@@ -74,6 +74,7 @@ os-int new "Example Corp"
 os-int open "Example Corp"
 os-int list
 os-int collect domain example.com
+os-int collect domain example.com --investigation "Example Corp"
 os-int collect example.com --collector dns
 os-int report "Example Corp" --format markdown
 os-int export "Example Corp" -o ./export
@@ -130,7 +131,7 @@ Logs go to `<data_dir>/logs/os-int.log.YYYY-MM-DD`, never to the TUI. Pass `--de
 | `p` or `Ctrl+P` | Command palette |
 | `a` | Ask agent |
 | `n` | New investigation / page / finding |
-| `e` | Edit notes or agent settings |
+| `e` | Edit page notes in `$EDITOR` (Overview/Notes), or agent/theme settings |
 | `r` | Run collectors for the current page |
 | `c` | Cancel the selected job |
 | `?` | Help |

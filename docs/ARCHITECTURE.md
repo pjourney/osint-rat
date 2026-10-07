@@ -55,7 +55,7 @@ structural changes.
 | `jobs/` | `JobManager`: spawns tasks with cancellation tokens, a concurrency limit, and a bounded event channel. |
 | `report/` | Markdown and JSON report generation. Renderers implement a small trait so HTML/PDF can be added later. |
 | `exchange/` | Versioned, path-independent import/export of investigations. |
-| `app/` | `App` owns config, store, workspace, job manager, and all UI state. Keys map to `Action`s; `App::dispatch` performs state transitions and side effects. |
+| `app/` | `App` owns config, store, workspace, job manager, and all UI state. Keys map to `Action`s; `App::dispatch` performs state transitions and side effects. Per-investigation `ui_state` restores the last view, page, and agent thread after restart. Long notes open `$EDITOR` / `$VISUAL` without a shell. |
 | `tui/` | Terminal setup/restore, the async event loop, theme, keymap, widgets, screens, and overlays. Rendering is a pure function of `App`. |
 | `cli/` | Clap definitions and non-TUI commands (`list`, `new`, `export`, `import`, `collect`, `report`, `doctor`, `config`). |
 

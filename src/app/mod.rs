@@ -5,6 +5,7 @@ pub mod commands;
 pub mod input;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
@@ -22,8 +23,8 @@ use crate::config::Config;
 use crate::files::InvestigationFiles;
 use crate::jobs::{JobEvent, JobManager, JobOutcome, JobOutput};
 use crate::model::{
-    AgentAction, AgentRun, ArtifactKind, Confidence, JobRecord, JobStatus, NewArtifact, Page,
-    PageKind, Proposal, ProposalStatus, Provenance, Target, Workspace, now,
+    AgentAction, AgentRun, Artifact, ArtifactKind, Confidence, JobRecord, JobStatus, NewArtifact,
+    Page, PageKind, Proposal, ProposalStatus, Provenance, Target, Workspace, now,
 };
 use crate::paths::AppPaths;
 use crate::report::write_report;
@@ -46,6 +47,46 @@ pub enum View {
     Jobs,
     Tools,
     Settings,
+    Artifacts,
+}
+
+impl View {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            View::Welcome => "welcome",
+            View::Overview => "overview",
+            View::Pages => "pages",
+            View::Sources => "sources",
+            View::Findings => "findings",
+            View::Entities => "entities",
+            View::Timeline => "timeline",
+            View::Notes => "notes",
+            View::Agent => "agent",
+            View::Jobs => "jobs",
+            View::Tools => "tools",
+            View::Settings => "settings",
+            View::Artifacts => "artifacts",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<View> {
+        Some(match value {
+            "welcome" => View::Welcome,
+            "overview" => View::Overview,
+            "pages" => View::Pages,
+            "sources" => View::Sources,
+            "findings" => View::Findings,
+            "entities" => View::Entities,
+            "timeline" => View::Timeline,
+            "notes" => View::Notes,
+            "agent" => View::Agent,
+            "jobs" => View::Jobs,
+            "tools" => View::Tools,
+            "settings" => View::Settings,
+            "artifacts" => View::Artifacts,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -162,6 +203,14 @@ pub struct App {
     pub agent: AgentStatus,
     pub streaming: HashMap<Uuid, String>,
     pub last_error: Option<String>,
+    pub pending_editor: Option<EditorSession>,
+}
+
+/// External `$EDITOR` session for long-form page notes.
+#[derive(Clone, Debug)]
+pub struct EditorSession {
+    pub path: PathBuf,
+    pub page_id: Uuid,
 }
 
 impl App {
@@ -198,6 +247,7 @@ impl App {
             agent,
             streaming: HashMap::new(),
             last_error: None,
+            pending_editor: None,
         };
         let _ = app.store.mark_interrupted_jobs();
         app
@@ -220,6 +270,7 @@ impl App {
             ("Entities", View::Entities),
             ("Timeline", View::Timeline),
             ("Notes", View::Notes),
+            ("Artifacts", View::Artifacts),
             ("Agent", View::Agent),
             ("Jobs", View::Jobs),
             ("Tools", View::Tools),
@@ -253,6 +304,7 @@ impl App {
         self.selected = 0;
         self.nav_index = 0;
         self.overlay = Overlay::None;
+        self.restore_session(id)?;
         self.status = format!(
             "Opened {}",
             self.workspace
@@ -263,6 +315,77 @@ impl App {
         self.store
             .set_state(GLOBAL_SCOPE, "last_investigation", &id.to_string())?;
         self.mark_dirty();
+        Ok(())
+    }
+
+    fn restore_session(&mut self, investigation_id: Uuid) -> Result<()> {
+        let scope = investigation_id.to_string();
+        if let Some(page) = self.store.get_state(&scope, "page")?
+            && let Ok(page_id) = Uuid::parse_str(&page)
+            && self
+                .workspace
+                .as_ref()
+                .is_some_and(|workspace| workspace.page(page_id).is_some())
+        {
+            self.page_id = Some(page_id);
+        }
+        if let Some(view) = self.store.get_state(&scope, "view")?
+            && let Some(view) = View::parse(&view)
+            && view != View::Welcome
+        {
+            self.view = view;
+            if let Some(index) = self
+                .nav_items()
+                .iter()
+                .position(|(_, candidate)| *candidate == view)
+            {
+                self.nav_index = index;
+            }
+        }
+        if let Some(thread) = self.store.get_state(&scope, "agent_thread")? {
+            self.agent_thread = Uuid::parse_str(&thread).ok();
+        } else if let Some(run) = self
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.data.agent_runs.last())
+        {
+            self.agent_thread = Some(run.thread_id);
+            self.agent_run_id = Some(run.id);
+        }
+        if let Some(run_id) = self.agent_thread.and_then(|thread| {
+            self.workspace.as_ref().and_then(|workspace| {
+                workspace
+                    .data
+                    .agent_runs
+                    .iter()
+                    .rev()
+                    .find(|run| run.thread_id == thread)
+                    .map(|run| run.id)
+            })
+        }) {
+            self.agent_run_id = Some(run_id);
+        }
+        Ok(())
+    }
+
+    fn save_session(&self) -> Result<()> {
+        let Some(workspace) = self.workspace.as_ref() else {
+            return Ok(());
+        };
+        let scope = workspace.id().to_string();
+        self.store.set_state(&scope, "view", self.view.as_str())?;
+        if let Some(page_id) = self.page_id {
+            self.store.set_state(&scope, "page", &page_id.to_string())?;
+        }
+        if let Some(thread) = self.agent_thread {
+            self.store
+                .set_state(&scope, "agent_thread", &thread.to_string())?;
+        }
+        self.store.set_state(
+            GLOBAL_SCOPE,
+            "last_investigation",
+            &workspace.id().to_string(),
+        )?;
         Ok(())
     }
 
@@ -301,7 +424,10 @@ impl App {
             Action::Move(delta) => self.move_selection(delta),
             Action::Select => self.select()?,
             Action::Back => self.cancel(),
-            Action::Help => self.overlay = Overlay::Help,
+            Action::Help => {
+                self.scroll = 0;
+                self.overlay = Overlay::Help;
+            }
             Action::Palette => {
                 self.overlay = Overlay::Palette {
                     query: Input::default(),
@@ -355,6 +481,7 @@ impl App {
             self.overlay = Overlay::None;
             return;
         }
+        let _ = self.save_session();
         self.should_quit = true;
     }
 
@@ -407,6 +534,7 @@ impl App {
             self.nav_index = index;
         }
         self.overlay = Overlay::None;
+        let _ = self.save_session();
     }
 
     fn move_selection(&mut self, delta: i32) {
@@ -440,8 +568,10 @@ impl App {
             Overlay::Text { scroll, .. } => {
                 *scroll = add_scroll(*scroll, delta);
             }
+            Overlay::Help => {
+                self.scroll = add_scroll(self.scroll, delta);
+            }
             Overlay::None
-            | Overlay::Help
             | Overlay::AgentPrompt { .. }
             | Overlay::Confirm { .. }
             | Overlay::Doctor => {
@@ -504,6 +634,7 @@ impl App {
                 if let Some(page) = workspace.data.pages.get(self.selected) {
                     self.page_id = Some(page.id);
                     self.view = View::Overview;
+                    let _ = self.save_session();
                 }
             }
             View::Sources => {
@@ -555,6 +686,11 @@ impl App {
                     let _ = self.spawn_tool(&name);
                 }
             }
+            View::Artifacts => {
+                if let Some(artifact) = workspace.data.artifacts.get(self.selected).cloned() {
+                    self.open_artifact(&artifact);
+                }
+            }
             _ => {}
         }
     }
@@ -567,6 +703,17 @@ impl App {
             View::Findings => self.finding_id = Some(hit.id),
             View::Entities => self.entity_id = Some(hit.id),
             View::Agent => self.agent_run_id = Some(hit.id),
+            View::Artifacts => {
+                if let Some(index) = self.workspace.as_ref().and_then(|workspace| {
+                    workspace
+                        .data
+                        .artifacts
+                        .iter()
+                        .position(|artifact| artifact.id == hit.id)
+                }) {
+                    self.selected = index;
+                }
+            }
             _ => {}
         }
     }
@@ -623,10 +770,20 @@ impl App {
                         &self.config.agent.timeout_seconds.to_string(),
                         "600",
                     ),
+                    field(
+                        "Theme",
+                        &self.config.ui.theme,
+                        "default / high-contrast / monochrome",
+                    ),
                 ],
             );
             self.overlay = Overlay::Form(form);
             return Ok(());
+        }
+        if matches!(self.view, View::Notes | View::Overview)
+            && let Some(page) = self.current_page().cloned()
+        {
+            return self.open_external_editor(&page);
         }
         if let Some(page) = self.current_page() {
             self.overlay = Overlay::Form(FormState::new(
@@ -635,6 +792,81 @@ impl App {
             ));
         }
         Ok(())
+    }
+
+    fn open_external_editor(&mut self, page: &Page) -> Result<()> {
+        let files = self.files().ok_or_else(|| eyre!("no investigation"))?;
+        files.ensure().ok();
+        let relative = format!("notes/edit-{}.md", page.id.simple());
+        let path = files
+            .resolve(&relative)
+            .ok_or_else(|| eyre!("unsafe notes path"))?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).wrap_err("could not create notes directory")?;
+        }
+        std::fs::write(&path, &page.notes).wrap_err("could not write notes for editing")?;
+        self.pending_editor = Some(EditorSession {
+            path,
+            page_id: page.id,
+        });
+        self.status = "Opening editor…".into();
+        Ok(())
+    }
+
+    pub fn take_pending_editor(&mut self) -> Option<EditorSession> {
+        self.pending_editor.take()
+    }
+
+    pub fn apply_editor_session(&mut self, session: EditorSession) -> Result<()> {
+        let notes = std::fs::read_to_string(&session.path).unwrap_or_default();
+        let _ = std::fs::remove_file(&session.path);
+        self.store.update_page_notes(session.page_id, &notes)?;
+        self.reload()?;
+        self.status = "Notes updated.".into();
+        Ok(())
+    }
+
+    pub fn editor_command(&self) -> Vec<String> {
+        let raw = self
+            .config
+            .ui
+            .editor
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                std::env::var("VISUAL")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .or_else(|| {
+                std::env::var("EDITOR")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .unwrap_or_else(|| "vi".into());
+        shlex::split(&raw)
+            .filter(|parts| !parts.is_empty())
+            .unwrap_or_else(|| vec![raw])
+    }
+
+    fn open_artifact(&mut self, artifact: &Artifact) {
+        let body = self
+            .files()
+            .and_then(|files| files.read_text(&artifact.path, 200_000).ok())
+            .unwrap_or_else(|| {
+                format!(
+                    "{}\n{}\n{} bytes\n{}",
+                    artifact.name,
+                    artifact.path,
+                    artifact.size_bytes,
+                    artifact.sha256.as_deref().unwrap_or("-")
+                )
+            });
+        self.overlay = Overlay::Text {
+            title: format!("{} {}", artifact.short_ref(), artifact.name),
+            body,
+            scroll: 0,
+        };
     }
 
     fn open_agent_prompt(&mut self) {
@@ -771,6 +1003,9 @@ impl App {
                 if let Ok(timeout) = values.get(2).map(String::as_str).unwrap_or("").parse() {
                     self.config.agent.timeout_seconds = timeout;
                 }
+                if let Some(theme) = values.get(3).filter(|value| !value.is_empty()) {
+                    self.config.ui.theme = theme.clone();
+                }
                 self.config.save(&self.paths.config_file)?;
                 self.agent = AgentStatus::resolve(&self.config, &self.tools);
                 self.status = format!("Agent set to {}", self.agent.profile.name);
@@ -806,6 +1041,7 @@ impl App {
             "open_tools" => self.switch_view(View::Tools),
             "open_agent" => self.switch_view(View::Agent),
             "open_settings" => self.switch_view(View::Settings),
+            "open_artifacts" => self.switch_view(View::Artifacts),
             "doctor" => self.overlay = Overlay::Doctor,
             "help" => self.overlay = Overlay::Help,
             "cancel_job" => self.cancel_selected_job(),
@@ -1556,6 +1792,16 @@ impl App {
                 View::Sources,
             );
         }
+        for artifact in &workspace.data.artifacts {
+            push(
+                &mut hits,
+                &format!("{} {}", artifact.name, artifact.path),
+                format!("{} {}", artifact.short_ref(), artifact.name),
+                "artifact",
+                artifact.id,
+                View::Artifacts,
+            );
+        }
         for run in &workspace.data.agent_runs {
             push(
                 &mut hits,
@@ -1764,7 +2010,7 @@ fn add_scroll(scroll: u16, delta: i32) -> u16 {
 mod tests {
     use super::*;
 
-    fn test_app() -> App {
+    fn test_app() -> (tempfile::TempDir, App) {
         let directory = tempfile::tempdir().expect("tempdir");
         let paths = AppPaths::new(
             directory.path().join("config.toml"),
@@ -1772,19 +2018,20 @@ mod tests {
         );
         paths.ensure_dirs().expect("dirs");
         let store = Store::open(&paths.database()).expect("store");
-        App::new(Config::default(), paths, store)
+        let app = App::new(Config::default(), paths, store);
+        (directory, app)
     }
 
     #[test]
     fn first_run_is_welcome() {
-        let mut app = test_app();
+        let (_directory, mut app) = test_app();
         app.open_last_or_welcome().expect("open");
         assert_eq!(app.view, View::Welcome);
     }
 
     #[test]
     fn creating_an_investigation_and_domain_page_round_trips() {
-        let mut app = test_app();
+        let (_directory, mut app) = test_app();
         app.dispatch(Action::Command("new_investigation"))
             .expect("form");
         if let Overlay::Form(form) = &mut app.overlay {
@@ -1812,5 +2059,80 @@ mod tests {
     fn command_palette_filters() {
         let hits = filtered("dns");
         assert!(hits.iter().any(|command| command.id == "run_dns"));
+    }
+
+    #[test]
+    fn investigation_survives_restart_with_findings_notes_and_report() {
+        let (directory, mut app) = test_app();
+        app.dispatch(Action::Command("new_investigation"))
+            .expect("form");
+        if let Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set("Example Corp");
+        }
+        app.dispatch(Action::Submit).expect("create");
+        app.dispatch(Action::Command("new_page")).expect("page");
+        if let Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set("example.com");
+            form.fields[1].value.set("domain");
+            form.fields[2].value.set("example.com");
+        }
+        app.dispatch(Action::Submit).expect("page");
+        app.dispatch(Action::Command("add_finding"))
+            .expect("finding");
+        if let Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set("Apex domain is registered");
+            form.fields[1]
+                .value
+                .set("Placeholder until collectors run.");
+        }
+        app.dispatch(Action::Submit).expect("save finding");
+        app.dispatch(Action::Command("add_note")).expect("note");
+        if let Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set("Follow the nameservers next.");
+        }
+        app.dispatch(Action::Submit).expect("save note");
+        app.dispatch(Action::Command("generate_report"))
+            .expect("report");
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.dispatch(Action::Quit).expect("save session");
+        assert!(app.should_quit);
+        let paths = AppPaths::new(
+            directory.path().join("config.toml"),
+            directory.path().join("data"),
+        );
+        let store = Store::open(&paths.database()).expect("reopen");
+        let mut restarted = App::new(Config::default(), paths, store);
+        restarted.open_last_or_welcome().expect("restore");
+        assert_eq!(
+            restarted.workspace.as_ref().unwrap().investigation().name,
+            "Example Corp"
+        );
+        assert_eq!(restarted.view, View::Entities);
+        let workspace = restarted.workspace.as_ref().expect("workspace");
+        assert_eq!(
+            workspace.data.pages[0].target.as_deref(),
+            Some("example.com")
+        );
+        assert_eq!(
+            workspace.data.findings[0].title,
+            "Apex domain is registered"
+        );
+        assert!(
+            workspace.data.pages[0]
+                .notes
+                .contains("Follow the nameservers")
+                || workspace
+                    .data
+                    .notes
+                    .iter()
+                    .any(|note| note.body.contains("Follow the nameservers"))
+        );
+        assert!(
+            workspace
+                .data
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.kind == ArtifactKind::Report)
+        );
     }
 }

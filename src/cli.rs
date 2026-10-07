@@ -264,7 +264,20 @@ async fn collect(
     let mut runtime = Runtime::load(cli)?;
     let target = parse_target(kind_or_target, target_arg)?;
     let investigation = match investigation_query {
-        Some(query) => runtime.store.require_investigation(query)?,
+        Some(query) => match runtime.store.find_investigation(query)? {
+            Some(found) => found,
+            None if uuid::Uuid::parse_str(query).is_ok() => {
+                return Err(eyre!(
+                    "no investigation named {query:?}; run `os-int list` to see existing investigations"
+                ));
+            }
+            None => {
+                let created = runtime.store.create_investigation(query, "")?;
+                InvestigationFiles::new(&runtime.paths, created.id).ensure()?;
+                eprintln!("Created investigation {}", created.name);
+                created
+            }
+        },
         None => match runtime.store.list_investigations()?.into_iter().next() {
             Some(summary) => summary.investigation,
             None => runtime.store.create_investigation(&target.value(), "")?,

@@ -59,6 +59,10 @@ async fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()>
                     Some(Ok(Event::Key(key))) => {
                         if let Some(action) = keymap::map_key(key, &app.overlay, app.view, app.is_editing()) {
                             dispatch(app, action);
+                            if let Err(error) = run_external_editor(terminal, app) {
+                                app.status = error.to_string();
+                                app.mark_dirty();
+                            }
                         }
                     }
                     Some(Ok(Event::Resize(_, _))) => app.mark_dirty(),
@@ -130,6 +134,33 @@ fn dispatch(app: &mut App, action: Action) {
         app.status = message;
         app.mark_dirty();
     }
+}
+
+fn run_external_editor(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
+    let Some(session) = app.take_pending_editor() else {
+        return Ok(());
+    };
+    ratatui::restore();
+    let mut argv = app.editor_command();
+    let program = argv.remove(0);
+    let status = std::process::Command::new(&program)
+        .args(&argv)
+        .arg(&session.path)
+        .status();
+    *terminal = ratatui::init();
+    match status {
+        Ok(code) if code.success() => app.apply_editor_session(session)?,
+        Ok(code) => {
+            app.status = format!("editor exited {code}");
+            let _ = std::fs::remove_file(&session.path);
+        }
+        Err(error) => {
+            app.status = format!("could not launch {program}: {error}");
+            let _ = std::fs::remove_file(&session.path);
+        }
+    }
+    app.mark_dirty();
+    Ok(())
 }
 
 pub fn draw(frame: &mut Frame, app: &App) {

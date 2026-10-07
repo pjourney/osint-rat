@@ -19,7 +19,7 @@ use super::widgets::{centered, input_line, list_from, pane_block, truncate};
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     match &app.overlay {
         Overlay::None => {}
-        Overlay::Help => text_modal(frame, area, "Help", HELP_TEXT, 0, theme),
+        Overlay::Help => text_modal(frame, area, "Help", HELP_TEXT, app.scroll, theme),
         Overlay::Doctor => doctor(frame, area, app, theme),
         Overlay::Text {
             title,

@@ -129,6 +129,7 @@ fn draw_main(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         View::Entities => entities(frame, area, app, theme, focused),
         View::Timeline => timeline(frame, area, app, theme, focused),
         View::Notes => notes(frame, area, app, theme, focused),
+        View::Artifacts => artifacts(frame, area, app, theme, focused),
         View::Agent => agent(frame, area, app, theme, focused),
         View::Jobs => jobs(frame, area, app, theme, focused),
         View::Tools => tools(frame, area, app, theme, focused),
@@ -557,6 +558,38 @@ fn jobs(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) 
     );
 }
 
+fn artifacts(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
+    let items: Vec<String> = app
+        .workspace
+        .as_ref()
+        .map(|workspace| {
+            workspace
+                .data
+                .artifacts
+                .iter()
+                .map(|artifact| {
+                    format!(
+                        "{}  {:<14}  {}  {}",
+                        artifact.short_ref(),
+                        artifact.kind.label(),
+                        crate::sanitize::format_bytes(artifact.size_bytes.max(0) as usize),
+                        artifact.name
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let items = if items.is_empty() {
+        vec!["(no artifacts yet — reports, snapshots, and agent context packs appear here)".into()]
+    } else {
+        items
+    };
+    frame.render_widget(
+        list_from(items, app.selected, theme).block(pane_block("Artifacts", focused, theme)),
+        area,
+    );
+}
+
 fn tools(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
     let items: Vec<String> = app
         .tools
@@ -590,6 +623,17 @@ fn settings(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
         Line::from(format!(
             "  available   {}",
             if app.agent.available { "yes" } else { "no" }
+        )),
+        Line::from(""),
+        Line::from(Span::styled("Interface", theme.header)),
+        Line::from(format!("  theme       {}", app.config.ui.theme)),
+        Line::from(format!(
+            "  editor      {}",
+            app.config
+                .ui
+                .editor
+                .as_deref()
+                .unwrap_or("$VISUAL / $EDITOR / vi")
         )),
         Line::from(""),
         Line::from(Span::styled("Network", theme.header)),
@@ -751,6 +795,19 @@ fn detail_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'st
                     Line::from(""),
                     Line::from(sanitize_text(&job.log).into_owned()),
                     Line::from(sanitize_text(&job.stderr).into_owned()),
+                ];
+            }
+        }
+        View::Artifacts => {
+            if let Some(artifact) = workspace.data.artifacts.get(app.selected) {
+                return vec![
+                    Line::from(format!("{}  {}", artifact.short_ref(), artifact.name)),
+                    Line::from(artifact.kind.label().to_string()),
+                    Line::from(artifact.path.clone()),
+                    Line::from(format!("{} bytes", artifact.size_bytes)),
+                    Line::from(artifact.sha256.clone().unwrap_or_else(|| "-".into())),
+                    Line::from(""),
+                    Line::from("Enter to preview."),
                 ];
             }
         }

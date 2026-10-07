@@ -132,7 +132,8 @@ os-int keyboard shortcuts
   j / k        Move selection     Enter      open / select
   /            Search             p  Ctrl+P  command palette
   a            Ask agent          n          new item / investigation
-  e            Edit notes         r          run collectors for this page
+  e            Edit notes in $EDITOR (Overview/Notes) or Settings
+  r            Run collectors for this page
   c            Cancel running job (Jobs view)
   ?            This help
 
