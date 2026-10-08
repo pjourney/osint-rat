@@ -59,7 +59,7 @@ Collection works without an AI agent. If Claude Code or Codex is on `PATH`, pres
 - Provenance on every record: collected, external, analyst, or AI inference (never silently promoted to fact)
 - Short references (`S-12`, `E-4`, `F-1`) shared by the UI, agents, and reports
 - Built-in passive collectors: DNS, RDAP, HTTP, TLS, certificate transparency, IP intelligence, public repositories, files
-- Diagnostics on public records: SPF, DMARC, MX, MTA-STS, BIMI, HTTP response headers, and certificate validity
+- Diagnostics on public records: SPF, DMARC, MX, MTA-STS, BIMI, DNSSEC, HTTP response headers, certificate validity, and security.txt. Gaps are stored as collected findings and cleared when a later collection shows the record is in place
 - Re-collection records a timeline event when a public observation changes
 - External tool registry (`whois`, `dig`, `gh`, custom passive TOML tools) — no shell, explicit argv. Active probes are refused
 - Background jobs with cancellation; the UI never blocks on I/O

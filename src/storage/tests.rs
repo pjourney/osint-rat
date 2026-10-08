@@ -216,6 +216,59 @@ fn a_changed_observation_is_recorded_on_the_timeline() {
 }
 
 #[test]
+fn collected_diagnostics_are_upserted_and_cleared() {
+    let (mut store, investigation) = store_with_investigation();
+    let context = ApplyContext {
+        investigation_id: investigation.id,
+        page_id: None,
+        job_id: None,
+    };
+    let mut open = EvidenceBatch::new();
+    let mut source = NewSource::collected(SourceKind::Dns, "dns", "DNS records for example.com");
+    source.content_hash = Some("diag-1".into());
+    let key = open.add_source(source);
+    open.add_finding(
+        "example.com spf",
+        "No SPF record published",
+        Confidence::High,
+        Some(key),
+    );
+    let created = store.apply_batch(context, &open).expect("creates");
+    assert_eq!(created.new_findings, 1);
+    let data = store.load_investigation(investigation.id).expect("loads");
+    assert_eq!(data.findings.len(), 1);
+    assert_eq!(data.findings[0].provenance, Provenance::Collected);
+    assert_eq!(data.findings[0].source_ids, created.source_ids);
+
+    let mut revised = EvidenceBatch::new();
+    let mut source = NewSource::collected(SourceKind::Dns, "dns", "DNS records for example.com");
+    source.content_hash = Some("diag-1".into());
+    let key = revised.add_source(source);
+    revised.add_finding(
+        "example.com spf",
+        "SPF +all authorizes any sender",
+        Confidence::Medium,
+        Some(key),
+    );
+    let updated = store.apply_batch(context, &revised).expect("updates");
+    assert_eq!(updated.updated_findings, 1);
+    assert_eq!(updated.new_findings, 0);
+    let data = store.load_investigation(investigation.id).expect("loads");
+    assert_eq!(data.findings.len(), 1);
+    assert!(data.findings[0].details.contains("+all"));
+
+    let mut cleared = EvidenceBatch::new();
+    let mut source = NewSource::collected(SourceKind::Dns, "dns", "DNS records for example.com");
+    source.content_hash = Some("diag-1".into());
+    cleared.add_source(source);
+    cleared.resolve_finding("example.com spf");
+    let resolved = store.apply_batch(context, &cleared).expect("clears");
+    assert_eq!(resolved.resolved_findings, 1);
+    let data = store.load_investigation(investigation.id).expect("loads");
+    assert!(data.findings.is_empty());
+}
+
+#[test]
 fn identical_recollection_reuses_source() {
     let (mut store, investigation) = store_with_investigation();
     let context = ApplyContext {

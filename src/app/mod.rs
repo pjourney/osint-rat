@@ -1446,19 +1446,21 @@ impl App {
         let mut error_text = None;
         let mut status = JobStatus::Succeeded;
         match outcome {
-            JobOutcome::Succeeded(JobOutput::Collection(output)) => {
-                self.apply_collection(job_id, output)?;
-                result_text = self
-                    .job_records
-                    .get(&job_id)
-                    .and_then(|job| job.result.clone());
-            }
-            JobOutcome::Succeeded(JobOutput::Agent(outcome)) => {
-                self.apply_agent(job_id, outcome)?;
-            }
-            JobOutcome::Succeeded(JobOutput::Report(report)) => {
-                result_text = Some(format!("Wrote {}", report.relative_path));
-            }
+            JobOutcome::Succeeded(output) => match *output {
+                JobOutput::Collection(collected) => {
+                    self.apply_collection(job_id, collected)?;
+                    result_text = self
+                        .job_records
+                        .get(&job_id)
+                        .and_then(|job| job.result.clone());
+                }
+                JobOutput::Agent(outcome) => {
+                    self.apply_agent(job_id, outcome)?;
+                }
+                JobOutput::Report(report) => {
+                    result_text = Some(format!("Wrote {}", report.relative_path));
+                }
+            },
             JobOutcome::Failed(error) => {
                 status = JobStatus::Failed;
                 error_text = Some(error);

@@ -111,8 +111,24 @@ pub struct EvidenceBatch {
     pub relationships: Vec<NewRelationship>,
     pub timeline: Vec<NewTimelineEvent>,
     pub artifacts: Vec<NewArtifact>,
+    /// Diagnostic gaps to store as collected findings. Present checks are listed in
+    /// `resolved_findings` so an earlier gap can be cleared.
+    #[serde(default)]
+    pub findings: Vec<NewCollectedFinding>,
+    /// Titles of collected findings that no longer apply.
+    #[serde(default)]
+    pub resolved_findings: Vec<String>,
     /// One-line human summary for the job result.
     pub summary: String,
+}
+
+/// A collected diagnostic finding. Provenance is always `Collected`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NewCollectedFinding {
+    pub title: String,
+    pub details: String,
+    pub confidence: Confidence,
+    pub source: Option<SourceKey>,
 }
 
 impl EvidenceBatch {
@@ -196,6 +212,41 @@ impl EvidenceBatch {
         });
     }
 
+    pub fn add_finding(
+        &mut self,
+        title: impl Into<String>,
+        details: impl Into<String>,
+        confidence: Confidence,
+        source: Option<SourceKey>,
+    ) {
+        let title = title.into();
+        if title.trim().is_empty() || self.findings.iter().any(|finding| finding.title == title) {
+            return;
+        }
+        self.resolved_findings.retain(|existing| existing != &title);
+        self.findings.push(NewCollectedFinding {
+            title,
+            details: details.into(),
+            confidence,
+            source,
+        });
+    }
+
+    pub fn resolve_finding(&mut self, title: impl Into<String>) {
+        let title = title.into();
+        if title.trim().is_empty() {
+            return;
+        }
+        self.findings.retain(|finding| finding.title != title);
+        if !self
+            .resolved_findings
+            .iter()
+            .any(|existing| existing == &title)
+        {
+            self.resolved_findings.push(title);
+        }
+    }
+
     pub fn event(
         &mut self,
         occurred_at: Timestamp,
@@ -251,6 +302,20 @@ impl EvidenceBatch {
         for mut artifact in other.artifacts {
             artifact.source = artifact.source.map(|key| key + offset);
             self.artifacts.push(artifact);
+        }
+        for mut finding in other.findings {
+            finding.source = finding.source.map(|key| key + offset);
+            self.add_finding(
+                finding.title,
+                finding.details,
+                finding.confidence,
+                finding.source,
+            );
+        }
+        for title in other.resolved_findings {
+            if !self.findings.iter().any(|finding| finding.title == title) {
+                self.resolve_finding(title);
+            }
         }
         if !other.summary.is_empty() {
             if self.summary.is_empty() {

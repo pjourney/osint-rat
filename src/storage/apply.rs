@@ -8,9 +8,9 @@ use uuid::Uuid;
 
 use super::Store;
 use super::evidence::{
-    NewSourceRecord, PriorObservation, TimelineInsert, find_duplicate_source,
-    find_prior_observation, insert_artifact, insert_source, insert_timeline_event,
-    mark_source_seen,
+    FindingSync, NewSourceRecord, PriorObservation, TimelineInsert, clear_collected_finding,
+    find_duplicate_source, find_prior_observation, insert_artifact, insert_source,
+    insert_timeline_event, mark_source_seen, sync_collected_finding,
 };
 use super::graph::{
     link_entity_source, link_page_entity, link_relationship_source, merge_entity_fields,
@@ -41,6 +41,9 @@ pub struct ApplySummary {
     pub new_artifacts: usize,
     /// Sources whose content differed from the latest stored observation of the same record.
     pub changed_observations: usize,
+    pub new_findings: usize,
+    pub updated_findings: usize,
+    pub resolved_findings: usize,
 }
 
 impl ApplySummary {
@@ -66,6 +69,12 @@ impl ApplySummary {
                 self.changed_observations
             ));
         }
+        if self.new_findings > 0 {
+            parts.push(format!("{} diagnostic finding(s)", self.new_findings));
+        }
+        if self.resolved_findings > 0 {
+            parts.push(format!("{} resolved finding(s)", self.resolved_findings));
+        }
         parts.join(", ")
     }
 }
@@ -86,6 +95,7 @@ impl Store {
         apply_timeline(&transaction, context, batch, &entity_ids, &mut summary)?;
         apply_observation_changes(&transaction, context, &changes, &mut summary)?;
         apply_artifacts(&transaction, context, batch, &mut summary)?;
+        apply_diagnostic_findings(&transaction, context, batch, &mut summary)?;
         touch_investigation(&transaction, context.investigation_id)?;
         transaction.commit()?;
         Ok(summary)
@@ -187,6 +197,40 @@ fn apply_observation_changes(
         if inserted {
             summary.new_events += 1;
             summary.changed_observations += 1;
+        }
+    }
+    Ok(())
+}
+
+fn apply_diagnostic_findings(
+    connection: &Connection,
+    context: ApplyContext,
+    batch: &EvidenceBatch,
+    summary: &mut ApplySummary,
+) -> rusqlite::Result<()> {
+    for title in &batch.resolved_findings {
+        if clear_collected_finding(connection, context.investigation_id, title)? {
+            summary.resolved_findings += 1;
+        }
+    }
+    for finding in &batch.findings {
+        let source_ids: Vec<Uuid> = finding
+            .source
+            .and_then(|key| summary.source_ids.get(key).copied())
+            .into_iter()
+            .collect();
+        match sync_collected_finding(
+            connection,
+            context.investigation_id,
+            context.page_id,
+            &finding.title,
+            &finding.details,
+            finding.confidence,
+            &source_ids,
+        )? {
+            FindingSync::Created => summary.new_findings += 1,
+            FindingSync::Updated => summary.updated_findings += 1,
+            FindingSync::LeftAlone => {}
         }
     }
     Ok(())

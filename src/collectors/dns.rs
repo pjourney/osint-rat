@@ -14,7 +14,7 @@ use crate::model::{
 };
 use crate::sanitize::sanitize_line;
 
-const RECORD_TYPES: [RecordType; 8] = [
+const RECORD_TYPES: [RecordType; 9] = [
     RecordType::A,
     RecordType::AAAA,
     RecordType::CNAME,
@@ -23,6 +23,7 @@ const RECORD_TYPES: [RecordType; 8] = [
     RecordType::TXT,
     RecordType::SOA,
     RecordType::CAA,
+    RecordType::DS,
 ];
 const SUBNAME_TYPES: [RecordType; 3] = [RecordType::A, RecordType::AAAA, RecordType::CNAME];
 
@@ -38,7 +39,7 @@ impl Collector for DnsCollector {
     }
 
     fn description(&self) -> &'static str {
-        "DNS records plus mail-authentication diagnostics (SPF, DMARC, MX, MTA-STS, BIMI)"
+        "DNS records plus diagnostics for mail policy and DNSSEC (DS)"
     }
 
     fn accepts(&self, kind: TargetKind) -> bool {
@@ -351,6 +352,10 @@ pub fn build_batch(target: &Target, answers: &DnsAnswers) -> EvidenceBatch {
     if let Some(posture) = diagnostic_summary {
         batch.summary = format!("{}; {posture}", batch.summary);
     }
+    if !answers.nxdomain {
+        let diagnostics = diagnose::assess_dns(domain, &diagnostic_facts(answers));
+        diagnose::record_findings(&mut batch, domain, &diagnostics, Some(key));
+    }
     batch
 }
 
@@ -449,7 +454,7 @@ fn describe(answers: &DnsAnswers) -> (String, Observations, Fields) {
             fields.push("diagnostics", posture);
         }
     }
-    for record_type in ["A", "AAAA", "CNAME", "MX", "NS", "TXT", "CAA"] {
+    for record_type in ["A", "AAAA", "CNAME", "MX", "NS", "TXT", "CAA", "DS"] {
         let count = answers
             .records
             .iter()
@@ -614,6 +619,18 @@ mod tests {
         assert!(actual.sources[0].fields.get("diagnostics").is_some());
         assert!(actual.summary.contains("spf present"));
         assert!(actual.summary.contains("dmarc present"));
+        assert!(
+            actual
+                .findings
+                .iter()
+                .any(|finding| finding.title == "example.com dnssec")
+        );
+        assert!(
+            actual
+                .resolved_findings
+                .iter()
+                .any(|title| title == "example.com spf")
+        );
     }
 
     #[test]

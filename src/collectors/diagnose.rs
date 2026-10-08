@@ -5,6 +5,8 @@
 
 use chrono::{DateTime, TimeDelta, Utc};
 
+use crate::model::{Confidence, EvidenceBatch, SourceKey};
+
 /// How a single diagnostic reading should be read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiagnosticState {
@@ -35,7 +37,7 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    fn new(check: &'static str, state: DiagnosticState, summary: impl Into<String>) -> Self {
+    pub fn new(check: &'static str, state: DiagnosticState, summary: impl Into<String>) -> Self {
         Self {
             check,
             state,
@@ -89,7 +91,30 @@ pub fn assess_dns(domain: &str, records: &[DnsFact]) -> Vec<Diagnostic> {
     if let Some(diagnostic) = assess_caa(records) {
         diagnostics.push(diagnostic);
     }
+    diagnostics.push(assess_dnssec(domain, records));
     diagnostics
+}
+
+/// Stores gap diagnostics as collected findings and clears gaps that are now in a good state.
+pub fn record_findings(
+    batch: &mut EvidenceBatch,
+    subject: &str,
+    diagnostics: &[Diagnostic],
+    source: Option<SourceKey>,
+) {
+    for diagnostic in diagnostics {
+        let title = format!("{subject} {}", diagnostic.check);
+        if diagnostic.state == DiagnosticState::Present {
+            batch.resolve_finding(title);
+            continue;
+        }
+        let confidence = if diagnostic.state == DiagnosticState::Missing {
+            Confidence::High
+        } else {
+            Confidence::Medium
+        };
+        batch.add_finding(title, diagnostic.summary.clone(), confidence, source);
+    }
 }
 
 /// Header diagnostics for one fetched response.
@@ -404,6 +429,25 @@ fn assess_tagged_txt(
     }
 }
 
+fn assess_dnssec(domain: &str, records: &[DnsFact]) -> Diagnostic {
+    let count = records
+        .iter()
+        .filter(|record| record.record_type == "DS" && record.name.eq_ignore_ascii_case(domain))
+        .count();
+    if count == 0 {
+        return Diagnostic::new(
+            "dnssec",
+            DiagnosticState::Review,
+            "No DS record; DNSSEC is not signed at the delegation",
+        );
+    }
+    Diagnostic::new(
+        "dnssec",
+        DiagnosticState::Present,
+        format!("{count} DS record(s) published"),
+    )
+}
+
 fn assess_caa(records: &[DnsFact]) -> Option<Diagnostic> {
     let values: Vec<&str> = records
         .iter()
@@ -483,6 +527,44 @@ mod tests {
         assert_eq!(state(&actual, "mx").state, DiagnosticState::Present);
         assert_eq!(state(&actual, "mta-sts").state, DiagnosticState::Present);
         assert!(posture(&actual).contains("spf present"));
+        assert_eq!(state(&actual, "dnssec").state, DiagnosticState::Review);
+    }
+
+    #[test]
+    fn ds_records_mark_dnssec_present() {
+        let input = [DnsFact {
+            name: "example.com".into(),
+            record_type: "DS".into(),
+            value: "12345 13 2 abcd".into(),
+            points_to: None,
+        }];
+        let actual = assess_dns("example.com", &input);
+        assert_eq!(state(&actual, "dnssec").state, DiagnosticState::Present);
+    }
+
+    #[test]
+    fn gaps_become_findings_and_good_states_resolve() {
+        let diagnostics = assess_dns("example.com", &[txt("example.com", "\"v=spf1 -all\"")]);
+        let mut batch = EvidenceBatch::new();
+        record_findings(&mut batch, "example.com", &diagnostics, Some(0));
+        assert!(
+            batch
+                .findings
+                .iter()
+                .any(|finding| finding.title == "example.com dmarc")
+        );
+        assert!(
+            batch
+                .resolved_findings
+                .iter()
+                .any(|title| title == "example.com spf")
+        );
+        assert!(
+            !batch
+                .findings
+                .iter()
+                .any(|finding| finding.title == "example.com spf")
+        );
     }
 
     #[test]

@@ -39,6 +39,8 @@ pub fn render_markdown(workspace: &Workspace) -> String {
         }
         out.push('\n');
     }
+    out.push_str("## Diagnostics\n\n");
+    write_diagnostics(&mut out, workspace);
     out.push_str("## Key Findings\n\n");
     if workspace.data.findings.is_empty() {
         out.push_str("No findings recorded.\n\n");
@@ -62,6 +64,8 @@ pub fn render_markdown(workspace: &Workspace) -> String {
     }
     out.push_str("\n## Infrastructure\n\n");
     write_infrastructure(&mut out, workspace);
+    out.push_str("## Changes\n\n");
+    write_changes(&mut out, workspace);
     out.push_str("## Timeline\n\n");
     if workspace.data.timeline.is_empty() {
         out.push_str("No dated events.\n\n");
@@ -183,6 +187,58 @@ fn write_finding(out: &mut String, workspace: &Workspace, finding: &Finding) {
     ));
 }
 
+fn write_diagnostics(out: &mut String, workspace: &Workspace) {
+    let mut any = false;
+    for entity in &workspace.data.entities {
+        if let Some(posture) = entity.fields.get("diagnostics") {
+            out.push_str(&format!(
+                "- {} {} — {}\n",
+                entity.short_ref(),
+                sanitize_text(entity.display_name()),
+                sanitize_text(posture)
+            ));
+            any = true;
+        }
+    }
+    if !any {
+        for source in &workspace.data.sources {
+            if let Some(posture) = source.fields.get("diagnostics") {
+                out.push_str(&format!(
+                    "- {} {} — {}\n",
+                    source.short_ref(),
+                    sanitize_text(&source.title),
+                    sanitize_text(posture)
+                ));
+                any = true;
+            }
+        }
+    }
+    if !any {
+        out.push_str("No diagnostics recorded yet.\n");
+    }
+    out.push('\n');
+}
+
+fn write_changes(out: &mut String, workspace: &Workspace) {
+    let mut any = false;
+    for event in &workspace.data.timeline {
+        if event.kind != crate::model::TimelineKind::Changed {
+            continue;
+        }
+        out.push_str(&format!(
+            "- {} {} — {}\n",
+            event.occurred_at.format("%Y-%m-%d"),
+            event.short_ref(),
+            sanitize_text(&event.title)
+        ));
+        any = true;
+    }
+    if !any {
+        out.push_str("No observation changes recorded.\n");
+    }
+    out.push('\n');
+}
+
 fn write_infrastructure(out: &mut String, workspace: &Workspace) {
     let mut any = false;
     for relationship in &workspace.data.relationships {
@@ -271,9 +327,11 @@ mod tests {
             "# Example Corp",
             "## Executive Summary",
             "## Scope",
+            "## Diagnostics",
             "## Key Findings",
             "## Entities",
             "## Infrastructure",
+            "## Changes",
             "## Timeline",
             "## Evidence",
             "## Open Questions",

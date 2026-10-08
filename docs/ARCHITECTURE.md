@@ -25,9 +25,11 @@ structural changes.
    queries, RDAP lookups, single HTTP(S) fetches of user-specified targets, TLS
    handshakes, a public certificate-transparency search, and public repository
    inspection. Diagnostics describe published records (mail policy, response
-   headers, certificate validity). Tools marked `active` are refused. When a
-   later collection of the same record has a new content hash, storage writes
-   an "observation changed" timeline event.
+   headers, certificate validity, DNSSEC, and security.txt). Gaps become collected
+   findings and are removed when a later collection shows the check is in a good
+   state. Tools marked `active` are refused. When a later collection of the same
+   record has a new content hash, storage writes an "observation changed" timeline
+   event.
 
 ## Layers
 

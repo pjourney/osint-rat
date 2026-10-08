@@ -198,6 +198,97 @@ pub(crate) fn list_sources(
     rows.collect()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FindingSync {
+    Created,
+    Updated,
+    LeftAlone,
+}
+
+/// Inserts or updates a collected diagnostic finding with this exact title.
+/// Analyst and agent findings with the same title are left untouched.
+pub(crate) fn sync_collected_finding(
+    connection: &Connection,
+    investigation_id: Uuid,
+    page_id: Option<Uuid>,
+    title: &str,
+    details: &str,
+    confidence: Confidence,
+    source_ids: &[Uuid],
+) -> rusqlite::Result<FindingSync> {
+    if let Some((finding_id, provenance)) = finding_by_title(connection, investigation_id, title)? {
+        if provenance != Provenance::Collected {
+            return Ok(FindingSync::LeftAlone);
+        }
+        connection.execute(
+            "UPDATE findings SET details = ?2, confidence = ?3, page_id = ?4, updated_at = ?5 WHERE id = ?1",
+            params![
+                id(&finding_id),
+                details.trim_end(),
+                confidence.as_str(),
+                opt_id(&page_id),
+                ts(&now())
+            ],
+        )?;
+        replace_finding_sources(connection, finding_id, source_ids)?;
+        return Ok(FindingSync::Updated);
+    }
+    let timestamp = now();
+    let finding = Finding {
+        id: Uuid::new_v4(),
+        investigation_id,
+        seq: next_seq(connection, SeqTable::Findings, investigation_id)?,
+        page_id,
+        title: title.trim().to_string(),
+        details: details.trim_end().to_string(),
+        confidence,
+        provenance: Provenance::Collected,
+        source_ids: source_ids.to_vec(),
+        created_at: timestamp,
+        updated_at: timestamp,
+    };
+    insert_finding_record(connection, &finding)?;
+    Ok(FindingSync::Created)
+}
+
+/// Deletes a collected finding with this title. Other provenances are kept.
+pub(crate) fn clear_collected_finding(
+    connection: &Connection,
+    investigation_id: Uuid,
+    title: &str,
+) -> rusqlite::Result<bool> {
+    let Some((finding_id, provenance)) = finding_by_title(connection, investigation_id, title)?
+    else {
+        return Ok(false);
+    };
+    if provenance != Provenance::Collected {
+        return Ok(false);
+    }
+    let deleted = connection.execute(
+        "DELETE FROM findings WHERE id = ?1",
+        params![id(&finding_id)],
+    )?;
+    Ok(deleted > 0)
+}
+
+fn finding_by_title(
+    connection: &Connection,
+    investigation_id: Uuid,
+    title: &str,
+) -> rusqlite::Result<Option<(Uuid, Provenance)>> {
+    connection
+        .query_row(
+            "SELECT id, provenance FROM findings WHERE investigation_id = ?1 AND title = ?2 ORDER BY seq DESC LIMIT 1",
+            params![id(&investigation_id), title],
+            |row| {
+                let provenance = Provenance::parse(&row.get::<_, String>(1)?)
+                    .unwrap_or(Provenance::Collected);
+                Ok((row.uuid(0)?, provenance))
+            },
+        )
+        .optional()
+}
+
 pub(crate) fn insert_finding_record(
     connection: &Connection,
     finding: &Finding,
