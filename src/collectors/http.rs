@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
 use url::Url;
 
+use super::diagnose;
 use super::html::{HtmlSummary, extract};
 use super::net::{FetchOptions, FetchedResponse, fetch};
 use super::rdap::parse_date;
@@ -38,7 +39,7 @@ impl Collector for HttpCollector {
     }
 
     fn description(&self) -> &'static str {
-        "Status, redirects, headers, page metadata, links, robots.txt, and sitemaps"
+        "Status, redirects, headers, page metadata, links, and response-header diagnostics"
     }
 
     fn accepts(&self, kind: TargetKind) -> bool {
@@ -272,6 +273,10 @@ fn describe(
         "Security headers: {}",
         security_headers(&response.headers)
     ));
+    diagnose::append_section(
+        &mut lines,
+        &diagnose::assess_http(response.final_url.scheme() == "https", &response.headers),
+    );
     let edges = detect_edge(&response.headers);
     if !edges.is_empty() {
         lines.push(format!("Edge/CDN indicators: {}", edges.join(", ")));
@@ -361,6 +366,12 @@ fn source_fields(
     if !edges.is_empty() {
         fields.push("edge", edges.join(", "));
     }
+    let diagnostics =
+        diagnose::assess_http(response.final_url.scheme() == "https", &response.headers);
+    let posture = diagnose::posture(&diagnostics);
+    if !posture.is_empty() {
+        fields.push("diagnostics", posture);
+    }
     fields
 }
 
@@ -396,6 +407,13 @@ pub fn build_batch(
     }
     if let Some(server) = response.header("server") {
         batch.annotate(&final_url, "server", server);
+    }
+    let posture = diagnose::posture(&diagnose::assess_http(
+        response.final_url.scheme() == "https",
+        &response.headers,
+    ));
+    if !posture.is_empty() {
+        batch.annotate(&subject, "diagnostics", posture);
     }
     let final_host = response.final_url.host_str().map(str::to_ascii_lowercase);
     if let Some(host) = final_host.as_deref() {

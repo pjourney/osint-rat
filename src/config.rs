@@ -190,7 +190,7 @@ impl Default for CollectorConfig {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ToolsConfig {
-    /// Built-in tool names to hide (for example `["traceroute"]`).
+    /// Built-in tool names to hide (for example `["dig"]`).
     pub disabled: Vec<String>,
     pub custom: Vec<ToolDefinitionConfig>,
 }
@@ -210,7 +210,7 @@ pub struct ToolDefinitionConfig {
     pub timeout_seconds: u64,
     /// `text`, `json`, `lines`, `hostnames`, `ips`, or `urls`.
     pub parser: String,
-    /// `passive` or `active`. Active tools always ask for confirmation.
+    /// Must be `passive`. Tools marked `active` are refused.
     pub activity: String,
 }
 
@@ -295,9 +295,10 @@ repository_history_depth = 200
 
 [tools]
 # Built-in tools to hide:
-# disabled = ["traceroute"]
+# disabled = ["dig"]
 
 # Custom external tools. Arguments are passed directly to the program (no shell).
+# activity must be "passive". Active probing tools are refused.
 # [[tools.custom]]
 # name = "subfinder"
 # program = "subfinder"

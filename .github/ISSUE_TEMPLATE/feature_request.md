@@ -10,6 +10,6 @@ What investigation workflow is awkward or missing?
 
 ## Proposal
 
-Keep collectors passive by default. If a tool is active, it should require confirmation.
+Keep the tool observational. Do not add remote access, exploitation, credential attacks, or active probes.
 
 ## Alternatives

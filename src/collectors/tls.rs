@@ -23,6 +23,7 @@ use tokio_rustls::rustls::{
 use x509_parser::prelude::{FromDer, GeneralName, X509Certificate};
 use x509_parser::public_key::PublicKey;
 
+use super::diagnose;
 use super::{CollectResult, CollectionOutput, Collector, CollectorContext};
 use crate::files::sha256_hex;
 use crate::model::{
@@ -47,7 +48,7 @@ impl Collector for TlsCollector {
     }
 
     fn description(&self) -> &'static str {
-        "Certificate chain, validity, SANs, issuer, protocol, and cipher via a TLS handshake"
+        "Certificate chain, validity diagnostics, SANs, issuer, protocol, and cipher"
     }
 
     fn accepts(&self, kind: TargetKind) -> bool {
@@ -382,6 +383,17 @@ fn describe(observation: &TlsObservation) -> (String, Fields) {
     };
     lines.push(format!("Validation: {validation}"));
     fields.push("validation", validation);
+    let diagnostics = diagnose::assess_tls(
+        observation.validation.is_ok(),
+        observation.validation.as_ref().err().map(String::as_str),
+        observation.chain.first().and_then(|leaf| leaf.not_after),
+        Utc::now(),
+    );
+    diagnose::append_section(&mut lines, &diagnostics);
+    let posture = diagnose::posture(&diagnostics);
+    if !posture.is_empty() {
+        fields.push("diagnostics", posture);
+    }
     fields.push_opt("protocol", observation.protocol.clone());
     for (position, certificate) in observation.chain.iter().enumerate() {
         lines.push(String::new());

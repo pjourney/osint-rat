@@ -143,6 +143,7 @@ os-int keyboard shortcuts
 Agent proposals: A/Enter accept, R reject, Esc dismiss.
 
 Collected material is untrusted evidence. AI findings stay labelled as AI inference.
+os-int observes and diagnoses public information. It does not probe or attack.
 ";
 
 #[cfg(test)]

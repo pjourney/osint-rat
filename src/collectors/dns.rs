@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use futures::future::{BoxFuture, join_all};
 use hickory_resolver::proto::rr::{RData, Record, RecordType};
 
+use super::diagnose::{self, DnsFact};
 use super::{CollectResult, CollectionOutput, Collector, CollectorContext};
 use crate::files::sha256_hex;
 use crate::model::{
@@ -37,7 +38,7 @@ impl Collector for DnsCollector {
     }
 
     fn description(&self) -> &'static str {
-        "A, AAAA, CNAME, MX, NS, TXT, SOA, and CAA records; SPF and DMARC policy"
+        "DNS records plus mail-authentication diagnostics (SPF, DMARC, MX, MTA-STS, BIMI)"
     }
 
     fn accepts(&self, kind: TargetKind) -> bool {
@@ -105,7 +106,14 @@ async fn collect(target: &Target, context: &CollectorContext) -> CollectResult {
                 .map(|kind| (format!("www.{domain}"), *kind)),
         );
     }
-    queries.push((format!("_dmarc.{domain}"), RecordType::TXT));
+    for name in [
+        format!("_dmarc.{domain}"),
+        format!("_mta-sts.{domain}"),
+        format!("_smtp._tls.{domain}"),
+        format!("default._bimi.{domain}"),
+    ] {
+        queries.push((name, RecordType::TXT));
+    }
     let lookups = queries
         .iter()
         .map(|(name, kind)| lookup(context, name, *kind));
@@ -305,6 +313,7 @@ pub fn build_batch(target: &Target, answers: &DnsAnswers) -> EvidenceBatch {
     let domain = &answers.domain;
     let mut batch = EvidenceBatch::new();
     let (content, observations, fields) = describe(answers);
+    let diagnostic_summary = fields.get("diagnostics").map(str::to_string);
     let mut source =
         NewSource::collected(SourceKind::Dns, "dns", format!("DNS records for {domain}"));
     source.content_hash = Some(stable_hash(answers));
@@ -335,7 +344,13 @@ pub fn build_batch(target: &Target, answers: &DnsAnswers) -> EvidenceBatch {
     for service in &observations.services {
         batch.annotate(&domain_key, "txt_verification", *service);
     }
+    if let Some(summary) = diagnostic_summary.clone() {
+        batch.annotate(&domain_key, "diagnostics", summary);
+    }
     batch.summary = summarize(answers);
+    if let Some(posture) = diagnostic_summary {
+        batch.summary = format!("{}; {posture}", batch.summary);
+    }
     batch
 }
 
@@ -426,6 +441,14 @@ fn describe(answers: &DnsAnswers) -> (String, Observations, Fields) {
         lines.push(";; observations".to_string());
         lines.extend(notes.into_iter().map(|note| format!("; {note}")));
     }
+    if !answers.nxdomain {
+        let diagnostics = diagnose::assess_dns(&answers.domain, &diagnostic_facts(answers));
+        diagnose::append_section(&mut lines, &diagnostics);
+        let posture = diagnose::posture(&diagnostics);
+        if !posture.is_empty() {
+            fields.push("diagnostics", posture);
+        }
+    }
     for record_type in ["A", "AAAA", "CNAME", "MX", "NS", "TXT", "CAA"] {
         let count = answers
             .records
@@ -437,6 +460,19 @@ fn describe(answers: &DnsAnswers) -> (String, Observations, Fields) {
         }
     }
     (lines.join("\n"), observations, fields)
+}
+
+fn diagnostic_facts(answers: &DnsAnswers) -> Vec<DnsFact> {
+    answers
+        .records
+        .iter()
+        .map(|record| DnsFact {
+            name: record.name.clone(),
+            record_type: record.record_type.clone(),
+            value: record.value.clone(),
+            points_to: record.points_to.clone(),
+        })
+        .collect()
 }
 
 /// A hash over the answers without TTLs, so identical re-collections deduplicate even though
@@ -574,6 +610,10 @@ mod tests {
         assert_eq!(actual.sources.len(), 1);
         assert!(actual.sources[0].content.contains("DMARC policy: p=reject"));
         assert!(actual.sources[0].content.contains("Google"));
+        assert!(actual.sources[0].content.contains("[present]"));
+        assert!(actual.sources[0].fields.get("diagnostics").is_some());
+        assert!(actual.summary.contains("spf present"));
+        assert!(actual.summary.contains("dmarc present"));
     }
 
     #[test]

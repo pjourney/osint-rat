@@ -121,6 +121,37 @@ pub(crate) fn find_duplicate_source(
     Ok(found.and_then(|value| Uuid::parse_str(&value).ok()))
 }
 
+/// The newest stored copy of the same observation, regardless of content hash.
+pub(crate) struct PriorObservation {
+    pub content_hash: Option<String>,
+}
+
+/// Finds the latest source with the same collector, title, and URL.
+pub(crate) fn find_prior_observation(
+    connection: &Connection,
+    investigation_id: Uuid,
+    source: &NewSource,
+) -> rusqlite::Result<Option<PriorObservation>> {
+    connection
+        .query_row(
+            "SELECT content_hash FROM sources
+             WHERE investigation_id = ?1 AND collector IS ?2 AND title = ?3 AND url IS ?4
+             ORDER BY seq DESC LIMIT 1",
+            params![
+                id(&investigation_id),
+                source.collector,
+                source.title,
+                source.url
+            ],
+            |row| {
+                Ok(PriorObservation {
+                    content_hash: row.get(0)?,
+                })
+            },
+        )
+        .optional()
+}
+
 pub(crate) fn mark_source_seen(
     connection: &Connection,
     source_id: Uuid,

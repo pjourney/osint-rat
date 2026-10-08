@@ -21,10 +21,13 @@ structural changes.
 4. **Untrusted content is data, never instructions.** Everything collected from
    the network, files, repositories, or tool output is sanitized before it is
    rendered and is fenced as untrusted evidence before it is shown to an agent.
-5. **Passive by default.** Built-in collectors only perform ordinary DNS
+5. **Observation, not attack.** Built-in collectors only perform ordinary DNS
    queries, RDAP lookups, single HTTP(S) fetches of user-specified targets, TLS
-   handshakes, and public repository inspection. Tools marked `active` require
-   explicit confirmation.
+   handshakes, a public certificate-transparency search, and public repository
+   inspection. Diagnostics describe published records (mail policy, response
+   headers, certificate validity). Tools marked `active` are refused. When a
+   later collection of the same record has a new content hash, storage writes
+   an "observation changed" timeline event.
 
 ## Layers
 
@@ -48,7 +51,7 @@ structural changes.
 | `model/` | Domain types: `Investigation`, `Page`, `Source`, `Finding`, `Entity`, `Relationship`, `Note`, `Artifact`, `TimelineEvent`, `JobRecord`, `AgentRun`, `Proposal`. Short references (`S-12`, `E-4`, …). No UI or storage code. |
 | `storage/` | `Store` wraps a SQLite connection: migrations, CRUD, applying collector output transactionally, loading a full `Workspace`. |
 | `files.rs` | Investigation directory layout and content-addressed snapshot storage. |
-| `collectors/` | `Collector` trait plus built-ins: DNS, RDAP, HTTP, TLS, IP intelligence, repository, file. Collectors return a `CollectorOutput` (sources, entities, relationships, timeline events, artifacts) and never touch the database. |
+| `collectors/` | `Collector` trait plus built-ins: DNS, RDAP, HTTP, TLS, certificate transparency, IP intelligence, repository, file. `diagnose` turns those observations into structured readings. Collectors return a `CollectionOutput` and never touch the database. |
 | `tools/` | External tool registry: PATH detection, built-in and user-defined tool definitions, argument templates. |
 | `exec/` | The single place where subprocesses are spawned: no shell, explicit argv, timeouts, bounded output, process-group kill, cancellation, argument redaction for display/logs. |
 | `agent/` | Agent profiles (Claude Code, Codex, generic), `AgentContext` and its prompt serialization, the streaming runner and output parsers, structured action proposals. |

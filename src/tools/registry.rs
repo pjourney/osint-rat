@@ -16,7 +16,7 @@ use crate::model::TargetKind;
 pub enum Activity {
     /// Ordinary lookups and fetches of public information.
     Passive,
-    /// Sends traffic that probes the target (traceroute, port checks, ...). Requires confirmation.
+    /// Probe traffic. os-int refuses to run tools marked active.
     Active,
 }
 
@@ -108,7 +108,7 @@ pub struct DetectedProgram {
 const DEFAULT_TIMEOUT_SECONDS: u64 = 60;
 
 /// Programs shown in the Tools screen and `os-int doctor` even when no tool definition uses them.
-const UTILITIES: [(&str, &str); 14] = [
+const UTILITIES: [(&str, &str); 13] = [
     ("whois", "registration lookups"),
     ("dig", "DNS queries"),
     ("host", "DNS lookups"),
@@ -122,7 +122,6 @@ const UTILITIES: [(&str, &str); 14] = [
     ("gh", "GitHub metadata for repositories"),
     ("exiftool", "file metadata"),
     ("openssl", "TLS inspection"),
-    ("traceroute", "network path (active)"),
 ];
 
 fn strings(values: &[&str]) -> Vec<String> {
@@ -253,21 +252,10 @@ pub fn builtin_tools() -> Vec<ToolDefinition> {
             "GitHub repository summary via gh",
             Activity::Passive,
         ),
-        builtin(
-            "traceroute",
-            "traceroute",
-            &["-m", "20", "-w", "2", "{host}"],
-            &[Ip, Domain],
-            "Network path to the target (sends probe packets)",
-            Activity::Active,
-        ),
     ];
     for tool in &mut tools {
         if tool.name == "exiftool" {
             tool.parser = OutputParser::Json;
-        }
-        if tool.name == "traceroute" {
-            tool.timeout = Duration::from_secs(90);
         }
     }
     tools
@@ -287,6 +275,11 @@ pub fn custom_tool(config: &ToolDefinitionConfig) -> (ToolDefinition, Option<Str
         problem = Some(error.to_string());
     } else if accepts.is_empty() {
         problem = Some("`accepts` lists no known target kinds".to_string());
+    } else if config.activity.trim().eq_ignore_ascii_case("active") {
+        problem = Some(
+            "active tools are refused; os-int only runs passive observation and diagnostic programs"
+                .to_string(),
+        );
     }
     let definition = ToolDefinition {
         name: config.name.trim().to_string(),
@@ -392,13 +385,34 @@ mod tests {
     }
 
     #[test]
-    fn traceroute_is_marked_active() {
-        let tools = builtin_tools();
-        let traceroute = tools
-            .iter()
-            .find(|tool| tool.name == "traceroute")
-            .expect("exists");
-        assert_eq!(traceroute.activity, Activity::Active);
+    fn builtin_tools_are_passive() {
+        assert!(
+            builtin_tools()
+                .iter()
+                .all(|tool| tool.activity == Activity::Passive)
+        );
+        assert!(builtin_tools().iter().all(|tool| tool.name != "traceroute"));
+    }
+
+    #[test]
+    fn active_custom_tools_are_refused() {
+        let input = ToolDefinitionConfig {
+            name: "probe".into(),
+            program: "probe".into(),
+            args: vec!["{domain}".into()],
+            accepts: vec!["domain".into()],
+            activity: "active".into(),
+            ..ToolDefinitionConfig::default()
+        };
+        let (definition, problem) = custom_tool(&input);
+        assert_eq!(definition.activity, Activity::Active);
+        assert!(problem.unwrap_or_default().contains("refused"));
+        let registry = ToolRegistry::detect(&ToolsConfig {
+            custom: vec![input],
+            ..ToolsConfig::default()
+        });
+        let entry = registry.find("probe").expect("present");
+        assert!(!entry.is_available());
     }
 
     #[test]
@@ -417,7 +431,7 @@ mod tests {
     #[test]
     fn custom_tools_override_builtins_and_disabled_are_hidden() {
         let input = ToolsConfig {
-            disabled: vec!["traceroute".into()],
+            disabled: vec!["dig".into()],
             custom: vec![ToolDefinitionConfig {
                 name: "whois".into(),
                 program: "my-whois".into(),
@@ -430,6 +444,6 @@ mod tests {
         let whois = registry.find("whois").expect("present");
         assert_eq!(whois.definition.program, "my-whois");
         assert!(!whois.definition.builtin);
-        assert!(registry.find("traceroute").is_none());
+        assert!(registry.find("dig").is_none());
     }
 }

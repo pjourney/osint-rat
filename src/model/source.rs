@@ -11,6 +11,7 @@ open_enum! {
         Rdap => ("rdap", "RDAP", "whois"),
         Http => ("http", "HTTP"),
         Tls => ("tls", "TLS certificate", "certificate"),
+        Ct => ("ct", "Certificate transparency", "certificate_transparency"),
         IpIntel => ("ip_intel", "IP intelligence", "asn"),
         Repository => ("repository", "Repository", "git"),
         File => ("file", "File"),

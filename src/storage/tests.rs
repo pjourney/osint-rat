@@ -185,6 +185,37 @@ fn apply_batch_creates_entities_relationships_and_timeline() {
 }
 
 #[test]
+fn a_changed_observation_is_recorded_on_the_timeline() {
+    let (mut store, investigation) = store_with_investigation();
+    let context = ApplyContext {
+        investigation_id: investigation.id,
+        page_id: None,
+        job_id: None,
+    };
+    store
+        .apply_batch(context, &dns_batch("hash-1"))
+        .expect("first");
+    let changed = store
+        .apply_batch(context, &dns_batch("hash-2"))
+        .expect("changed");
+    let data = store.load_investigation(investigation.id).expect("loads");
+    assert_eq!(changed.new_sources, 1);
+    assert_eq!(changed.changed_observations, 1);
+    assert!(changed.describe().contains("changed observation"));
+    assert!(
+        data.timeline
+            .iter()
+            .any(|event| event.kind == TimelineKind::Changed
+                && event.title.contains("DNS records for example.com"))
+    );
+    let repeated = store
+        .apply_batch(context, &dns_batch("hash-2"))
+        .expect("repeat");
+    assert_eq!(repeated.unchanged_sources, 1);
+    assert_eq!(repeated.changed_observations, 0);
+}
+
+#[test]
 fn identical_recollection_reuses_source() {
     let (mut store, investigation) = store_with_investigation();
     let context = ApplyContext {

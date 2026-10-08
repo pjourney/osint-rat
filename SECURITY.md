@@ -8,13 +8,14 @@ We will acknowledge receipt as soon as we can and work on a fix before any discl
 
 ## What this software does and does not do
 
-os-int is a local investigation notebook. It:
+os-int is a local investigation notebook for observation, monitoring, and diagnosis. It:
 
 - stores data on the machine that runs it
-- fetches URLs and DNS/RDAP records the analyst asks it to fetch
-- runs local agent CLIs and OSINT utilities as subprocesses
+- fetches public URLs, DNS/RDAP records, and certificate-transparency search results the analyst asks it to fetch
+- runs local agent CLIs and passive OSINT utilities as subprocesses
+- records when a later collection of the same public record has changed
 
-It does not sandbox those subprocesses beyond: no shell, explicit argv, timeouts, output bounds, process-group kill, and (for Claude Code) `--tools ""`.
+It does not include remote access, exploitation, credential attacks, or active probing. It does not sandbox subprocesses beyond: no shell, explicit argv, timeouts, output bounds, process-group kill, refusal of tools marked `active`, and (for Claude Code) `--tools ""`.
 
 ## Please report
 

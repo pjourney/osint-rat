@@ -49,6 +49,11 @@ pub const COMMANDS: &[Command] = &[
         hint: "",
     },
     Command {
+        id: "run_ct",
+        title: "Run Certificate Transparency",
+        hint: "",
+    },
+    Command {
         id: "run_ip",
         title: "Run IP Intelligence",
         hint: "",
