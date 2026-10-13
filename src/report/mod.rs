@@ -200,17 +200,15 @@ fn write_diagnostics(out: &mut String, workspace: &Workspace) {
             any = true;
         }
     }
-    if !any {
-        for source in &workspace.data.sources {
-            if let Some(posture) = source.fields.get("diagnostics") {
-                out.push_str(&format!(
-                    "- {} {} — {}\n",
-                    source.short_ref(),
-                    sanitize_text(&source.title),
-                    sanitize_text(posture)
-                ));
-                any = true;
-            }
+    for source in &workspace.data.sources {
+        if let Some(posture) = source.fields.get("diagnostics") {
+            out.push_str(&format!(
+                "- {} {} — {}\n",
+                source.short_ref(),
+                sanitize_text(&source.title),
+                sanitize_text(posture)
+            ));
+            any = true;
         }
     }
     if !any {
@@ -371,5 +369,55 @@ mod tests {
         let actual = render_markdown(&workspace);
         assert!(actual.contains("AI inference (unverified)"));
         assert!(actual.contains("*(none)*"));
+    }
+
+    #[test]
+    fn diagnostics_include_entities_and_sources_together() {
+        use crate::model::{Entity, EntityKind, Fields, Source, SourceKind};
+        let mut workspace = empty_workspace("Op");
+        let investigation_id = workspace.id();
+        let timestamp = now();
+        let mut entity_fields = Fields::new();
+        entity_fields.push("diagnostics", "spf missing");
+        workspace.data.entities.push(Entity {
+            id: Uuid::new_v4(),
+            investigation_id,
+            seq: 1,
+            kind: EntityKind::Domain,
+            value: "example.com".into(),
+            label: String::new(),
+            notes: String::new(),
+            provenance: Provenance::Collected,
+            fields: entity_fields,
+            source_ids: Vec::new(),
+            created_at: timestamp,
+            updated_at: timestamp,
+        });
+        let mut source_fields = Fields::new();
+        source_fields.push("diagnostics", "hsts review");
+        workspace.data.sources.push(Source {
+            id: Uuid::new_v4(),
+            investigation_id,
+            seq: 1,
+            kind: SourceKind::Http,
+            title: "HTTP response for example.com".into(),
+            url: None,
+            retrieved_at: timestamp,
+            last_seen_at: None,
+            published_at: None,
+            author: None,
+            collector: Some("http".into()),
+            content_hash: None,
+            snapshot_path: None,
+            content: String::new(),
+            fields: source_fields,
+            notes: String::new(),
+            provenance: Provenance::Collected,
+            page_id: None,
+            job_id: None,
+        });
+        let actual = render_markdown(&workspace);
+        assert!(actual.contains("spf missing"));
+        assert!(actual.contains("hsts review"));
     }
 }

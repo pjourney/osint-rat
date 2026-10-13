@@ -544,7 +544,7 @@ impl App {
             None
         };
         let proposal_count = if let Overlay::Proposals { run_id, .. } = &self.overlay {
-            Some(self.proposals_for(*run_id).len().max(1))
+            Some(self.pending_proposals(*run_id).len().max(1))
         } else {
             None
         };
@@ -570,6 +570,10 @@ impl App {
             }
             Overlay::Help => {
                 self.scroll = add_scroll(self.scroll, delta);
+            }
+            Overlay::None if self.view == View::Welcome => {
+                const WELCOME_CHOICES: i32 = 4;
+                self.selected = (self.selected as i32 + delta).rem_euclid(WELCOME_CHOICES) as usize;
             }
             Overlay::None
             | Overlay::AgentPrompt { .. }
@@ -603,16 +607,16 @@ impl App {
                     self.open_hit(&hit);
                 }
             }
-            Overlay::None if self.pane == Pane::Nav => {
-                let view = self.nav_items()[self.nav_index].1;
-                self.switch_view(view);
-            }
             Overlay::None if self.view == View::Welcome => match self.selected {
                 0 => self.open_new()?,
                 1 => self.open_open_form(),
                 2 => self.overlay = Overlay::Doctor,
                 _ => self.overlay = Overlay::Help,
             },
+            Overlay::None if self.pane == Pane::Nav => {
+                let view = self.nav_items()[self.nav_index].1;
+                self.switch_view(view);
+            }
             Overlay::None => self.select_main_item(),
             Overlay::Form(_) => self.submit()?,
             Overlay::Confirm { command, .. } => {
@@ -702,7 +706,17 @@ impl App {
             View::Sources => self.source_id = Some(hit.id),
             View::Findings => self.finding_id = Some(hit.id),
             View::Entities => self.entity_id = Some(hit.id),
-            View::Agent => self.agent_run_id = Some(hit.id),
+            View::Agent => {
+                self.agent_run_id = Some(hit.id);
+                if let Some(thread_id) = self
+                    .workspace
+                    .as_ref()
+                    .and_then(|workspace| workspace.agent_run(hit.id))
+                    .map(|run| run.thread_id)
+                {
+                    self.agent_thread = Some(thread_id);
+                }
+            }
             View::Artifacts => {
                 if let Some(index) = self.workspace.as_ref().and_then(|workspace| {
                     workspace
@@ -1317,26 +1331,24 @@ impl App {
 
     fn focus_ref(&self) -> Option<String> {
         let workspace = self.workspace.as_ref()?;
-        if let Some(id) = self.entity_id {
-            return workspace.ref_of(id).map(|reference| reference.to_string());
-        }
-        if let Some(id) = self.source_id {
-            return workspace.ref_of(id).map(|reference| reference.to_string());
-        }
-        if let Some(id) = self.finding_id {
-            return workspace.ref_of(id).map(|reference| reference.to_string());
-        }
-        None
+        let id = match self.view {
+            View::Entities => self.entity_id,
+            View::Sources => self.source_id,
+            View::Findings => self.finding_id,
+            _ => None,
+        }?;
+        workspace.ref_of(id).map(|reference| reference.to_string())
     }
 
     fn focus_label(&self) -> Option<String> {
-        let workspace = self.workspace.as_ref()?;
-        if let Some(id) = self.entity_id {
-            return workspace
-                .entity(id)
-                .map(|entity| entity.display_name().to_string());
+        if self.view != View::Entities {
+            return None;
         }
-        None
+        let workspace = self.workspace.as_ref()?;
+        let id = self.entity_id?;
+        workspace
+            .entity(id)
+            .map(|entity| entity.display_name().to_string())
     }
 
     fn generate_report(&mut self, format: &str) -> Result<()> {
@@ -1492,10 +1504,15 @@ impl App {
         let Some(workspace) = &self.workspace else {
             return Ok(());
         };
+        let page_id = if self.job_records.contains_key(&job_id) {
+            self.job_records.get(&job_id).and_then(|job| job.page_id)
+        } else {
+            self.page_id
+        };
         let summary = self.store.apply_batch(
             ApplyContext {
                 investigation_id: workspace.id(),
-                page_id: self.page_id,
+                page_id,
                 job_id: Some(job_id),
             },
             &output.batch,
@@ -1512,19 +1529,22 @@ impl App {
     }
 
     fn apply_agent(&mut self, job_id: Uuid, outcome: crate::agent::AgentOutcome) -> Result<()> {
-        let Some(run_id) = self.agent_run_id else {
-            return Ok(());
-        };
         let Some(workspace) = &self.workspace else {
             return Ok(());
         };
         let investigation_id = workspace.id();
-        if let Some(mut run) = self
+        let Some(mut run) = self
             .store
             .load_investigation(investigation_id)?
             .agent_runs
             .into_iter()
-            .find(|run| run.id == run_id)
+            .find(|run| run.job_id == Some(job_id))
+        else {
+            self.status = "Agent result did not match an open run.".into();
+            return Ok(());
+        };
+        let run_id = run.id;
+        let run_page_id = run.page_id;
         {
             run.response = outcome.response.clone();
             run.status = if outcome.error.is_some() {
@@ -1550,12 +1570,13 @@ impl App {
                 };
                 if let Ok(artifact_id) =
                     self.store
-                        .add_artifact(investigation_id, self.page_id, &artifact)
+                        .add_artifact(investigation_id, run_page_id, &artifact)
                 {
                     run.context_artifact_id = Some(artifact_id);
                 }
             }
             self.store.update_agent_run(&run)?;
+            self.agent_run_id = Some(run_id);
         }
         let actions: Vec<(AgentAction, ProposalStatus, Option<String>)> = outcome
             .actions
@@ -1594,14 +1615,23 @@ impl App {
             .unwrap_or_default()
     }
 
+    fn pending_proposals(&self, run_id: Uuid) -> Vec<Proposal> {
+        self.proposals_for(run_id)
+            .into_iter()
+            .filter(|proposal| proposal.status == ProposalStatus::Pending)
+            .collect()
+    }
+
     fn decide_proposal(&mut self, status: ProposalStatus) -> Result<()> {
         let Overlay::Proposals { run_id, selected } = self.overlay else {
             return Ok(());
         };
-        let proposals = self.proposals_for(run_id);
-        let Some(proposal) = proposals.get(selected) else {
+        let Some(proposal) = self.pending_proposals(run_id).get(selected).cloned() else {
             return Ok(());
         };
+        if proposal.status != ProposalStatus::Pending {
+            return Ok(());
+        }
         if status == ProposalStatus::Accepted
             && let Err(error) = self.apply_proposal(&proposal.action)
         {
@@ -1616,13 +1646,13 @@ impl App {
         }
         self.store.update_proposal(proposal.id, status, None)?;
         self.reload()?;
-        let remaining = self
-            .proposals_for(run_id)
-            .iter()
-            .filter(|proposal| proposal.status == ProposalStatus::Pending)
-            .count();
-        if remaining == 0 {
+        let pending_len = self.pending_proposals(run_id).len();
+        if pending_len == 0 {
             self.overlay = Overlay::None;
+        } else if let Overlay::Proposals { selected, .. } = &mut self.overlay
+            && *selected >= pending_len
+        {
+            *selected = pending_len - 1;
         }
         Ok(())
     }
@@ -1829,22 +1859,39 @@ impl App {
         format!("{} jobs | {}", active.len(), parts.join(" | "))
     }
 
+    /// Jobs in the order the Jobs pane lists them: persisted rows, then live jobs not reloaded yet.
+    pub fn listed_job_ids(&self) -> Vec<Uuid> {
+        let mut ids = Vec::new();
+        if let Some(workspace) = self.workspace.as_ref() {
+            ids.extend(workspace.data.jobs.iter().map(|job| job.id));
+        }
+        let mut live: Vec<&JobRecord> = self
+            .job_records
+            .values()
+            .filter(|job| !ids.contains(&job.id))
+            .collect();
+        live.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        ids.extend(live.iter().map(|job| job.id));
+        ids
+    }
+
     pub fn cancel_selected_job(&mut self) {
-        let selected = self
+        let Some(job_id) = self.listed_job_ids().get(self.selected).copied() else {
+            return;
+        };
+        self.jobs.cancel(job_id);
+        if let Some(job) = self.job_records.get(&job_id) {
+            self.status = format!("Cancelling {}", job.label);
+        } else if let Some(job) = self
             .workspace
             .as_ref()
-            .and_then(|workspace| workspace.data.jobs.get(self.selected).map(|job| job.id));
-        let job_id = selected.or_else(|| {
-            self.job_records
-                .values()
-                .find(|job| job.status.is_active())
-                .map(|job| job.id)
-        });
-        if let Some(job_id) = job_id {
-            self.jobs.cancel(job_id);
-            if let Some(job) = self.job_records.get(&job_id) {
-                self.status = format!("Cancelling {}", job.label);
-            }
+            .and_then(|workspace| workspace.job(job_id))
+        {
+            self.status = format!("Cancelling {}", job.label);
         }
     }
 
@@ -2129,5 +2176,300 @@ mod tests {
                 .iter()
                 .any(|artifact| artifact.kind == ArtifactKind::Report)
         );
+    }
+
+    fn create_named_investigation(app: &mut App, name: &str) {
+        app.dispatch(Action::Command("new_investigation"))
+            .expect("form");
+        if let Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set(name);
+        }
+        app.dispatch(Action::Submit).expect("create");
+    }
+
+    fn create_page(app: &mut App, title: &str, kind: &str, target: &str) {
+        app.dispatch(Action::Command("new_page"))
+            .expect("page form");
+        if let Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set(title);
+            form.fields[1].value.set(kind);
+            form.fields[2].value.set(target);
+        }
+        app.dispatch(Action::Submit).expect("page");
+    }
+
+    fn sample_job(label: &str, status: JobStatus, page_id: Option<Uuid>) -> JobRecord {
+        JobRecord {
+            id: Uuid::new_v4(),
+            investigation_id: None,
+            seq: 0,
+            kind: "collector:dns".into(),
+            label: label.into(),
+            description: format!("{label} job"),
+            status,
+            program: None,
+            args: Vec::new(),
+            created_at: now(),
+            started_at: None,
+            finished_at: None,
+            progress: None,
+            log: String::new(),
+            stderr: String::new(),
+            result: None,
+            error: None,
+            page_id,
+        }
+    }
+
+    fn sample_run(
+        investigation_id: Uuid,
+        job_id: Uuid,
+        thread_id: Uuid,
+        question: &str,
+    ) -> AgentRun {
+        AgentRun {
+            id: Uuid::new_v4(),
+            investigation_id,
+            seq: 0,
+            thread_id,
+            page_id: None,
+            agent_name: "Claude Code".into(),
+            program: "claude".into(),
+            args: Vec::new(),
+            question: question.into(),
+            response: String::new(),
+            status: JobStatus::Running,
+            error: None,
+            focus: None,
+            context_artifact_id: None,
+            job_id: Some(job_id),
+            model: None,
+            cost_usd: None,
+            created_at: now(),
+            finished_at: None,
+        }
+    }
+
+    #[test]
+    fn welcome_keys_move_the_welcome_menu() {
+        let (_directory, mut app) = test_app();
+        app.open_last_or_welcome().expect("welcome");
+        app.dispatch(Action::Move(1)).expect("down");
+        assert_eq!(app.selected, 1);
+        app.dispatch(Action::Select).expect("open");
+        assert!(matches!(
+            app.overlay,
+            Overlay::Form(ref form) if form.kind == FormKind::OpenInvestigation
+        ));
+    }
+
+    #[test]
+    fn collection_stays_on_the_page_that_queued_it() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Example Corp");
+        create_page(&mut app, "first", "domain", "first.example");
+        create_page(&mut app, "second", "domain", "second.example");
+        let pages = app
+            .workspace
+            .as_ref()
+            .expect("workspace")
+            .data
+            .pages
+            .clone();
+        let queued_page = pages[0].id;
+        let current_page = pages[1].id;
+        app.page_id = Some(current_page);
+        let job_id = Uuid::new_v4();
+        let mut job = sample_job("DNS", JobStatus::Running, Some(queued_page));
+        job.id = job_id;
+        job.investigation_id = Some(app.workspace.as_ref().expect("workspace").id());
+        app.job_records.insert(job_id, job);
+        let mut batch = crate::model::EvidenceBatch::new();
+        batch.add_finding(
+            "queued on the first page",
+            "collected while another page was open",
+            Confidence::High,
+            None,
+        );
+        app.apply_collection(job_id, CollectionOutput::new(batch))
+            .expect("applies");
+        app.reload().expect("reload");
+        let finding = &app.workspace.as_ref().expect("workspace").data.findings[0];
+        assert_eq!(finding.page_id, Some(queued_page));
+    }
+
+    #[test]
+    fn agent_result_updates_the_run_that_owns_the_job() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Example Corp");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let finished_job = Uuid::new_v4();
+        let selected_job = Uuid::new_v4();
+        let mut finished = sample_run(
+            investigation_id,
+            finished_job,
+            Uuid::new_v4(),
+            "What is public?",
+        );
+        let mut selected = sample_run(
+            investigation_id,
+            selected_job,
+            Uuid::new_v4(),
+            "A later question",
+        );
+        app.store.insert_agent_run(&mut finished).expect("run");
+        app.store.insert_agent_run(&mut selected).expect("run");
+        app.agent_run_id = Some(selected.id);
+        app.apply_agent(
+            finished_job,
+            crate::agent::AgentOutcome {
+                response: "The domain is registered.".into(),
+                actions: Vec::new(),
+                model: None,
+                cost_usd: None,
+                error: None,
+                context_path: String::new(),
+                program: "claude".into(),
+                args: Vec::new(),
+            },
+        )
+        .expect("applies");
+        let data = app
+            .store
+            .load_investigation(investigation_id)
+            .expect("loads");
+        let finished_run = data
+            .agent_runs
+            .iter()
+            .find(|run| run.id == finished.id)
+            .expect("finished run");
+        let selected_run = data
+            .agent_runs
+            .iter()
+            .find(|run| run.id == selected.id)
+            .expect("selected run");
+        assert_eq!(finished_run.response, "The domain is registered.");
+        assert_eq!(finished_run.status, JobStatus::Succeeded);
+        assert!(selected_run.response.is_empty());
+        assert_eq!(selected_run.status, JobStatus::Running);
+        assert_eq!(app.agent_run_id, Some(finished.id));
+    }
+
+    #[test]
+    fn accepting_a_proposal_applies_the_highlighted_pending_action() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Example Corp");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let mut run = sample_run(investigation_id, Uuid::new_v4(), Uuid::new_v4(), "Notes?");
+        app.store.insert_agent_run(&mut run).expect("run");
+        let proposals = app
+            .store
+            .insert_proposals(
+                investigation_id,
+                run.id,
+                vec![
+                    (
+                        AgentAction::AddNote {
+                            body: "already saved".into(),
+                        },
+                        ProposalStatus::Accepted,
+                        None,
+                    ),
+                    (
+                        AgentAction::AddNote {
+                            body: "still pending".into(),
+                        },
+                        ProposalStatus::Pending,
+                        None,
+                    ),
+                ],
+            )
+            .expect("proposals");
+        app.reload().expect("reload");
+        app.overlay = Overlay::Proposals {
+            run_id: run.id,
+            selected: 0,
+        };
+        app.dispatch(Action::Accept).expect("accept");
+        let data = app
+            .store
+            .load_investigation(investigation_id)
+            .expect("loads");
+        let pending = data
+            .proposals
+            .iter()
+            .find(|proposal| proposal.id == proposals[1].id)
+            .expect("pending");
+        assert_eq!(pending.status, ProposalStatus::Accepted);
+        assert!(
+            data.notes
+                .iter()
+                .any(|note| note.body.contains("still pending"))
+        );
+        assert!(
+            !data
+                .notes
+                .iter()
+                .any(|note| note.body.contains("already saved"))
+        );
+    }
+
+    #[test]
+    fn search_open_restores_the_agent_thread() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Example Corp");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let older_thread = Uuid::new_v4();
+        let newer_thread = Uuid::new_v4();
+        let mut older = sample_run(investigation_id, Uuid::new_v4(), older_thread, "Older");
+        let mut newer = sample_run(investigation_id, Uuid::new_v4(), newer_thread, "Newer");
+        app.store.insert_agent_run(&mut older).expect("run");
+        app.store.insert_agent_run(&mut newer).expect("run");
+        app.reload().expect("reload");
+        app.agent_thread = Some(newer_thread);
+        app.open_hit(&SearchHit {
+            label: "Older".into(),
+            kind: "agent".into(),
+            id: older.id,
+            view: View::Agent,
+        });
+        assert_eq!(app.agent_run_id, Some(older.id));
+        assert_eq!(app.agent_thread, Some(older_thread));
+    }
+
+    #[test]
+    fn cancel_targets_the_listed_job_not_the_first_active_one() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Example Corp");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let mut stored = sample_job("Stored", JobStatus::Queued, None);
+        stored.investigation_id = Some(investigation_id);
+        app.store.insert_job(&mut stored).expect("job");
+        app.reload().expect("reload");
+        app.job_records.insert(stored.id, stored.clone());
+        let mut live = sample_job("Live", JobStatus::Running, None);
+        live.investigation_id = Some(investigation_id);
+        live.created_at = now();
+        app.job_records.insert(live.id, live.clone());
+        app.view = View::Jobs;
+        app.selected = 1;
+        assert_eq!(app.listed_job_ids()[1], live.id);
+        app.cancel_selected_job();
+        assert_eq!(app.status, "Cancelling Live");
+    }
+
+    #[test]
+    fn agent_focus_follows_the_current_view() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Example Corp");
+        create_page(&mut app, "example.com", "domain", "example.com");
+        let entity_id = app.workspace.as_ref().expect("workspace").data.entities[0].id;
+        app.entity_id = Some(entity_id);
+        app.view = View::Overview;
+        assert!(app.focus_ref().is_none());
+        assert!(app.focus_label().is_none());
+        app.view = View::Entities;
+        assert_eq!(app.focus_ref().as_deref(), Some("E-1"));
+        assert_eq!(app.focus_label().as_deref(), Some("example.com"));
     }
 }

@@ -5,6 +5,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+use crate::exec::redact::redact_args;
 use crate::exec::{CommandSpec, ExecError, run};
 use crate::files::sha256_hex;
 use crate::jobs::JobContext;
@@ -89,7 +90,7 @@ pub fn build_batch(
     );
     let mut content = format!(
         "Program: {program}\nArguments: {}\nExit: {}\n\n--- stdout ---\n{stdout}",
-        args.join(" "),
+        redact_args(args).join(" "),
         exit_code
             .map(|code| code.to_string())
             .unwrap_or_else(|| "?".into())
@@ -232,6 +233,17 @@ mod tests {
         );
         assert_eq!(actual.sources[0].kind, SourceKind::Command);
         assert!(actual.sources[0].content.contains("Program: whois"));
+        let secret = build_batch(
+            &tool,
+            &target,
+            "whois",
+            &["--api-key".into(), "sk-secret".into(), "example.com".into()],
+            "ok\n",
+            "",
+            Some(0),
+        );
+        assert!(secret.sources[0].content.contains("[REDACTED]"));
+        assert!(!secret.sources[0].content.contains("sk-secret"));
         assert!(actual.relationships.iter().any(|relationship| {
             relationship.kind == "mentions" && relationship.to.value == "ns1.example.net"
         }));

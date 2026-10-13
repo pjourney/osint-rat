@@ -220,16 +220,28 @@ pub(crate) fn sync_collected_finding(
         if provenance != Provenance::Collected {
             return Ok(FindingSync::LeftAlone);
         }
-        connection.execute(
-            "UPDATE findings SET details = ?2, confidence = ?3, page_id = ?4, updated_at = ?5 WHERE id = ?1",
-            params![
-                id(&finding_id),
-                details.trim_end(),
-                confidence.as_str(),
-                opt_id(&page_id),
-                ts(&now())
-            ],
-        )?;
+        if let Some(page_id) = page_id {
+            connection.execute(
+                "UPDATE findings SET details = ?2, confidence = ?3, page_id = ?4, updated_at = ?5 WHERE id = ?1",
+                params![
+                    id(&finding_id),
+                    details.trim_end(),
+                    confidence.as_str(),
+                    id(&page_id),
+                    ts(&now())
+                ],
+            )?;
+        } else {
+            connection.execute(
+                "UPDATE findings SET details = ?2, confidence = ?3, updated_at = ?4 WHERE id = ?1",
+                params![
+                    id(&finding_id),
+                    details.trim_end(),
+                    confidence.as_str(),
+                    ts(&now())
+                ],
+            )?;
+        }
         replace_finding_sources(connection, finding_id, source_ids)?;
         return Ok(FindingSync::Updated);
     }

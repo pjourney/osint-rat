@@ -242,10 +242,11 @@ fn proposals(
         Line::from(format!("{} suggests:", app.agent.profile.name)),
         Line::from(""),
     ];
-    for (index, proposal) in proposals.iter().enumerate() {
-        if proposal.status != ProposalStatus::Pending {
-            continue;
-        }
+    let pending: Vec<_> = proposals
+        .iter()
+        .filter(|proposal| proposal.status == ProposalStatus::Pending)
+        .collect();
+    for (index, proposal) in pending.iter().enumerate() {
         let style = if index == selected {
             theme.selected
         } else {

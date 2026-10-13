@@ -269,6 +269,73 @@ fn collected_diagnostics_are_upserted_and_cleared() {
 }
 
 #[test]
+fn recollection_without_a_page_keeps_the_finding_page() {
+    let (mut store, investigation) = store_with_investigation();
+    let page = store
+        .create_page(NewPage::new(
+            investigation.id,
+            "",
+            PageKind::Domain,
+            Some("example.com"),
+        ))
+        .expect("page");
+    let on_page = ApplyContext {
+        investigation_id: investigation.id,
+        page_id: Some(page.id),
+        job_id: None,
+    };
+    let mut open = EvidenceBatch::new();
+    let mut source = NewSource::collected(SourceKind::Dns, "dns", "DNS records for example.com");
+    source.content_hash = Some("diag-page".into());
+    let key = open.add_source(source);
+    open.add_finding(
+        "example.com spf",
+        "No SPF record published",
+        Confidence::High,
+        Some(key),
+    );
+    store.apply_batch(on_page, &open).expect("creates");
+    let broad = ApplyContext {
+        investigation_id: investigation.id,
+        page_id: None,
+        job_id: None,
+    };
+    let mut revised = EvidenceBatch::new();
+    let mut source = NewSource::collected(SourceKind::Dns, "dns", "DNS records for example.com");
+    source.content_hash = Some("diag-page".into());
+    let key = revised.add_source(source);
+    revised.add_finding(
+        "example.com spf",
+        "SPF still missing after a broader collect",
+        Confidence::High,
+        Some(key),
+    );
+    store.apply_batch(broad, &revised).expect("updates");
+    let data = store.load_investigation(investigation.id).expect("loads");
+    assert_eq!(data.findings.len(), 1);
+    assert_eq!(data.findings[0].page_id, Some(page.id));
+    assert!(data.findings[0].details.contains("broader collect"));
+}
+
+#[test]
+fn asn_page_creates_an_asn_entity() {
+    let (mut store, investigation) = store_with_investigation();
+    let page = store
+        .create_page(NewPage::new(
+            investigation.id,
+            "",
+            PageKind::Asn,
+            Some("as13335"),
+        ))
+        .expect("page");
+    assert_eq!(page.kind, PageKind::Asn);
+    assert_eq!(page.target.as_deref(), Some("AS13335"));
+    let data = store.load_investigation(investigation.id).expect("loads");
+    assert_eq!(data.entities[0].kind, EntityKind::Asn);
+    assert_eq!(data.entities[0].value, "AS13335");
+}
+
+#[test]
 fn identical_recollection_reuses_source() {
     let (mut store, investigation) = store_with_investigation();
     let context = ApplyContext {

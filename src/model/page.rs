@@ -14,6 +14,7 @@ open_enum! {
         Organization => ("organization", "Organization", "org", "company", "organisation"),
         Domain => ("domain", "Domain", "hostname"),
         Ip => ("ip", "IP address", "ip_address", "ipv4", "ipv6"),
+        Asn => ("asn", "ASN", "as", "autonomous_system"),
         Url => ("url", "URL", "link"),
         Email => ("email", "Email", "mail"),
         Username => ("username", "Username", "handle", "account"),
@@ -31,6 +32,7 @@ impl PageKind {
             PageKind::Organization => Some(EntityKind::Organization),
             PageKind::Domain => Some(EntityKind::Domain),
             PageKind::Ip => Some(EntityKind::Ip),
+            PageKind::Asn => Some(EntityKind::Asn),
             PageKind::Url => Some(EntityKind::Url),
             PageKind::Email => Some(EntityKind::Email),
             PageKind::Username => Some(EntityKind::Username),
@@ -45,6 +47,7 @@ impl PageKind {
         match self {
             PageKind::Domain => Some(TargetKind::Domain),
             PageKind::Ip => Some(TargetKind::Ip),
+            PageKind::Asn => Some(TargetKind::Asn),
             PageKind::Url => Some(TargetKind::Url),
             PageKind::Email => Some(TargetKind::Email),
             PageKind::Username => Some(TargetKind::Username),
@@ -59,6 +62,7 @@ impl PageKind {
         match self {
             PageKind::Domain => "example.com",
             PageKind::Ip => "192.0.2.15",
+            PageKind::Asn => "AS13335",
             PageKind::Url => "https://example.com/about",
             PageKind::Email => "alice@example.com",
             PageKind::Username => "octocat",
@@ -74,12 +78,12 @@ impl PageKind {
         match kind {
             TargetKind::Domain => PageKind::Domain,
             TargetKind::Ip => PageKind::Ip,
+            TargetKind::Asn => PageKind::Asn,
             TargetKind::Url => PageKind::Url,
             TargetKind::Email => PageKind::Email,
             TargetKind::Repository => PageKind::Repository,
             TargetKind::File => PageKind::File,
             TargetKind::Username => PageKind::Username,
-            TargetKind::Asn => PageKind::Organization,
         }
     }
 }

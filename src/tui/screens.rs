@@ -522,37 +522,40 @@ fn agent(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool)
 
 fn jobs(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
     let mut items: Vec<String> = Vec::new();
-    if let Some(workspace) = app.workspace.as_ref() {
-        for job in &workspace.data.jobs {
-            let live = app.job_records.get(&job.id);
-            let status = live.map(|live| live.status).unwrap_or(job.status);
-            let progress = live
-                .and_then(|live| live.progress.clone())
-                .or(job.progress.clone());
-            items.push(format!(
-                "{}  {}  {:<10}  {}  {}",
-                job.short_ref(),
-                status.symbol(),
-                job.label,
-                progress.unwrap_or_default(),
-                truncate(&job.description, 40)
-            ));
-        }
-    }
-    for job in app.job_records.values() {
-        if app
+    for job_id in app.listed_job_ids() {
+        let stored = app
             .workspace
             .as_ref()
-            .is_some_and(|workspace| workspace.job(job.id).is_some())
-        {
+            .and_then(|workspace| workspace.job(job_id));
+        let live = app.job_records.get(&job_id);
+        let Some(label) = live
+            .map(|job| job.label.as_str())
+            .or_else(|| stored.map(|job| job.label.as_str()))
+        else {
             continue;
-        }
+        };
+        let status = live
+            .map(|job| job.status)
+            .or_else(|| stored.map(|job| job.status))
+            .unwrap_or(crate::model::JobStatus::Queued);
+        let reference = stored
+            .map(|job| job.short_ref().to_string())
+            .or_else(|| live.map(|job| job.short_ref().to_string()))
+            .unwrap_or_else(|| "-".into());
+        let progress = live
+            .and_then(|job| job.progress.clone())
+            .or_else(|| stored.and_then(|job| job.progress.clone()));
+        let description = live
+            .map(|job| job.description.as_str())
+            .or_else(|| stored.map(|job| job.description.as_str()))
+            .unwrap_or("");
         items.push(format!(
-            "{}  {}  {}  {}",
-            job.short_ref(),
-            job.status.symbol(),
-            job.label,
-            job.description
+            "{}  {}  {:<10}  {}  {}",
+            reference,
+            status.symbol(),
+            label,
+            progress.unwrap_or_default(),
+            truncate(description, 40)
         ));
     }
     if items.is_empty() {
@@ -787,22 +790,40 @@ fn detail_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'st
             }
         }
         View::Jobs => {
-            if let Some(job) = workspace.data.jobs.get(app.selected) {
-                let live = app.job_records.get(&job.id);
+            if let Some(job_id) = app.listed_job_ids().get(app.selected).copied() {
+                let stored = workspace.job(job_id);
+                let live = app.job_records.get(&job_id);
+                let description = live
+                    .map(|job| job.description.clone())
+                    .or_else(|| stored.map(|job| job.description.clone()))
+                    .unwrap_or_default();
+                let status = live
+                    .map(|job| job.status)
+                    .or_else(|| stored.map(|job| job.status))
+                    .unwrap_or(crate::model::JobStatus::Queued);
+                let program = live
+                    .and_then(|job| job.program.clone())
+                    .or_else(|| stored.and_then(|job| job.program.clone()));
+                let args = live
+                    .map(|job| job.args.clone())
+                    .or_else(|| stored.map(|job| job.args.clone()))
+                    .unwrap_or_default();
+                let log = live
+                    .map(|job| job.log.clone())
+                    .or_else(|| stored.map(|job| job.log.clone()))
+                    .unwrap_or_default();
+                let stderr = live
+                    .map(|job| job.stderr.clone())
+                    .or_else(|| stored.map(|job| job.stderr.clone()))
+                    .unwrap_or_default();
                 return vec![
-                    Line::from(job.description.clone()),
-                    Line::from(format!(
-                        "Status   {}",
-                        live.map(|live| live.status).unwrap_or(job.status)
-                    )),
-                    Line::from(format!(
-                        "Program  {}",
-                        job.program.as_deref().unwrap_or("-")
-                    )),
-                    Line::from(format!("Args     {}", job.args.join(" "))),
+                    Line::from(description),
+                    Line::from(format!("Status   {status}")),
+                    Line::from(format!("Program  {}", program.as_deref().unwrap_or("-"))),
+                    Line::from(format!("Args     {}", args.join(" "))),
                     Line::from(""),
-                    Line::from(sanitize_text(&job.log).into_owned()),
-                    Line::from(sanitize_text(&job.stderr).into_owned()),
+                    Line::from(sanitize_text(&log).into_owned()),
+                    Line::from(sanitize_text(&stderr).into_owned()),
                 ];
             }
         }

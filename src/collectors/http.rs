@@ -448,7 +448,7 @@ pub fn build_batch(
     if let Some(modified) = last_modified(response) {
         batch.event(
             modified,
-            TimelineKind::Published,
+            TimelineKind::Updated,
             format!("Last-Modified of {}", response.final_url),
             Some(key),
             Some(final_url.clone()),
@@ -565,6 +565,8 @@ pub struct RobotsSummary {
 
 pub fn parse_robots(text: &str) -> RobotsSummary {
     let mut summary = RobotsSummary::default();
+    let mut group_matches_star = false;
+    let mut group_has_rules = false;
     for line in text.lines() {
         let line = line.split('#').next().unwrap_or_default().trim();
         let Some((directive, value)) = line.split_once(':') else {
@@ -572,11 +574,29 @@ pub fn parse_robots(text: &str) -> RobotsSummary {
         };
         let value = value.trim();
         match directive.trim().to_ascii_lowercase().as_str() {
-            "sitemap" if !value.is_empty() => summary.sitemaps.push(value.to_string()),
+            "user-agent" => {
+                if group_has_rules {
+                    group_matches_star = false;
+                    group_has_rules = false;
+                }
+                if value == "*" {
+                    group_matches_star = true;
+                }
+            }
+            "sitemap" if !value.is_empty() => {
+                group_has_rules = true;
+                summary.sitemaps.push(value.to_string());
+            }
             "disallow"
-                if !value.is_empty() && !summary.disallowed.iter().any(|path| path == value) =>
+                if group_matches_star
+                    && !value.is_empty()
+                    && !summary.disallowed.iter().any(|path| path == value) =>
             {
-                summary.disallowed.push(value.to_string())
+                group_has_rules = true;
+                summary.disallowed.push(value.to_string());
+            }
+            "allow" | "disallow" => {
+                group_has_rules = true;
             }
             _ => {}
         }
@@ -646,6 +666,16 @@ async fn collect_robots(
 
 const SECURITY_TXT_MAX_BYTES: usize = 64 * 1024;
 
+/// A non-HTML success is a published security.txt. HTML successes are soft 404s.
+fn security_txt_is_document(response: &FetchedResponse) -> bool {
+    response.is_success() && !response.is_html()
+}
+
+/// 404, 410, and HTML success pages mean this location did not publish the file.
+fn security_txt_is_absent(response: &FetchedResponse) -> bool {
+    matches!(response.status, 404 | 410) || (response.is_success() && response.is_html())
+}
+
 /// A published `security.txt` (RFC 9116).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SecurityTxt {
@@ -714,22 +744,20 @@ async fn collect_security_txt(
         context.job.progress(format!("Fetching {url}"));
         context.job.command("GET", &[url.to_string()]);
         match fetch(&context.net, url, &options, &context.job.cancel).await {
-            Ok(response) if response.is_success() && !response.is_html() => {
+            Ok(response) if security_txt_is_document(&response) => {
                 let text = sanitize_bytes(&response.body);
                 add_security_txt(batch, &host, &response, &text);
                 return;
             }
-            Ok(response) if response.status == 404 || response.status == 410 => {
+            Ok(response) if security_txt_is_absent(&response) => {
                 saw_absent = true;
             }
             Ok(response) => {
                 warnings.push(format!("security.txt {url}: HTTP {}", response.status));
-                return;
             }
             Err(error) if error == "cancelled" => return,
             Err(error) => {
                 warnings.push(format!("security.txt {url}: {error}"));
-                return;
             }
         }
     }
@@ -986,6 +1014,8 @@ Acknowledgments: https://example.com/thanks
         assert!(has("mentions", "admin@example.com"));
         assert!(!has("links_to", "www.example.com"));
         assert_eq!(actual.timeline.len(), 1);
+        assert_eq!(actual.timeline[0].kind, TimelineKind::Updated);
+        assert!(actual.timeline[0].title.contains("Last-Modified"));
         assert!(
             actual.sources[0]
                 .content
@@ -1011,6 +1041,45 @@ Acknowledgments: https://example.com/thanks
         let actual = parse_robots(input);
         assert_eq!(actual.disallowed, vec!["/admin"]);
         assert_eq!(actual.sitemaps, vec!["https://example.com/sitemap.xml"]);
+    }
+
+    #[test]
+    fn robots_disallow_is_scoped_to_the_star_group() {
+        let input = "\
+User-agent: Googlebot
+Disallow: /google-only
+User-agent: *
+Disallow: /private
+Sitemap: https://example.com/sitemap.xml
+";
+        let actual = parse_robots(input);
+        assert_eq!(actual.disallowed, vec!["/private"]);
+        assert_eq!(actual.sitemaps, vec!["https://example.com/sitemap.xml"]);
+    }
+
+    #[test]
+    fn security_txt_lookup_continues_after_a_soft_miss() {
+        let mut html = response();
+        html.status = 200;
+        html.headers = vec![("content-type".into(), "text/html".into())];
+        html.body = b"<html>missing</html>".to_vec();
+        assert!(security_txt_is_absent(&html));
+        assert!(!security_txt_is_document(&html));
+        let mut missing = response();
+        missing.status = 404;
+        missing.headers.clear();
+        missing.body.clear();
+        assert!(security_txt_is_absent(&missing));
+        let mut server_error = response();
+        server_error.status = 500;
+        server_error.headers.clear();
+        server_error.body.clear();
+        assert!(!security_txt_is_document(&server_error));
+        assert!(!security_txt_is_absent(&server_error));
+        let mut document = response();
+        document.headers = vec![("content-type".into(), "text/plain".into())];
+        document.body = b"Contact: mailto:security@example.com\n".to_vec();
+        assert!(security_txt_is_document(&document));
     }
 
     #[test]

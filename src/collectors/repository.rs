@@ -157,9 +157,13 @@ fn owner_and_name(url: &str) -> Option<(String, String)> {
 }
 
 fn clone_destination(repos_dir: &Path, url: &str) -> PathBuf {
-    let slug = owner_and_name(url)
-        .map(|(owner, name)| sanitize_filename(&format!("{owner}-{name}")))
-        .unwrap_or_else(|| sanitize_filename(url));
+    let slug = match (Url::parse(url).ok(), owner_and_name(url)) {
+        (Some(parsed), Some((owner, name))) => {
+            let host = parsed.host_str().unwrap_or("repo");
+            sanitize_filename(&format!("{host}-{owner}-{name}"))
+        }
+        _ => sanitize_filename(url),
+    };
     repos_dir.join(slug)
 }
 
@@ -496,6 +500,16 @@ fn describe(observation: &RepoObservation) -> (String, Fields) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clone_paths_include_the_host() {
+        let root = Path::new("/tmp/repos");
+        let github = clone_destination(root, "https://github.com/acme/project");
+        let gitlab = clone_destination(root, "https://gitlab.com/acme/project.git");
+        assert_ne!(github, gitlab);
+        assert!(github.ends_with("github.com-acme-project"));
+        assert!(gitlab.ends_with("gitlab.com-acme-project"));
+    }
 
     #[test]
     fn parses_git_log_lines() {
