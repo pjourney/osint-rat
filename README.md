@@ -1,33 +1,66 @@
 # os-int
 
-An open-source intelligence investigation workbench for the terminal.
+**A terminal workbench for open-source intelligence investigations.**
 
-os-int lets you create an investigation, collect public information, organize evidence with provenance, inspect entities and relationships, run passive OSINT tools, take notes, ask a locally installed AI agent CLI (Claude Code, Codex, or any other command), and generate reports — without leaving the terminal.
+os-int is where you keep a case together. You create an investigation, add the domains, addresses, URLs, and files you care about, collect public records, and keep every observation tied to its source. You can take notes, ask a local AI agent CLI, and write a report — without leaving the terminal.
 
-It orchestrates information, tools, sources, and agents. It does not try to reimplement every OSINT utility.
+It orchestrates information, tools, sources, and agents. Built-in collectors cover the passive basics. Everything else plugs in as an external program you already have, or as the agent CLI you already use.
 
 ```text
-┌ os-int ─ Investigation: Example Corp ───────────── Claude ● ┐
-│ Navigate     │ P-1  example.com  Domain                     │
-│              │ Target  example.com                          │
-│ Overview     │                                              │
-│ Pages        │ Entities on this page                        │
-│ Sources      │   E-1  Domain      example.com               │
-│ Findings     │   E-4  IP          93.184.216.34             │
-│ Entities     │                                              │
-│ Timeline     │ Findings                                     │
-│ Agent        │   F-1  [COL]  HTTPS redirects to apex        │
-│ Jobs         │                                              │
-├──────────────┴──────────────────────────────────────────────┤
-│ [a] Ask  [/] Search  [p] Palette  [r] Collect  [?] Help     │
-└─────────────────────────────────────────────────────────────┘
+┌ os-int · Example Corp ───────────────────────────────────────── Claude ● ┐
+│ Navigate │ P-1  example.com                         │ example.com        │
+│          │ Domain                                   │                    │
+│ Overview │                                          │ Entities           │
+│ Pages    │ Target   example.com                     │  E-1  Domain       │
+│ Sources  │                                          │  E-4  IP           │
+│ Findings │ Entities on this page                    │                    │
+│ Entities │   E-1  Domain   example.com              │ Findings           │
+│ Timeline │   E-4  IP       93.184.216.34            │  F-1  [COL] HTTPS  │
+│ Notes    │                                          │                    │
+│ Agent    │ Findings                                 │                    │
+│ Jobs     │   F-1  [COL]  HTTPS redirects to apex    │                    │
+│ Settings │                                          │                    │
+├──────────┴──────────────────────────────────────────┴────────────────────┤
+│ [a] Ask   [/] Search   [p] Palette   [r] Collect   [?] Help               │
+└───────────────────────────────────────────────────────────────────────────┘
 ```
 
-*(Screenshot placeholder — run `os-int` in a 120×40 terminal for the live layout.)*
+*Sketch of a wide terminal. The live layout drops the right-hand detail pane below 96 columns. Press `?` inside the app for the keyboard overlay.*
 
-## Installation
+| | |
+| --- | --- |
+| **New here** | [Install](#install), then [your first investigation](#your-first-investigation) |
+| **Day to day** | [How a case is organized](#how-a-case-is-organized), [keyboard](#keyboard), [command line](#command-line) |
+| **Going further** | [User guide](docs/guide.md) — every screen, collector, setting, and troubleshooting step |
+| **Contributing** | [Architecture](docs/ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) |
 
-Requires Rust 1.88 or newer (the crate edition is 2024).
+---
+
+## What you use it for
+
+- Keep one investigation per case, with pages for each subject (a domain, an IP, a URL, a repository, a file, a person, an organization).
+- Collect public DNS, RDAP, HTTP, TLS, certificate-transparency, IP, repository, and file metadata, and store the raw response.
+- Read diagnostics of published records: mail policy, response headers, certificate validity, DNSSEC, and `security.txt`.
+- Attach provenance to every record so collected data, original material, your notes, and AI inference stay distinct.
+- Cite anything with a short id (`P-1`, `S-12`, `E-4`, `F-1`) that the interface, the agent, and reports all share.
+- Run passive external tools (`whois`, `dig`, `gh`, or your own) with an explicit argument list. There is no shell.
+- Ask Claude Code, Codex, or another local agent CLI a question about the case. Proposed changes are previewed before anything is written.
+- Export a Markdown or JSON report, or a portable directory you can import on another machine.
+
+> [!TIP]
+> Collection works with no AI agent installed. If `claude` or `codex` is on your `PATH`, press `a` from any investigation screen.
+
+## Boundaries
+
+os-int is an observation, monitoring, and diagnostic notebook for public information.
+
+Built-in collectors perform ordinary DNS queries, RDAP lookups, a single HTTP(S) fetch of a URL you specify, a TLS handshake, a query to the public [crt.sh](https://crt.sh) certificate transparency search, inspection of public git metadata, and inspection of a local file you point at. Diagnostics describe what a name publishes. A gap is stored as a collected finding and cleared when a later collection shows the record is in place.
+
+Custom tools marked `active` are refused. You are responsible for complying with applicable law, terms of service, and your organization's rules.
+
+## Install
+
+You need [Rust](https://rustup.rs) **1.88** or newer. The crate uses the 2024 edition. SQLite is bundled, so there is no separate database to install.
 
 ```bash
 git clone https://github.com/pjourney/osint-rat.git
@@ -35,70 +68,160 @@ cd osint-rat
 cargo install --path .
 ```
 
-The binary is named `os-int`. On first launch it writes a commented `config.toml` and a SQLite database under the platform data directory (`~/.local/share/os-int` on Linux).
+Or install straight from the repository:
 
-Override locations with `--config`, `--data-dir`, `OS_INT_CONFIG`, or `OS_INT_DATA_DIR`.
-
-## First-run workflow
-
-```text
-$ os-int
-  n          New Investigation → Example Corp
-  n          New Page → example.com  (type: Domain)
-  r          Run collectors (DNS, RDAP, HTTP, TLS)
-  5          Open Entities
-  a          Ask the agent about a highlighted IP
-  p          Command palette → Generate Report
+```bash
+cargo install --git https://github.com/pjourney/osint-rat
 ```
 
-Collection works without an AI agent. If Claude Code or Codex is on `PATH`, press `a` from any investigation screen.
+The binary is named `os-int`. Make sure `~/.cargo/bin` is on your `PATH`.
 
-## Features
+Check the install:
 
-- Investigations, pages, sources, findings, entities, relationships, notes, artifacts, timeline
-- Provenance on every record: collected, external, analyst, or AI inference (never silently promoted to fact)
-- Short references (`S-12`, `E-4`, `F-1`) shared by the UI, agents, and reports
-- Built-in passive collectors: DNS, RDAP, HTTP, TLS, certificate transparency, IP intelligence, public repositories, files
-- Diagnostics on public records: SPF, DMARC, MX, MTA-STS, BIMI, DNSSEC, HTTP response headers, certificate validity, and security.txt. Gaps are stored as collected findings and cleared when a later collection shows the record is in place
-- Re-collection records a timeline event when a public observation changes
-- External tool registry (`whois`, `dig`, `gh`, custom passive TOML tools) — no shell, explicit argv. Active probes are refused
-- Background jobs with cancellation; the UI never blocks on I/O
-- Local agent CLIs: Claude Code (`claude -p --output-format stream-json --tools ""`), Codex, or a generic command
-- Agent context packs fence untrusted evidence; proposed actions are previewed before they mutate state
-- Markdown and JSON reports; portable investigation import/export
-- `os-int doctor` for environment checks useful in bug reports
-
-## CLI
-
-```text
-os-int                         # TUI
-os-int new "Example Corp"
-os-int open "Example Corp"
-os-int list
-os-int collect domain example.com
-os-int collect domain example.com --investigation "Example Corp"
-os-int collect example.com --collector dns
-os-int collect example.com --collector ct
-os-int report "Example Corp" --format markdown
-os-int export "Example Corp" -o ./export
-os-int import ./export
+```bash
+os-int --version
 os-int doctor
-os-int --debug                 # file logs at debug level
+os-int config
 ```
 
-## AI agent integration
+`doctor` reports the database, the config file, and whether common programs (`claude`, `codex`, `dig`, `whois`, `git`, `gh`, `exiftool`, `curl`, `openssl`) are on `PATH`. Missing programs are optional. A database warning makes `doctor` exit non-zero, which is useful in bug reports.
 
-os-int never talks to an LLM API. It runs the agent you already have installed as a subprocess.
+### Where your files live
 
-Default profile: Claude Code. `claude -p` is invoked non-interactively with `--tools ""` so prompt-injected web content cannot make the agent run commands. The investigation context is written to disk (audit trail) and passed on stdin.
+The first launch writes a commented `config.toml` and a SQLite database. Override either location with `--config`, `--data-dir`, `OS_INT_CONFIG`, or `OS_INT_DATA_DIR`.
 
-Configure another agent in `config.toml`:
+| Platform | Config | Data |
+| --- | --- | --- |
+| Linux | `~/.config/os-int/config.toml` | `~/.local/share/os-int/` |
+| macOS | `~/Library/Application Support/os-int/config.toml` | `~/Library/Application Support/os-int/` |
+| Windows | `%APPDATA%\os-int\config.toml` | `%APPDATA%\os-int\` |
+
+The data directory holds `os-int.sqlite3`, daily log files, a small cache, and one folder per investigation. Details are in the [user guide](docs/guide.md#where-files-live).
+
+## Your first investigation
+
+Launch the workbench:
+
+```bash
+os-int
+```
+
+On the welcome screen:
+
+1. Press `n` and name the investigation, for example `Example Corp`.
+2. Press `n` again and add a page. Choose **Domain** and enter `example.com`.
+3. Press `r`. os-int runs DNS, RDAP, HTTP, TLS, and certificate transparency in the background. The interface stays responsive. Watch progress under **Jobs** (`8`).
+4. Press `3` for sources, `4` for findings, `5` for entities. Each row has a short id you can cite later.
+5. Press `a`, ask a question about a highlighted record, and review any proposed changes before accepting them.
+6. Press `p`, type `report`, and generate a Markdown report.
+
+The same case from the shell, if you prefer to collect before opening the interface:
+
+```bash
+os-int collect domain example.com --investigation "Example Corp"
+os-int report "Example Corp"
+os-int open "Example Corp"
+```
+
+`collect` creates the investigation and the page when they do not already exist. `os-int new "Example Corp"` also creates a case, then opens it in the workbench and stays there until you quit.
+
+## How a case is organized
+
+```text
+Investigation
+  └── Pages          one subject each (domain, IP, URL, file, …)
+        ├── Sources        raw observations, with provenance
+        ├── Entities       normalized identifiers (example.com, 93.184.216.34)
+        ├── Relationships  typed links between entities (resolves_to, redirects_to, …)
+        ├── Findings       claims, each citing the sources that support them
+        ├── Notes          your writing, or a note accepted from an agent
+        ├── Artifacts      saved bodies, context packs, reports
+        └── Timeline       what happened, including when a public record changed
+```
+
+| Provenance | Badge | Meaning |
+| --- | --- | --- |
+| Collected | `COL` | Gathered by a collector or external tool |
+| External | `EXT` | Original material you supplied |
+| Analyst | `ANL` | Written by you |
+| Agent | `AI` | Inference from an agent. Accepting a proposal keeps this label |
+
+A finding with no cited sources is a hypothesis. AI inference is never relabelled as collected fact.
+
+Short references are per-investigation sequence numbers (`S-12`). UUIDs are the real primary keys, which keeps import and export collision-free. The prefixes are `P` page, `S` source, `F` finding, `E` entity, `R` relationship, `N` note, `A` artifact, `T` timeline, `J` job, `Q` agent run, `X` proposal.
+
+## Moving around
+
+The screen has a navigation column, a main pane, and (on a wide terminal) a detail pane. `Tab` and `Shift+Tab` move between panes. `j` / `k` or the arrow keys move the selection. `Enter` opens the selection.
+
+| Key | Action |
+| --- | --- |
+| `q` | Quit, or close an overlay |
+| `Esc` | Back, or close an overlay |
+| `Ctrl+C` | Quit from anywhere |
+| `/` or `Ctrl+F` | Search pages, entities, findings, sources, artifacts, and agent runs |
+| `p` or `Ctrl+P` | Command palette |
+| `a` | Ask the active agent |
+| `n` | New investigation, page, or finding, depending on the screen |
+| `e` | Edit the current page notes in `$EDITOR`, or open agent and theme settings |
+| `r` | Run the default collectors for the current page |
+| `c` | Cancel the selected job (Jobs screen) |
+| `?` | Help |
+| `1`–`6` | Overview, Pages, Sources, Findings, Entities, Timeline |
+| `7` `8` `9` `0` | Agent, Jobs, Tools, Settings |
+
+Notes and Artifacts are in the navigation column. On the welcome screen, `o` opens an existing investigation and `d` runs doctor. While an agent proposal is open: `A`, `y`, or `Enter` accepts it; `R` or `n` rejects it; `Esc` dismisses the list.
+
+The full palette (new page, one collector, add a finding, generate a report, and the rest) is listed in the [user guide](docs/guide.md#command-palette).
+
+## Command line
+
+Global flags work with every command: `--config <file>`, `--data-dir <dir>`, and `--debug` (debug-level file logs).
+
+```text
+os-int                                      # open the workbench
+os-int new "Example Corp" -d "Public site"
+os-int open "Example Corp"                  # name, UUID, or unique prefix
+os-int list
+os-int collect domain example.com --investigation "Example Corp"
+os-int collect example.com --collector dns  # kind is guessed from the value
+os-int collect ip 192.0.2.15
+os-int report "Example Corp" --format markdown -o ./example.md
+os-int export "Example Corp" -o ./export
+os-int import ./export --rename             # --rename only if the id already exists
+os-int doctor
+os-int config
+```
+
+`report --format json` writes JSON. Any other format value writes Markdown. Without `-o`, the file is saved inside the investigation directory and the path is printed.
+
+Collector ids: `dns`, `rdap`, `http`, `tls`, `ct`, `ip`, `repository`, `file`. Omit `--collector` to run the defaults for that target. A domain runs DNS, RDAP, HTTP, TLS, and certificate transparency. An IP runs RDAP and IP intelligence. See the [collector matrix](docs/guide.md#collectors) for every target kind.
+
+## Configuration
+
+Every setting is optional. Delete a line to fall back to the built-in default. The file written on first launch is commented; the [configuration reference](docs/guide.md#configuration) explains each key.
+
+```toml
+[ui]
+theme = "default"          # default, high-contrast, or monochrome
+# editor = "nvim"          # otherwise $VISUAL, then $EDITOR, then vi
+
+[agent]
+active = "claude"          # claude, codex, or a profile under [agents]
+
+[network]
+# proxy = "socks5h://127.0.0.1:9050"   # HTTP(S) only; DNS and TLS connect directly
+
+[tools]
+# disabled = ["dig"]
+```
+
+To point os-int at another agent:
 
 ```toml
 [agent]
 active = "codex"
 
-# or a generic CLI:
 # [agents.opencode]
 # name = "opencode"
 # program = "opencode"
@@ -107,66 +230,25 @@ active = "codex"
 # input = "argument"
 ```
 
-Untrusted material (HTTP bodies, DNS TXT, tool output) is sanitized for the terminal and fenced as `<<<UNTRUSTED …>>>` before it is shown to an agent.
+os-int never calls an LLM API itself. It runs the program you configured as a subprocess. Claude Code is invoked with `--tools ""`, so prompt-injected page content cannot make that agent run commands. Collected material is wrapped in `<<<UNTRUSTED …>>>` fences before the agent sees it. The exact context pack is saved under the investigation for audit. Nothing an agent proposes is applied until you accept it.
 
-## Configuration
+Logs go to `<data_dir>/logs/os-int.log.YYYY-MM-DD`, never into the terminal UI. Pass `--debug` or set `RUST_LOG` when you need more detail.
 
-See the commented file written on first launch, or `src/config.rs` (`DEFAULT_CONFIG_TOML`). Notable sections:
-
-- `[ui]` theme (`default`, `high-contrast`, `monochrome`), tick rate, editor
-- `[agent]` active profile, timeouts, context size
-- `[network]` timeouts, max body size, optional SOCKS/HTTP proxy (DNS and TLS collectors connect directly)
-- `[collectors]` robots.txt, www check, concurrency, git history depth
-- `[[tools.custom]]` extra programs with argument templates (`{domain}`, `{ip}`, `{url}`, …)
-
-Logs go to `<data_dir>/logs/os-int.log.YYYY-MM-DD`, never to the TUI. Pass `--debug` or set `RUST_LOG`.
-
-## Keyboard shortcuts
-
-| Key | Action |
-| --- | --- |
-| `q` | Quit (or close an overlay) |
-| `Esc` | Back / close overlay |
-| `Tab` / `Shift+Tab` | Next / previous pane |
-| `j` `k` | Move selection |
-| `Enter` | Open / select |
-| `/` | Search |
-| `p` or `Ctrl+P` | Command palette |
-| `a` | Ask agent |
-| `n` | New investigation / page / finding |
-| `e` | Edit page notes in `$EDITOR` (Overview/Notes), or agent/theme settings |
-| `r` | Run collectors for the current page |
-| `c` | Cancel the selected job |
-| `?` | Help |
-| `1`–`0` | Jump to Overview … Settings |
-
-Agent proposals: `A` accept, `R` reject.
-
-## OSINT, legal, and ethical use
-
-os-int is an observation, monitoring, and diagnostic notebook for public information. Built-in collectors perform ordinary DNS queries, RDAP lookups, a single HTTP(S) fetch of a user-specified URL, a TLS handshake, a query to the public crt.sh certificate transparency search, and inspection of public git metadata. It does not include remote access, exploitation, credential attacks, or active network probes. Custom tools marked `active` are refused.
-
-You are responsible for complying with applicable law, terms of service, and your organization's rules. Do not use this software to access systems you are not authorized to investigate, to harass people, or to collect personal data without a lawful basis.
-
-## Architecture
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). In short:
-
-- `model/` — domain types, no UI
-- `storage/` — SQLite (rusqlite, bundled) plus a content-addressed file store
-- `collectors/`, `tools/`, `agent/`, `jobs/` — work that must not block the UI
-- `app/` — state and actions, testable without a terminal
-- `tui/` — Ratatui event loop and rendering
-
-## Development
+## Develop
 
 ```bash
-cargo fmt --check
+cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 ```
 
-MSRV is 1.88. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+A throwaway data directory keeps experiments away from your real cases:
+
+```bash
+cargo run -- --data-dir /tmp/os-int-dev --config /tmp/os-int-dev/config.toml
+```
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before changing structure.
 
 ## License
 

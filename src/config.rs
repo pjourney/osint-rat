@@ -232,7 +232,7 @@ impl Default for ToolDefinitionConfig {
 /// The commented configuration file written on first launch.
 pub const DEFAULT_CONFIG_TOML: &str = r#"# os-int configuration
 # Every setting is optional; delete a line to fall back to the built-in default.
-# Documentation: https://github.com/pjourney/osint-rat/blob/main/README.md#configuration
+# Full reference: https://github.com/pjourney/osint-rat/blob/main/docs/guide.md#configuration
 
 [ui]
 # "default", "high-contrast", or "monochrome"
@@ -353,7 +353,7 @@ impl Config {
     pub fn save(&self, path: &Path) -> Result<()> {
         let body = toml::to_string_pretty(self).wrap_err("could not serialize configuration")?;
         let text = format!(
-            "# os-int configuration (saved from the Settings screen)\n# See README.md#configuration for all options.\n\n{body}"
+            "# os-int configuration (saved from the Settings screen)\n# See docs/guide.md#configuration for all options.\n\n{body}"
         );
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
