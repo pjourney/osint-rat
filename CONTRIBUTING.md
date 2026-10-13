@@ -105,5 +105,8 @@ Please follow [SECURITY.md](SECURITY.md). Use a private report rather than a pub
 
 - [README](README.md)
 - [User guide](docs/guide.md)
+- [Examples](docs/examples.md)
+- [FAQ](docs/faq.md)
+- [Database tables](docs/schema.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Code of conduct](CODE_OF_CONDUCT.md)

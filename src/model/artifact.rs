@@ -1,3 +1,8 @@
+//! A file kept inside the investigation directory.
+//!
+//! The database stores a path relative to that directory (a snapshot, a report, an agent
+//! context pack, a repository clone). Export copies the files and keeps those relative paths.
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

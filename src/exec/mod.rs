@@ -26,14 +26,20 @@ const LINE_CHANNEL_CAPACITY: usize = 256;
 const TERMINATE_GRACE: Duration = Duration::from_secs(2);
 pub const DEFAULT_MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 
-/// What to run.
+/// What to run. Callers pass an argv. `run` does not split arguments or invoke a shell.
 #[derive(Clone, Debug)]
 pub struct CommandSpec {
+    /// Executable name or path. Looked up on `PATH` when it is not a path.
     pub program: String,
+    /// Arguments, already rendered. Placeholders have been substituted by the caller.
     pub args: Vec<String>,
+    /// Working directory. `None` inherits the os-int process directory.
     pub cwd: Option<PathBuf>,
+    /// Extra environment variables. The rest of the environment is inherited.
     pub env: Vec<(String, String)>,
+    /// Bytes written to the child's stdin, then the pipe is closed. `None` leaves stdin empty.
     pub stdin: Option<Vec<u8>>,
+    /// Wall-clock limit. The process group is killed when this elapses.
     pub timeout: Duration,
     /// Bytes of stdout retained in `ExecOutcome::stdout` (the head) and of stderr (the tail).
     pub max_output_bytes: usize,

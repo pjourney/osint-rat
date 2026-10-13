@@ -85,6 +85,10 @@ pub(crate) fn touch_investigation(
     Ok(())
 }
 
+/// A synchronous SQLite connection plus the migrations applied at open.
+///
+/// Callers on the UI task use this directly. Collectors never see a `Store`. They return a
+/// batch, and `Store::apply_batch` writes it in one transaction.
 pub struct Store {
     connection: Connection,
     path: Option<PathBuf>,

@@ -1,4 +1,8 @@
 //! An investigation loaded into memory, with lookup indexes.
+//!
+//! [`InvestigationData`] is also the `data` object inside an export manifest. [`Workspace`]
+//! wraps that snapshot with maps from UUID and short reference back to each record, so the
+//! workbench and the report renderer do not scan the vectors for every lookup.
 
 use std::collections::HashMap;
 

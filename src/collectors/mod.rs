@@ -89,8 +89,14 @@ pub trait Collector: Send + Sync {
     fn id(&self) -> &'static str;
     /// Short label for status displays (`DNS`).
     fn label(&self) -> &'static str;
+    /// One line shown in the command palette and job description.
     fn description(&self) -> &'static str;
+    /// Whether this collector can run against `kind`.
+    ///
+    /// The default set for a page is every accepting collector that also returns true from
+    /// [`Collector::runs_by_default`] and whose [`Collector::requires`] programs are installed.
     fn accepts(&self, kind: TargetKind) -> bool;
+    /// `Passive` for every built-in collector. Active work is refused at the tool boundary.
     fn activity(&self) -> Activity {
         Activity::Passive
     }
@@ -102,6 +108,11 @@ pub trait Collector: Send + Sync {
     fn runs_by_default(&self) -> bool {
         true
     }
+    /// Gather evidence for `target`.
+    ///
+    /// Return a [`CollectionOutput`] and do not touch SQLite. Put non-fatal problems in
+    /// `warnings`. Return `Err` only when the collector produced nothing worth applying.
+    /// Check `context.job.cancel` on long loops so the Jobs screen can cancel the task.
     fn collect<'a>(
         &'a self,
         target: &'a Target,

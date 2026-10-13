@@ -18,39 +18,34 @@ use crate::collectors::CollectionOutput;
 /// blocking a job when the UI falls behind; results are never dropped.
 pub const EVENT_CHANNEL_CAPACITY: usize = 1024;
 
+/// A message from a running job to the UI task.
+///
+/// Log lines may be dropped when the channel is full. [`JobEvent::Finished`] is not dropped:
+/// the sender waits until the UI has room for the result.
 #[derive(Debug)]
 pub enum JobEvent {
-    Started {
-        job_id: Uuid,
-    },
+    /// The task has started. The row moves from queued to running.
+    Started { job_id: Uuid },
+    /// One line of output. `is_error` selects the stderr tail.
     Log {
         job_id: Uuid,
         line: String,
         is_error: bool,
     },
-    Progress {
-        job_id: Uuid,
-        message: String,
-    },
+    /// A short status string, such as the URL being fetched.
+    Progress { job_id: Uuid, message: String },
     /// Records the exact program and arguments a job is executing (already redacted).
     Command {
         job_id: Uuid,
         program: String,
         args: Vec<String>,
     },
-    /// Streaming agent output.
-    AgentDelta {
-        job_id: Uuid,
-        text: String,
-    },
-    AgentStatus {
-        job_id: Uuid,
-        status: String,
-    },
-    Finished {
-        job_id: Uuid,
-        outcome: JobOutcome,
-    },
+    /// Streaming agent output, appended to the reply shown on the Agent screen.
+    AgentDelta { job_id: Uuid, text: String },
+    /// A phase label from the agent CLI (`thinking`, a tool name, and similar).
+    AgentStatus { job_id: Uuid, status: String },
+    /// The task finished. `outcome` carries the batch, the agent reply, the report, or the error.
+    Finished { job_id: Uuid, outcome: JobOutcome },
 }
 
 #[derive(Debug)]
@@ -69,10 +64,14 @@ pub struct ReportOutput {
     pub sha256: String,
 }
 
+/// How a job ended. The UI applies a successful collection in one SQLite transaction.
 #[derive(Debug)]
 pub enum JobOutcome {
+    /// The work finished and produced a batch, an agent reply, or a report.
     Succeeded(Box<JobOutput>),
+    /// A user-facing error. The job row stores this string.
     Failed(String),
+    /// The analyst cancelled the job, or shutdown cancelled it.
     Cancelled,
 }
 

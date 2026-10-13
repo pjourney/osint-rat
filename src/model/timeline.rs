@@ -1,3 +1,9 @@
+//! Dated events on a case.
+//!
+//! Collectors write registration dates, certificate expirations, commits, and the moment an
+//! observation's content hash changes (`TimelineKind::Changed`). Analyst-entered events use
+//! `TimelineKind::UserEvent`.
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

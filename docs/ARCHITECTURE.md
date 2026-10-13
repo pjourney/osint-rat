@@ -158,5 +158,7 @@ Database rows store **relative** paths inside the investigation directory, so an
 ## See also
 
 - [User guide](guide.md)
+- [Examples](examples.md)
+- [Database tables](schema.md)
 - [Contributing](../CONTRIBUTING.md)
 - [Security policy](../SECURITY.md)

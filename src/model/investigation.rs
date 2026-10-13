@@ -1,3 +1,5 @@
+//! One case: the unit of listing, export, import, and the agent context pack.
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

@@ -20,16 +20,20 @@ use tracing_appender::non_blocking::WorkerGuard;
 #[command(
     name = "os-int",
     version,
-    about = "Open-source intelligence investigation workbench for the terminal"
+    about = "Open-source intelligence investigation workbench for the terminal",
+    long_about = "\
+os-int keeps an investigation in the terminal: pages, public records, notes, and a local agent CLI.
+
+With no subcommand it opens the workbench on the last investigation, or the welcome screen when you have none. `os-int help <command>` prints one command. The user guide is docs/guide.md."
 )]
 pub struct Cli {
-    /// Path to config.toml (overrides OS_INT_CONFIG).
+    /// Path to config.toml. Overrides OS_INT_CONFIG, then the platform config directory.
     #[arg(long, global = true)]
     pub config: Option<PathBuf>,
-    /// Data directory (overrides OS_INT_DATA_DIR).
+    /// Data directory. Overrides OS_INT_DATA_DIR, then storage.data_dir, then the platform default.
     #[arg(long, global = true)]
     pub data_dir: Option<PathBuf>,
-    /// Write debug logs to the log file.
+    /// Write debug logs to the daily log file. Does not print logs into the workbench.
     #[arg(long, global = true)]
     pub debug: bool,
     #[command(subcommand)]
@@ -38,55 +42,98 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Open an investigation in the TUI.
+    /// Open an investigation in the workbench.
+    ///
+    /// Matches the name, the UUID, or a unique UUID prefix. Stays in the terminal UI until you quit.
     Open {
         /// Investigation name, UUID, or unique UUID prefix.
         name: String,
     },
-    /// Create an investigation and open it.
+    /// Create an investigation and open it in the workbench.
+    ///
+    /// Stays in the terminal UI until you quit. To create a case and return to the shell, use
+    /// `collect --investigation`.
     New {
+        /// Name of the case. Must be unique.
         name: String,
+        /// Description. Markdown reports use this as the executive summary.
         #[arg(short, long)]
         description: Option<String>,
     },
     /// List investigations.
+    ///
+    /// Prints the name, an id prefix, and counts of pages, sources, findings, and entities.
+    /// The most recently updated case is first.
     List,
     /// Export an investigation as a portable directory.
+    ///
+    /// Writes `investigation.osint.json` plus a `files/` tree of snapshots, reports, and other
+    /// artifacts. Paths inside the manifest are relative.
     Export {
+        /// Investigation name, UUID, or unique UUID prefix.
         investigation: String,
+        /// Directory to create. Defaults to `<sanitized-name>-<uuid>` in the current directory.
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
     /// Import a previously exported investigation.
+    ///
+    /// Refuses an archive whose investigation id is already in this data directory unless
+    /// `--rename` is set. A colliding name is adjusted so it stays unique.
     Import {
+        /// Export directory, or the `investigation.osint.json` file inside it.
         path: PathBuf,
-        /// Assign a new ID if an investigation with the same ID already exists.
+        /// Assign a new id when an investigation with the same id already exists.
         #[arg(long)]
         rename: bool,
     },
-    /// Run collectors from the command line.
+    /// Run passive collectors and store the results.
+    ///
+    /// The first argument is a target kind (`domain`, `ip`, `url`, `email`, `asn`, `repository`,
+    /// `file`, `username`) or a value os-int can guess (`example.com`). `--collector dns` runs
+    /// one collector. Without it, the default set for that kind runs: a domain runs dns, rdap,
+    /// http, tls, and ct; an IP runs rdap and ip.
+    ///
+    /// `--investigation` selects the case. A new name is created. A UUID that does not exist is
+    /// an error. With no investigation flag, the most recently updated case is used, or one is
+    /// created and named after the target.
     Collect {
-        /// Target kind (`domain`, `ip`, `url`, ...) or a value to guess from.
+        /// Target kind, or a value to guess from when `target` is omitted.
         kind: String,
-        /// Target value. Optional when `kind` is itself a target we can guess.
+        /// Target value. Omit when `kind` is itself a value such as `example.com`.
         target: Option<String>,
+        /// Case to write into. Created when the name is new.
         #[arg(short, long)]
         investigation: Option<String>,
-        /// Run one collector (`dns`, `rdap`, `http`, `tls`, `ip`) instead of the defaults.
+        /// One collector id (`dns`, `rdap`, `http`, `tls`, `ct`, `ip`, `repository`, `file`).
         #[arg(short, long)]
         collector: Option<String>,
     },
     /// Write a Markdown or JSON report.
+    ///
+    /// `json` writes JSON. Any other format value writes Markdown. Without `--output`, the file
+    /// is saved under the investigation's `reports/` directory and the path is printed.
     Report {
+        /// Investigation name, UUID, or unique UUID prefix.
         investigation: String,
+        /// `markdown` (default) or `json`.
         #[arg(short, long, default_value = "markdown")]
         format: String,
+        /// Copy the report to this path as well as storing it in the investigation.
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
     /// Check the local environment.
+    ///
+    /// Reports the database, config file, log directory, proxy or direct network, and whether
+    /// `claude`, `codex`, `dig`, `whois`, `git`, `gh`, `exiftool`, `curl`, and `openssl` are on
+    /// PATH. A missing program is optional. A warning, usually from the database integrity
+    /// check, makes this command exit non-zero.
     Doctor,
     /// Print the resolved configuration path and data directory.
+    ///
+    /// Also prints the database path and the log directory after flags, environment variables,
+    /// and `storage.data_dir` have been applied.
     Config,
 }
 

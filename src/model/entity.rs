@@ -1,3 +1,9 @@
+//! Normalized identifiers observed in a case.
+//!
+//! Entities are upserted by kind plus canonical value, so `Example.COM.` and `example.com` share
+//! a row. A page's subject is usually also an entity. Nameservers, addresses, and certificate
+//! names become entities even when you never created a page for them.
+
 use std::net::IpAddr;
 
 use serde::{Deserialize, Serialize};

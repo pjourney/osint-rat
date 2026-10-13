@@ -1,6 +1,6 @@
 # os-int user guide
 
-This is the complete guide to using os-int: the workbench, the collectors, the agent, the command line, and the configuration file. For a shorter introduction, start with the [README](../README.md). For how the code is put together, see [ARCHITECTURE.md](ARCHITECTURE.md).
+This is the complete guide to using os-int: the workbench, the collectors, the agent, the command line, and the configuration file. For a shorter introduction, start with the [README](../README.md). For copy-paste sessions, see [examples](examples.md). For how the code is put together, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Contents
 
@@ -18,6 +18,8 @@ This is the complete guide to using os-int: the workbench, the collectors, the a
 - [Keyboard](#keyboard)
 - [Troubleshooting](#troubleshooting)
 - [Using it responsibly](#using-it-responsibly)
+
+Worked sessions are in [examples](examples.md). Common questions are in the [FAQ](faq.md). The SQLite table map is in [schema](schema.md).
 
 ## Concepts
 
@@ -572,6 +574,9 @@ To report a vulnerability in os-int itself, follow [SECURITY.md](../SECURITY.md)
 ## See also
 
 - [README](../README.md) — install and a first session
+- [Examples](examples.md) — copy-paste investigations, tools, agents, and export
+- [FAQ](faq.md) — pages versus entities, badges, paths, and the cases that look like failures
+- [Database tables](schema.md) — what each SQLite table stores
 - [ARCHITECTURE.md](ARCHITECTURE.md) — module map and design decisions
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — development setup and pull requests
 - [SECURITY.md](../SECURITY.md) — vulnerability reports

@@ -1,3 +1,9 @@
+//! One observation: a DNS answer set, an HTTP response, an RDAP document, a tool's stdout.
+//!
+//! `content_hash` is the SHA-256 of the raw snapshot. Re-collecting byte-identical content
+//! updates `last_seen_at` and does not insert a second source. A new hash records an
+//! "observation changed" timeline event.
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

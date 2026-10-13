@@ -128,22 +128,33 @@ os-int keyboard shortcuts
 
   q            Quit (or close an overlay)
   Esc          Back / close overlay
+  Ctrl+C       Quit from anywhere
   Tab          Next pane          Shift+Tab  previous pane
   j / k        Move selection     Enter      open / select
-  /            Search             p  Ctrl+P  command palette
-  a            Ask agent          n          new item / investigation
-  e            Edit notes in $EDITOR (Overview/Notes) or Settings
-  r            Run collectors for this page
-  c            Cancel running job (Jobs view)
+  /  Ctrl+F    Search             p  Ctrl+P  command palette
+  a            Ask agent          n          new investigation, page, or finding
+  e            Edit notes in $EDITOR (Overview) or open Settings
+  r            Run default collectors for this page
+  c            Cancel the selected job (Jobs view)
   ?            This help
 
   1 Overview  2 Pages  3 Sources  4 Findings  5 Entities
   6 Timeline  7 Agent  8 Jobs     9 Tools     0 Settings
 
-Agent proposals: A/Enter accept, R reject, Esc dismiss.
+Notes and Artifacts are in the Navigate column. On the welcome
+screen, o opens a case and d runs doctor.
 
-Collected material is untrusted evidence. AI findings stay labelled as AI inference.
-os-int observes and diagnoses public information. It does not probe or attack.
+Agent proposals: Enter accepts, R rejects, Esc dismisses the list.
+
+Badges: [COL] collected  [EXT] original material
+        [ANL] you wrote  [AI]  agent inference
+
+A domain page collects DNS, RDAP, HTTP, TLS, and certificate
+transparency. An IP page collects RDAP and IP intelligence.
+Press p and type dns, rdap, http, tls, ct, or ip for one collector.
+
+Collected material is untrusted evidence. Accepting an AI finding
+keeps the AI badge. os-int observes public information.
 ";
 
 #[cfg(test)]

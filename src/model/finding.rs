@@ -1,3 +1,9 @@
+//! Claims recorded against a case.
+//!
+//! A finding cites the sources that support it. Collected diagnostics, conclusions you write,
+//! and inferences you accept from an agent are all findings; [`Provenance`] tells them apart.
+//! [`Finding::is_unsupported`] is true when `source_ids` is empty.
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -15,7 +21,8 @@ pub struct Finding {
     pub title: String,
     pub details: String,
     pub confidence: Confidence,
-    /// `Analyst` or `Agent`. AI findings stay labelled as AI even after acceptance.
+    /// Who asserted the claim. Collected diagnostics stay `collected`. A finding you add
+    /// from the palette is `analyst`. Accepting an agent proposal keeps `agent`.
     pub provenance: Provenance,
     pub source_ids: Vec<Uuid>,
     pub created_at: Timestamp,

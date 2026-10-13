@@ -1,4 +1,11 @@
 //! Domain model. These types are independent of the terminal UI and of storage.
+//!
+//! An [`Investigation`] owns [`Page`]s. Collectors attach [`Source`]s, [`Entity`] values,
+//! [`Relationship`]s, [`Finding`]s, and [`TimelineEvent`]s. Short ids (`S-12`) come from
+//! [`ShortRef`] and are scoped to one investigation; the UUID is the primary key.
+//!
+//! Provenance ([`Provenance`]) is stored on the records analysts read: `collected`, `external`,
+//! `analyst`, and `agent`. Agent inference stays `agent` after a proposal is accepted.
 
 pub mod agent;
 pub mod artifact;

@@ -1,4 +1,11 @@
 //! Application state and action handling. Testable without a terminal.
+//!
+//! [`App`] owns the config, the database, the loaded investigation, and the job manager.
+//! [`Action`] values come from the keymap or from a finished job. `App::dispatch` is the only
+//! place that changes that state. The TUI draws whatever `App` currently holds.
+//!
+//! Per-investigation UI state (last view, page, and agent thread) is stored in `ui_state` and
+//! restored when the case is opened again.
 
 pub mod action;
 pub mod commands;
@@ -33,20 +40,36 @@ use crate::tools::{Activity, ToolEntry, ToolRegistry};
 
 use self::commands::filtered;
 
+/// The main pane. Number keys `1`–`6` and `7` `8` `9` `0` jump to every variant except
+/// [`View::Welcome`], [`View::Notes`], and [`View::Artifacts`]. Notes and Artifacts are reached
+/// from the navigation column or the command palette.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum View {
+    /// First-run and no-investigation screen: new, open, doctor, help.
     Welcome,
+    /// The current page: target, entities, findings, and page notes.
     Overview,
+    /// Subjects in this investigation.
     Pages,
+    /// Observations, with provenance and content hashes.
     Sources,
+    /// Claims. Collected diagnostics, analyst conclusions, and agent inferences.
     Findings,
+    /// Normalized identifiers and the relationships between them.
     Entities,
+    /// Dated events, including registration, expiry, and observation changes.
     Timeline,
+    /// Standalone notes. Page notes are edited from Overview with `e`.
     Notes,
+    /// Questions sent to the local agent CLI, and their replies.
     Agent,
+    /// Background collectors, tools, agent calls, and reports.
     Jobs,
+    /// External programs detected on `PATH`, including custom tools that will not run.
     Tools,
+    /// Active agent profile and theme.
     Settings,
+    /// Files stored for this investigation: snapshots, reports, context packs.
     Artifacts,
 }
 
@@ -89,53 +112,66 @@ impl View {
     }
 }
 
+/// Which column has the keyboard focus. `Tab` cycles Nav → Main → Detail on a wide terminal.
+/// The detail pane is not created when the terminal is narrower than 96 columns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pane {
+    /// The screen list (Overview, Pages, Sources, …).
     Nav,
+    /// The list or body for [`View`].
     Main,
+    /// The selected record.
     Detail,
 }
 
+/// A modal drawn over the workbench. Keys are handled by the overlay until it closes.
+/// Letters insert text while a form, search box, palette, or agent prompt is open.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Overlay {
+    /// The workbench itself is receiving keys.
     None,
+    /// Keyboard cheat sheet. `PgUp` / `PgDn` scroll it.
     Help,
-    Palette {
-        query: Input,
-        selected: usize,
-    },
-    Search {
-        query: Input,
-        selected: usize,
-    },
-    AgentPrompt {
-        input: Input,
-    },
+    /// Filterable list of commands from `app::commands::COMMANDS`.
+    Palette { query: Input, selected: usize },
+    /// Search hits across the open investigation.
+    Search { query: Input, selected: usize },
+    /// The question that will be sent to the active agent.
+    AgentPrompt { input: Input },
+    /// A multi-field form (new investigation, new page, new finding, settings).
     Form(FormState),
+    /// A yes/no prompt that runs `command` when confirmed.
     Confirm {
         title: String,
         message: String,
         command: String,
     },
+    /// Scrollable text, used for long records that are not a form.
     Text {
         title: String,
         body: String,
         scroll: u16,
     },
+    /// The same checks `os-int doctor` prints.
     Doctor,
-    Proposals {
-        run_id: Uuid,
-        selected: usize,
-    },
+    /// Actions proposed by one agent run. Accept and reject apply one at a time.
+    Proposals { run_id: Uuid, selected: usize },
 }
 
+/// Which form [`Overlay::Form`] is editing. The field list is built to match the kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FormKind {
+    /// Name and description of a new case.
     NewInvestigation,
+    /// Name, UUID, or prefix of a case to open.
     OpenInvestigation,
+    /// Page type and target. Left and right cycle the type.
     NewPage,
+    /// Title, details, confidence, and cited source ids.
     NewFinding,
+    /// Body of a note.
     NewNote,
+    /// Active agent profile, optional program override, timeout, and theme.
     SettingsAgent,
 }
 

@@ -1,3 +1,8 @@
+//! Background work as stored on a case: collectors, external tools, agent calls, and reports.
+//!
+//! The live event stream is [`crate::jobs::JobEvent`]. This module is the row that remains
+//! after the task finishes.
+
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -9,10 +14,15 @@ use super::ids::{RefKind, ShortRef};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JobStatus {
+    /// Accepted by the job manager and waiting for a free slot.
     Queued,
+    /// The task is running. The Jobs screen shows its progress line.
     Running,
+    /// Finished and applied (or, for an agent, the reply was stored).
     Succeeded,
+    /// Finished with an error string the Jobs screen can show.
     Failed,
+    /// Cancelled from the Jobs screen, or cancelled because os-int shut down.
     Cancelled,
 }
 

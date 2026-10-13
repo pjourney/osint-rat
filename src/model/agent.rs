@@ -1,3 +1,8 @@
+//! Questions sent to a local agent CLI, and the structured changes the agent may propose.
+//!
+//! A [`Proposal`] stays pending until the analyst accepts or rejects it. Accepting an
+//! [`AgentAction::AddFinding`] writes a finding with provenance `agent`.
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

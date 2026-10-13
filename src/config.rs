@@ -30,13 +30,19 @@ const DEFAULT_REPOSITORY_HISTORY_DEPTH: u32 = 200;
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    /// Theme, redraw interval, and the external editor.
     pub ui: UiConfig,
+    /// Which agent profile is active, plus timeouts and context limits.
     pub agent: AgentSettings,
     /// Named agent profiles. Built-in profiles (`claude`, `codex`) can be overridden here.
     pub agents: BTreeMap<String, AgentProfileConfig>,
+    /// HTTP client settings. DNS and TLS collectors do not use `proxy`.
     pub network: NetworkConfig,
+    /// Data directory override and the largest evidence file that will be copied in.
     pub storage: StorageConfig,
+    /// What the built-in collectors fetch, and how many jobs may run at once.
     pub collectors: CollectorConfig,
+    /// Built-in tools to hide, and passive programs you add yourself.
     pub tools: ToolsConfig,
 }
 

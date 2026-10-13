@@ -31,8 +31,8 @@ It orchestrates information, tools, sources, and agents. Built-in collectors cov
 | --- | --- |
 | **New here** | [Install](#install), then [your first investigation](#your-first-investigation) |
 | **Day to day** | [How a case is organized](#how-a-case-is-organized), [keyboard](#keyboard), [command line](#command-line) |
-| **Going further** | [User guide](docs/guide.md) — every screen, collector, setting, and troubleshooting step |
-| **Contributing** | [Architecture](docs/ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) |
+| **Going further** | [User guide](docs/guide.md) · [Examples](docs/examples.md) · [FAQ](docs/faq.md) |
+| **Contributing** | [Architecture](docs/ARCHITECTURE.md) · [Database tables](docs/schema.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) |
 
 ---
 

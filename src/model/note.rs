@@ -1,3 +1,9 @@
+//! Standalone annotations.
+//!
+//! The notes you edit with `e` on Overview are stored on the page (`Page::notes`). A [`Note`]
+//! row is a separate record with its own short id, used for notes you add from the palette and
+//! for notes accepted from an agent.
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

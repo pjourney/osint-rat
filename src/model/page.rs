@@ -1,3 +1,8 @@
+//! A subject inside an investigation: a domain, an address, a URL, a file, a person.
+//!
+//! Page kinds that map to a [`crate::model::TargetKind`] can run collectors. Person,
+//! organization, event, and generic pages are for notes and links.
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
