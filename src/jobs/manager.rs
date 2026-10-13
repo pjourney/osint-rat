@@ -129,7 +129,7 @@ async fn run_with_cancellation(
         return JobOutcome::Cancelled;
     }
     match result {
-        Some(Ok(output)) => JobOutcome::Succeeded(output),
+        Some(Ok(output)) => JobOutcome::Succeeded(Box::new(output)),
         Some(Err(error)) => JobOutcome::Failed(error),
         None => JobOutcome::Cancelled,
     }
@@ -173,7 +173,7 @@ mod tests {
         assert_eq!(finished_id, job_id);
         assert!(matches!(
             outcome,
-            JobOutcome::Succeeded(JobOutput::Report(_))
+            JobOutcome::Succeeded(output) if matches!(output.as_ref(), JobOutput::Report(_))
         ));
     }
 

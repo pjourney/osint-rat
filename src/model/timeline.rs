@@ -16,6 +16,7 @@ open_enum! {
         Release => ("release", "Release"),
         Published => ("published", "Published"),
         Observed => ("observed", "Observed", "collection"),
+        Changed => ("changed", "Observation changed"),
         UserEvent => ("user", "Analyst event", "manual"),
         Finding => ("finding", "Finding recorded"),
         Investigation => ("investigation", "Investigation activity"),

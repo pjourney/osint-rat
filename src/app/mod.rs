@@ -1028,6 +1028,7 @@ impl App {
             "run_rdap" => self.run_named_collector("rdap")?,
             "run_http" => self.run_named_collector("http")?,
             "run_tls" => self.run_named_collector("tls")?,
+            "run_ct" => self.run_named_collector("ct")?,
             "run_ip" => self.run_named_collector("ip")?,
             "ask_agent" => self.open_agent_prompt(),
             "generate_report" => self.generate_report("markdown")?,
@@ -1047,12 +1048,6 @@ impl App {
             "cancel_job" => self.cancel_selected_job(),
             other if other.starts_with("run_tool:") => {
                 self.spawn_tool(other.trim_start_matches("run_tool:"))?;
-            }
-            other if other.starts_with("confirm_tool:") => {
-                let name = other.trim_start_matches("confirm_tool:");
-                if let Some(entry) = self.tools.find(name).cloned() {
-                    self.spawn_tool_inner(entry)?;
-                }
             }
             _ => self.status = format!("Unknown command {id}"),
         }
@@ -1451,19 +1446,21 @@ impl App {
         let mut error_text = None;
         let mut status = JobStatus::Succeeded;
         match outcome {
-            JobOutcome::Succeeded(JobOutput::Collection(output)) => {
-                self.apply_collection(job_id, output)?;
-                result_text = self
-                    .job_records
-                    .get(&job_id)
-                    .and_then(|job| job.result.clone());
-            }
-            JobOutcome::Succeeded(JobOutput::Agent(outcome)) => {
-                self.apply_agent(job_id, outcome)?;
-            }
-            JobOutcome::Succeeded(JobOutput::Report(report)) => {
-                result_text = Some(format!("Wrote {}", report.relative_path));
-            }
+            JobOutcome::Succeeded(output) => match *output {
+                JobOutput::Collection(collected) => {
+                    self.apply_collection(job_id, collected)?;
+                    result_text = self
+                        .job_records
+                        .get(&job_id)
+                        .and_then(|job| job.result.clone());
+                }
+                JobOutput::Agent(outcome) => {
+                    self.apply_agent(job_id, outcome)?;
+                }
+                JobOutput::Report(report) => {
+                    result_text = Some(format!("Wrote {}", report.relative_path));
+                }
+            },
             JobOutcome::Failed(error) => {
                 status = JobStatus::Failed;
                 error_text = Some(error);
@@ -1886,15 +1883,13 @@ impl App {
             return Ok(());
         }
         if entry.definition.activity == Activity::Active {
-            self.overlay = Overlay::Confirm {
-                title: "Active recon tool".into(),
-                message: format!(
-                    "{} sends traffic to the target ({}). Continue?",
-                    entry.definition.name,
-                    entry.definition.activity.as_str()
+            bail_status(
+                &mut self.status,
+                &format!(
+                    "{} is an active probe. os-int only runs passive observation and diagnostic tools.",
+                    entry.definition.name
                 ),
-                command: format!("confirm_tool:{}", entry.definition.name),
-            };
+            );
             return Ok(());
         }
         self.spawn_tool_inner(entry)

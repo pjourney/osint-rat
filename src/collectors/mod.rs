@@ -7,6 +7,8 @@
 //!
 //! To add a collector: implement `Collector`, then register it in `CollectorRegistry::builtin`.
 
+pub mod ct;
+pub mod diagnose;
 pub mod dns;
 pub mod file;
 pub mod html;
@@ -134,6 +136,7 @@ impl CollectorRegistry {
                 Arc::new(rdap::RdapCollector),
                 Arc::new(http::HttpCollector),
                 Arc::new(tls::TlsCollector),
+                Arc::new(ct::CtCollector),
                 Arc::new(ip::IpCollector),
                 Arc::new(repository::RepositoryCollector),
                 Arc::new(file::FileCollector),
@@ -193,7 +196,7 @@ mod tests {
             .iter()
             .map(|collector| collector.id())
             .collect();
-        assert_eq!(actual, vec!["dns", "rdap", "http", "tls"]);
+        assert_eq!(actual, vec!["dns", "rdap", "http", "tls", "ct"]);
     }
 
     #[test]

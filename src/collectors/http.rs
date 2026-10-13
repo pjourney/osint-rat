@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
 use url::Url;
 
+use super::diagnose;
 use super::html::{HtmlSummary, extract};
 use super::net::{FetchOptions, FetchedResponse, fetch};
 use super::rdap::parse_date;
@@ -38,7 +39,7 @@ impl Collector for HttpCollector {
     }
 
     fn description(&self) -> &'static str {
-        "Status, redirects, headers, page metadata, links, robots.txt, and sitemaps"
+        "Status, redirects, headers, page metadata, links, header diagnostics, and security.txt"
     }
 
     fn accepts(&self, kind: TargetKind) -> bool {
@@ -73,6 +74,7 @@ async fn collect(target: &Target, context: &CollectorContext) -> CollectResult {
     if context.settings.fetch_robots {
         collect_robots(&response.final_url, context, &mut batch, &mut warnings).await;
     }
+    collect_security_txt(&response.final_url, context, &mut batch, &mut warnings).await;
     for warning in &warnings {
         context.job.log(format!("warning: {warning}"));
     }
@@ -272,6 +274,10 @@ fn describe(
         "Security headers: {}",
         security_headers(&response.headers)
     ));
+    diagnose::append_section(
+        &mut lines,
+        &diagnose::assess_http(response.final_url.scheme() == "https", &response.headers),
+    );
     let edges = detect_edge(&response.headers);
     if !edges.is_empty() {
         lines.push(format!("Edge/CDN indicators: {}", edges.join(", ")));
@@ -361,6 +367,12 @@ fn source_fields(
     if !edges.is_empty() {
         fields.push("edge", edges.join(", "));
     }
+    let diagnostics =
+        diagnose::assess_http(response.final_url.scheme() == "https", &response.headers);
+    let posture = diagnose::posture(&diagnostics);
+    if !posture.is_empty() {
+        fields.push("diagnostics", posture);
+    }
     fields
 }
 
@@ -397,6 +409,20 @@ pub fn build_batch(
     if let Some(server) = response.header("server") {
         batch.annotate(&final_url, "server", server);
     }
+    let posture = diagnose::posture(&diagnose::assess_http(
+        response.final_url.scheme() == "https",
+        &response.headers,
+    ));
+    if !posture.is_empty() {
+        batch.annotate(&subject, "diagnostics", posture);
+    }
+    let host = response.final_url.host_str().unwrap_or("url").to_string();
+    diagnose::record_findings(
+        &mut batch,
+        &host,
+        &diagnose::assess_http(response.final_url.scheme() == "https", &response.headers),
+        Some(key),
+    );
     let final_host = response.final_url.host_str().map(str::to_ascii_lowercase);
     if let Some(host) = final_host.as_deref() {
         relate_final_host(
@@ -618,6 +644,192 @@ async fn collect_robots(
     }
 }
 
+const SECURITY_TXT_MAX_BYTES: usize = 64 * 1024;
+
+/// A published `security.txt` (RFC 9116).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SecurityTxt {
+    pub contacts: Vec<String>,
+    pub expires: Option<String>,
+    pub policies: Vec<String>,
+    pub canonicals: Vec<String>,
+    pub acknowledgments: Vec<String>,
+}
+
+impl SecurityTxt {
+    pub fn has_contact(&self) -> bool {
+        !self.contacts.is_empty()
+    }
+}
+
+/// Parses contact, expiry, policy, and canonical fields. Other lines are kept out of entities.
+pub fn parse_security_txt(text: &str) -> SecurityTxt {
+    let mut parsed = SecurityTxt::default();
+    for line in text.lines() {
+        let line = line.split('#').next().unwrap_or_default().trim();
+        let Some((field, value)) = line.split_once(':') else {
+            continue;
+        };
+        let value = sanitize_line(value).trim().to_string();
+        if value.is_empty() {
+            continue;
+        }
+        match field.trim().to_ascii_lowercase().as_str() {
+            "contact" if parsed.contacts.len() < 20 => parsed.contacts.push(value),
+            "expires" if parsed.expires.is_none() => parsed.expires = Some(value),
+            "policy" if parsed.policies.len() < 10 => parsed.policies.push(value),
+            "canonical" if parsed.canonicals.len() < 5 => parsed.canonicals.push(value),
+            "acknowledgments" | "acknowledgements" if parsed.acknowledgments.len() < 10 => {
+                parsed.acknowledgments.push(value);
+            }
+            _ => {}
+        }
+    }
+    parsed
+}
+
+async fn collect_security_txt(
+    base: &Url,
+    context: &CollectorContext,
+    batch: &mut EvidenceBatch,
+    warnings: &mut Vec<String>,
+) {
+    if base.scheme() != "https" {
+        return;
+    }
+    let host = base.host_str().unwrap_or("url").to_string();
+    let mut candidates = Vec::new();
+    if let Ok(url) = base.join("/.well-known/security.txt") {
+        candidates.push(url);
+    }
+    if let Ok(url) = base.join("/security.txt") {
+        candidates.push(url);
+    }
+    let options = FetchOptions {
+        max_body_bytes: SECURITY_TXT_MAX_BYTES,
+        accept: Some("text/plain,*/*;q=0.5"),
+    };
+    let mut saw_absent = false;
+    for url in &candidates {
+        context.job.progress(format!("Fetching {url}"));
+        context.job.command("GET", &[url.to_string()]);
+        match fetch(&context.net, url, &options, &context.job.cancel).await {
+            Ok(response) if response.is_success() && !response.is_html() => {
+                let text = sanitize_bytes(&response.body);
+                add_security_txt(batch, &host, &response, &text);
+                return;
+            }
+            Ok(response) if response.status == 404 || response.status == 410 => {
+                saw_absent = true;
+            }
+            Ok(response) => {
+                warnings.push(format!("security.txt {url}: HTTP {}", response.status));
+                return;
+            }
+            Err(error) if error == "cancelled" => return,
+            Err(error) => {
+                warnings.push(format!("security.txt {url}: {error}"));
+                return;
+            }
+        }
+    }
+    if saw_absent {
+        let diagnostic = diagnose::Diagnostic::new(
+            "security.txt",
+            diagnose::DiagnosticState::Missing,
+            "No security.txt was published",
+        );
+        let source = if batch.sources.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
+        diagnose::record_findings(batch, &host, &[diagnostic], source);
+    }
+}
+
+fn add_security_txt(batch: &mut EvidenceBatch, host: &str, response: &FetchedResponse, text: &str) {
+    let parsed = parse_security_txt(text);
+    let mut source =
+        NewSource::collected(SourceKind::Http, "http", format!("security.txt for {host}"));
+    source.url = Some(response.final_url.to_string());
+    source.content_hash = Some(crate::files::sha256_hex(&response.body));
+    source.content = truncate_with_marker(text, SECURITY_TXT_MAX_BYTES).into_owned();
+    source
+        .fields
+        .push("contacts", parsed.contacts.len().to_string());
+    source.fields.push_opt("expires", parsed.expires.clone());
+    let key = batch.add_source(source);
+    let page = EntityKey::new(EntityKind::Url, response.final_url.as_str());
+    for contact in &parsed.contacts {
+        relate_security_contact(batch, &page, contact, key);
+    }
+    for policy in &parsed.policies {
+        if let Ok(url) = Url::parse(policy) {
+            let policy_key = EntityKey::new(EntityKind::Url, url.as_str());
+            batch.relate(&page, relation::REFERENCES, &policy_key, Some(key));
+        }
+    }
+    let mut diagnostics = vec![diagnose::Diagnostic::new(
+        "security.txt",
+        diagnose::DiagnosticState::Present,
+        "security.txt is published",
+    )];
+    match parsed.expires.as_deref().and_then(parse_date) {
+        Some(expires) if expires <= Utc::now() => diagnostics.push(diagnose::Diagnostic::new(
+            "security.txt-expires",
+            diagnose::DiagnosticState::Review,
+            "security.txt Expires is in the past",
+        )),
+        Some(expires) => {
+            batch.event(
+                expires,
+                TimelineKind::Expiration,
+                format!("security.txt for {host} expires"),
+                Some(key),
+                Some(page.clone()),
+            );
+            diagnostics.push(diagnose::Diagnostic::new(
+                "security.txt-expires",
+                diagnose::DiagnosticState::Present,
+                "security.txt Expires is in the future",
+            ));
+        }
+        None => diagnostics.push(diagnose::Diagnostic::new(
+            "security.txt-expires",
+            diagnose::DiagnosticState::Review,
+            "security.txt has no Expires field",
+        )),
+    }
+    if !parsed.has_contact() {
+        diagnostics.push(diagnose::Diagnostic::new(
+            "security.txt-contact",
+            diagnose::DiagnosticState::Review,
+            "security.txt has no Contact field",
+        ));
+    } else {
+        diagnostics.push(diagnose::Diagnostic::new(
+            "security.txt-contact",
+            diagnose::DiagnosticState::Present,
+            "security.txt publishes a Contact",
+        ));
+    }
+    diagnose::record_findings(batch, host, &diagnostics, Some(key));
+}
+
+fn relate_security_contact(batch: &mut EvidenceBatch, page: &EntityKey, contact: &str, key: usize) {
+    let value = contact.strip_prefix("mailto:").unwrap_or(contact).trim();
+    if value.contains('@') && !value.contains('/') {
+        let email = EntityKey::new(EntityKind::Email, value);
+        batch.relate(page, relation::MENTIONS, &email, Some(key));
+        return;
+    }
+    if let Ok(url) = Url::parse(contact) {
+        let url_key = EntityKey::new(EntityKind::Url, url.as_str());
+        batch.relate(page, relation::REFERENCES, &url_key, Some(key));
+    }
+}
+
 fn add_robots_source(
     batch: &mut EvidenceBatch,
     response: &FetchedResponse,
@@ -726,6 +938,23 @@ mod tests {
             sha256: "abc".into(),
             size_bytes: 13,
         }
+    }
+
+    #[test]
+    fn security_txt_contacts_and_expiry_are_parsed() {
+        let input = "\
+Contact: mailto:security@example.com
+Expires: 2020-01-01T00:00:00.000Z
+Policy: https://example.com/policy
+# not a field
+Acknowledgments: https://example.com/thanks
+";
+        let actual = parse_security_txt(input);
+        assert_eq!(actual.contacts, vec!["mailto:security@example.com"]);
+        assert_eq!(actual.expires.as_deref(), Some("2020-01-01T00:00:00.000Z"));
+        assert_eq!(actual.policies, vec!["https://example.com/policy"]);
+        assert_eq!(actual.acknowledgments, vec!["https://example.com/thanks"]);
+        assert!(actual.has_contact());
     }
 
     #[test]

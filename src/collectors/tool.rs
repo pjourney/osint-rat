@@ -11,7 +11,7 @@ use crate::jobs::JobContext;
 use crate::model::{EntityKey, EntityKind, EvidenceBatch, NewSource, SourceKind, Target, relation};
 use crate::sanitize::{sanitize_line, sanitize_text};
 use crate::tools::template::render_args;
-use crate::tools::{OutputParser, ToolDefinition};
+use crate::tools::{Activity, OutputParser, ToolDefinition};
 
 use super::CollectionOutput;
 
@@ -31,6 +31,12 @@ pub async fn run_tool(
     target: &Target,
     job: &JobContext,
 ) -> Result<CollectionOutput, String> {
+    if definition.activity == Activity::Active {
+        return Err(format!(
+            "{} is marked active. os-int only runs passive observation and diagnostic tools",
+            definition.name
+        ));
+    }
     let args = render_args(&definition.args, target).map_err(|error| error.to_string())?;
     let mut spec = CommandSpec::new(program.display().to_string(), args, definition.timeout);
     spec.max_output_bytes = crate::exec::DEFAULT_MAX_OUTPUT_BYTES;

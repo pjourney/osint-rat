@@ -58,8 +58,10 @@ Collection works without an AI agent. If Claude Code or Codex is on `PATH`, pres
 - Investigations, pages, sources, findings, entities, relationships, notes, artifacts, timeline
 - Provenance on every record: collected, external, analyst, or AI inference (never silently promoted to fact)
 - Short references (`S-12`, `E-4`, `F-1`) shared by the UI, agents, and reports
-- Built-in passive collectors: DNS, RDAP, HTTP, TLS, IP intelligence, public repositories, files
-- External tool registry (`whois`, `dig`, `gh`, custom TOML tools) — no shell, explicit argv
+- Built-in passive collectors: DNS, RDAP, HTTP, TLS, certificate transparency, IP intelligence, public repositories, files
+- Diagnostics on public records: SPF, DMARC, MX, MTA-STS, BIMI, DNSSEC, HTTP response headers, certificate validity, and security.txt. Gaps are stored as collected findings and cleared when a later collection shows the record is in place
+- Re-collection records a timeline event when a public observation changes
+- External tool registry (`whois`, `dig`, `gh`, custom passive TOML tools) — no shell, explicit argv. Active probes are refused
 - Background jobs with cancellation; the UI never blocks on I/O
 - Local agent CLIs: Claude Code (`claude -p --output-format stream-json --tools ""`), Codex, or a generic command
 - Agent context packs fence untrusted evidence; proposed actions are previewed before they mutate state
@@ -76,6 +78,7 @@ os-int list
 os-int collect domain example.com
 os-int collect domain example.com --investigation "Example Corp"
 os-int collect example.com --collector dns
+os-int collect example.com --collector ct
 os-int report "Example Corp" --format markdown
 os-int export "Example Corp" -o ./export
 os-int import ./export
@@ -141,7 +144,7 @@ Agent proposals: `A` accept, `R` reject.
 
 ## OSINT, legal, and ethical use
 
-os-int is a research notebook. Built-in collectors are **passive by default**: ordinary DNS queries, RDAP lookups, a single HTTP(S) fetch of a user-specified URL, a TLS handshake, and inspection of public git metadata. Tools marked `active` (for example traceroute) ask for confirmation.
+os-int is an observation, monitoring, and diagnostic notebook for public information. Built-in collectors perform ordinary DNS queries, RDAP lookups, a single HTTP(S) fetch of a user-specified URL, a TLS handshake, a query to the public crt.sh certificate transparency search, and inspection of public git metadata. It does not include remote access, exploitation, credential attacks, or active network probes. Custom tools marked `active` are refused.
 
 You are responsible for complying with applicable law, terms of service, and your organization's rules. Do not use this software to access systems you are not authorized to investigate, to harass people, or to collect personal data without a lawful basis.
 

@@ -23,6 +23,7 @@ use tokio_rustls::rustls::{
 use x509_parser::prelude::{FromDer, GeneralName, X509Certificate};
 use x509_parser::public_key::PublicKey;
 
+use super::diagnose;
 use super::{CollectResult, CollectionOutput, Collector, CollectorContext};
 use crate::files::sha256_hex;
 use crate::model::{
@@ -47,7 +48,7 @@ impl Collector for TlsCollector {
     }
 
     fn description(&self) -> &'static str {
-        "Certificate chain, validity, SANs, issuer, protocol, and cipher via a TLS handshake"
+        "Certificate chain, validity diagnostics, SANs, issuer, protocol, and cipher"
     }
 
     fn accepts(&self, kind: TargetKind) -> bool {
@@ -355,7 +356,10 @@ fn format_date(date: &Option<DateTime<Utc>>) -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 
-fn describe(observation: &TlsObservation) -> (String, Fields) {
+fn describe(
+    observation: &TlsObservation,
+    diagnostics: &[diagnose::Diagnostic],
+) -> (String, Fields) {
     let mut lines = vec![format!(
         "Endpoint: {}:{}",
         observation.host, observation.port
@@ -382,6 +386,11 @@ fn describe(observation: &TlsObservation) -> (String, Fields) {
     };
     lines.push(format!("Validation: {validation}"));
     fields.push("validation", validation);
+    diagnose::append_section(&mut lines, diagnostics);
+    let posture = diagnose::posture(diagnostics);
+    if !posture.is_empty() {
+        fields.push("diagnostics", posture);
+    }
     fields.push_opt("protocol", observation.protocol.clone());
     for (position, certificate) in observation.chain.iter().enumerate() {
         lines.push(String::new());
@@ -430,7 +439,13 @@ fn describe(observation: &TlsObservation) -> (String, Fields) {
 /// Builds the evidence batch for a TLS observation. Pure and unit-tested.
 pub fn build_batch(target: &Target, observation: &TlsObservation) -> EvidenceBatch {
     let mut batch = EvidenceBatch::new();
-    let (content, fields) = describe(observation);
+    let diagnostics = diagnose::assess_tls(
+        observation.validation.is_ok(),
+        observation.validation.as_ref().err().map(String::as_str),
+        observation.chain.first().and_then(|leaf| leaf.not_after),
+        Utc::now(),
+    );
+    let (content, fields) = describe(observation, &diagnostics);
     let mut source = NewSource::collected(
         SourceKind::Tls,
         "tls",
@@ -448,6 +463,12 @@ pub fn build_batch(target: &Target, observation: &TlsObservation) -> EvidenceBat
     source.content = content;
     source.fields = fields;
     let key = batch.add_source(source);
+    diagnose::record_findings(
+        &mut batch,
+        &format!("{}:{}", observation.host, observation.port),
+        &diagnostics,
+        Some(key),
+    );
     let subject = batch.entity(target.entity_kind(), &target.value(), Some(key));
     let Some(leaf) = observation.chain.first() else {
         batch.summary = "no certificate presented".into();

@@ -8,15 +8,16 @@ use uuid::Uuid;
 
 use super::Store;
 use super::evidence::{
-    NewSourceRecord, TimelineInsert, find_duplicate_source, insert_artifact, insert_source,
-    insert_timeline_event, mark_source_seen,
+    FindingSync, NewSourceRecord, PriorObservation, TimelineInsert, clear_collected_finding,
+    find_duplicate_source, find_prior_observation, insert_artifact, insert_source,
+    insert_timeline_event, mark_source_seen, sync_collected_finding,
 };
 use super::graph::{
     link_entity_source, link_page_entity, link_relationship_source, merge_entity_fields,
     upsert_entity, upsert_relationship,
 };
 use super::touch_investigation;
-use crate::model::{EntityKey, EvidenceBatch, Provenance};
+use crate::model::{EntityKey, EvidenceBatch, NewSource, Provenance, TimelineKind, Timestamp};
 
 /// Where a batch is being applied.
 #[derive(Clone, Copy, Debug)]
@@ -38,6 +39,11 @@ pub struct ApplySummary {
     pub new_relationships: usize,
     pub new_events: usize,
     pub new_artifacts: usize,
+    /// Sources whose content differed from the latest stored observation of the same record.
+    pub changed_observations: usize,
+    pub new_findings: usize,
+    pub updated_findings: usize,
+    pub resolved_findings: usize,
 }
 
 impl ApplySummary {
@@ -57,6 +63,18 @@ impl ApplySummary {
         if self.new_artifacts > 0 {
             parts.push(format!("{} artifacts", self.new_artifacts));
         }
+        if self.changed_observations > 0 {
+            parts.push(format!(
+                "{} changed observation(s)",
+                self.changed_observations
+            ));
+        }
+        if self.new_findings > 0 {
+            parts.push(format!("{} diagnostic finding(s)", self.new_findings));
+        }
+        if self.resolved_findings > 0 {
+            parts.push(format!("{} resolved finding(s)", self.resolved_findings));
+        }
         parts.join(", ")
     }
 }
@@ -71,15 +89,25 @@ impl Store {
     ) -> Result<ApplySummary> {
         let transaction = self.connection_mut().transaction()?;
         let mut summary = ApplySummary::default();
-        apply_sources(&transaction, context, batch, &mut summary)?;
+        let changes = apply_sources(&transaction, context, batch, &mut summary)?;
         let entity_ids = apply_entities(&transaction, context, batch, &mut summary)?;
         apply_relationships(&transaction, context, batch, &entity_ids, &mut summary)?;
         apply_timeline(&transaction, context, batch, &entity_ids, &mut summary)?;
+        apply_observation_changes(&transaction, context, &changes, &mut summary)?;
         apply_artifacts(&transaction, context, batch, &mut summary)?;
+        apply_diagnostic_findings(&transaction, context, batch, &mut summary)?;
         touch_investigation(&transaction, context.investigation_id)?;
         transaction.commit()?;
         Ok(summary)
     }
+}
+
+/// A public record whose latest stored copy differs from the copy just collected.
+struct ObservationChange {
+    source_index: usize,
+    occurred_at: Timestamp,
+    title: String,
+    description: String,
 }
 
 fn apply_sources(
@@ -87,8 +115,9 @@ fn apply_sources(
     context: ApplyContext,
     batch: &EvidenceBatch,
     summary: &mut ApplySummary,
-) -> rusqlite::Result<()> {
-    for source in &batch.sources {
+) -> rusqlite::Result<Vec<ObservationChange>> {
+    let mut changes = Vec::new();
+    for (source_index, source) in batch.sources.iter().enumerate() {
         if let Some(existing) = find_duplicate_source(connection, context.investigation_id, source)?
         {
             mark_source_seen(connection, existing, source.retrieved_at)?;
@@ -96,6 +125,7 @@ fn apply_sources(
             summary.unchanged_sources += 1;
             continue;
         }
+        let prior = find_prior_observation(connection, context.investigation_id, source)?;
         let record = NewSourceRecord {
             investigation_id: context.investigation_id,
             page_id: context.page_id,
@@ -103,8 +133,105 @@ fn apply_sources(
             source: source.clone(),
         };
         let inserted = insert_source(connection, &record)?;
+        if let Some(change) = observation_change(source_index, source, prior.as_ref()) {
+            changes.push(change);
+        }
         summary.source_ids.push(inserted.id);
         summary.new_sources += 1;
+    }
+    Ok(changes)
+}
+
+fn observation_change(
+    source_index: usize,
+    source: &NewSource,
+    prior: Option<&PriorObservation>,
+) -> Option<ObservationChange> {
+    let prior = prior?;
+    let new_hash = source.content_hash.as_deref()?;
+    if prior.content_hash.as_deref() == Some(new_hash) {
+        return None;
+    }
+    let previous = prior
+        .content_hash
+        .as_deref()
+        .map(hash_prefix)
+        .unwrap_or_else(|| "none".into());
+    Some(ObservationChange {
+        source_index,
+        occurred_at: source.retrieved_at,
+        title: format!("{} changed ({})", source.title, hash_prefix(new_hash)),
+        description: format!(
+            "The latest stored observation hash {previous} differs from the newly collected hash {}.",
+            hash_prefix(new_hash)
+        ),
+    })
+}
+
+fn hash_prefix(hash: &str) -> String {
+    hash.chars().take(12).collect()
+}
+
+fn apply_observation_changes(
+    connection: &Connection,
+    context: ApplyContext,
+    changes: &[ObservationChange],
+    summary: &mut ApplySummary,
+) -> rusqlite::Result<()> {
+    for change in changes {
+        let source_id = summary.source_ids.get(change.source_index).copied();
+        let inserted = insert_timeline_event(
+            connection,
+            TimelineInsert {
+                investigation_id: context.investigation_id,
+                occurred_at: change.occurred_at,
+                kind: &TimelineKind::Changed,
+                title: &change.title,
+                description: &change.description,
+                provenance: Provenance::Collected,
+                source_id,
+                entity_id: None,
+                page_id: context.page_id,
+            },
+        )?;
+        if inserted {
+            summary.new_events += 1;
+            summary.changed_observations += 1;
+        }
+    }
+    Ok(())
+}
+
+fn apply_diagnostic_findings(
+    connection: &Connection,
+    context: ApplyContext,
+    batch: &EvidenceBatch,
+    summary: &mut ApplySummary,
+) -> rusqlite::Result<()> {
+    for title in &batch.resolved_findings {
+        if clear_collected_finding(connection, context.investigation_id, title)? {
+            summary.resolved_findings += 1;
+        }
+    }
+    for finding in &batch.findings {
+        let source_ids: Vec<Uuid> = finding
+            .source
+            .and_then(|key| summary.source_ids.get(key).copied())
+            .into_iter()
+            .collect();
+        match sync_collected_finding(
+            connection,
+            context.investigation_id,
+            context.page_id,
+            &finding.title,
+            &finding.details,
+            finding.confidence,
+            &source_ids,
+        )? {
+            FindingSync::Created => summary.new_findings += 1,
+            FindingSync::Updated => summary.updated_findings += 1,
+            FindingSync::LeftAlone => {}
+        }
     }
     Ok(())
 }

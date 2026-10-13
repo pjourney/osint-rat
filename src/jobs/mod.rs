@@ -71,7 +71,7 @@ pub struct ReportOutput {
 
 #[derive(Debug)]
 pub enum JobOutcome {
-    Succeeded(JobOutput),
+    Succeeded(Box<JobOutput>),
     Failed(String),
     Cancelled,
 }

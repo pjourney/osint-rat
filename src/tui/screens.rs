@@ -205,6 +205,12 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
                     Span::raw("  "),
                     provenance_span(entity.provenance, theme),
                 ]));
+                if let Some(posture) = entity.fields.get("diagnostics") {
+                    lines.push(Line::from(Span::styled(
+                        format!("    {}", truncate(posture, 72)),
+                        theme.muted,
+                    )));
+                }
             }
         }
         let findings: Vec<_> = workspace
@@ -708,6 +714,7 @@ fn detail_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'st
                     "Retrieved  {}",
                     source.retrieved_at.to_rfc3339()
                 )));
+                append_fields(&mut lines, &source.fields, theme);
                 lines.push(Line::from(""));
                 for line in sanitize_text(&source.content).lines().take(80) {
                     lines.push(Line::from(line.to_string()));
@@ -731,9 +738,10 @@ fn detail_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'st
                         "Sources  {}",
                         workspace.format_source_refs(&entity.source_ids)
                     )),
-                    Line::from(""),
-                    Line::from(Span::styled("Relationships", theme.header)),
                 ];
+                append_fields(&mut lines, &entity.fields, theme);
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled("Relationships", theme.header)));
                 for rel in workspace.outgoing(entity.id) {
                     if let Some(to) = workspace.entity(rel.to_id) {
                         lines.push(Line::from(format!(
@@ -836,6 +844,17 @@ fn detail_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'st
         }
     }
     vec![Line::from(Span::styled("Nothing selected.", theme.muted))]
+}
+
+fn append_fields(lines: &mut Vec<Line<'static>>, fields: &crate::model::Fields, theme: &Theme) {
+    if fields.is_empty() {
+        return;
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("Fields", theme.header)));
+    for (key, value) in fields.iter().take(16) {
+        lines.push(Line::from(format!("  {key}  {}", truncate(value, 60))));
+    }
 }
 
 fn finding_line(
