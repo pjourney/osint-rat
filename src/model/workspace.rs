@@ -12,6 +12,7 @@ use uuid::Uuid;
 use super::agent::{AgentRun, Proposal, ProposalStatus};
 use super::artifact::Artifact;
 use super::entity::{Entity, EntityKind};
+use super::event::Event;
 use super::finding::Finding;
 use super::ids::{RefKind, ShortRef};
 use super::investigation::Investigation;
@@ -49,6 +50,9 @@ pub struct InvestigationData {
     /// Resolution bags. Empty on version-1 archives (`#[serde(default)]`).
     #[serde(default)]
     pub resolutions: Vec<Resolution>,
+    /// First-class Event objects (Phase 6). Empty on version-1 and version-2 archives.
+    #[serde(default)]
+    pub events: Vec<Event>,
 }
 
 impl InvestigationData {
@@ -68,6 +72,7 @@ impl InvestigationData {
             proposals: Vec::new(),
             page_entities: Vec::new(),
             resolutions: Vec::new(),
+            events: Vec::new(),
         }
     }
 }
@@ -349,6 +354,9 @@ fn build_index(data: &InvestigationData) -> WorkspaceIndex {
     }
     for resolution in &data.resolutions {
         register(resolution.id, RefKind::Resolution, resolution.seq);
+    }
+    for event in &data.events {
+        register(event.id, RefKind::Event, event.seq);
     }
     index.pages = position_map(data.pages.iter().map(|page| page.id));
     index.sources = position_map(data.sources.iter().map(|source| source.id));

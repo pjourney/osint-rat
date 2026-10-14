@@ -6,6 +6,7 @@
 
 mod activity;
 mod apply;
+mod events;
 mod evidence;
 mod graph;
 mod load;
@@ -50,6 +51,7 @@ pub(crate) enum SeqTable {
     Resolutions,
     PlaybookRuns,
     Automations,
+    Events,
 }
 
 impl SeqTable {
@@ -68,6 +70,7 @@ impl SeqTable {
             SeqTable::Resolutions => "resolutions",
             SeqTable::PlaybookRuns => "playbook_runs",
             SeqTable::Automations => "automations",
+            SeqTable::Events => "events",
         }
     }
 }

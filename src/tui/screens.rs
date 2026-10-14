@@ -670,29 +670,84 @@ fn entities(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
 }
 
 fn timeline(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
-    let items = app
-        .workspace
-        .as_ref()
-        .map(|workspace| {
-            workspace
-                .data
-                .timeline
+    let rows = Layout::vertical([Constraint::Length(3), Constraint::Min(4)]).split(area);
+    let filter = match app.timeline.filter_entity_id.and_then(|id| {
+        app.workspace
+            .as_ref()
+            .and_then(|workspace| workspace.entity(id))
+            .map(|entity| entity.display_name().to_string())
+    }) {
+        Some(name) => format!("filter {name}"),
+        None => "all entities".into(),
+    };
+    let mode = if app.timeline.nearby {
+        "nearby"
+    } else {
+        "overlay"
+    };
+    let header = vec![
+        Line::from(Span::styled(
+            format!("Timeline {mode} · {filter} · [ ] f filter · l nearby · x clear"),
+            theme.header,
+        )),
+        Line::from(Span::styled(
+            "Collection log + imported Events. Enter opens a linked entity. Esc restores.",
+            theme.muted,
+        )),
+    ];
+    frame.render_widget(
+        Paragraph::new(header).block(pane_block("Timeline", focused, theme)),
+        rows[0],
+    );
+    let items: Vec<String> = if app.timeline.nearby {
+        let nearby = app.listed_nearby();
+        if nearby.is_empty() {
+            vec!["(no nearby entities — same country or prefix)".into()]
+        } else {
+            nearby
+                .iter()
+                .map(|entity| {
+                    format!(
+                        "{}  {:<12}  {}  {}",
+                        entity.short_ref(),
+                        entity.kind.label(),
+                        entity.fields.get("country").unwrap_or("-"),
+                        entity.display_name()
+                    )
+                })
+                .collect()
+        }
+    } else {
+        let listed = app.listed_timeline_rows();
+        if listed.is_empty() {
+            vec!["(no events — collect, ingest, or import)".into()]
+        } else {
+            listed
                 .iter()
                 .map(|event| {
+                    let end = event
+                        .ended_at
+                        .map(|ended| format!("→{}", ended.format("%H:%M")))
+                        .unwrap_or_default();
                     format!(
-                        "{}  {}  {:<16}  {}",
-                        event.short_ref(),
-                        event.occurred_at.format("%Y-%m-%d"),
+                        "{}  {}{end}  {:<16}  {}",
+                        event.short_ref,
+                        event.started_at.format("%Y-%m-%d"),
                         event.kind.label(),
                         event.title
                     )
                 })
                 .collect()
-        })
-        .unwrap_or_default();
+        }
+    };
+    let selected = if items.len() <= 1 && items.first().is_some_and(|item| item.starts_with('(')) {
+        0
+    } else {
+        app.selected.min(items.len().saturating_sub(1))
+    };
     frame.render_widget(
-        list_from(items, app.selected, theme).block(pane_block("Timeline", focused, theme)),
-        area,
+        list_from(items, selected, theme).block(pane_block("Events", focused, theme)),
+        rows[1],
     );
 }
 
@@ -1141,6 +1196,61 @@ fn detail_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'st
                     Line::from(""),
                     Line::from("Enter to preview."),
                 ];
+            }
+        }
+        View::Timeline => {
+            if app.timeline.nearby {
+                if let Some(entity) = app.listed_nearby().into_iter().nth(app.selected) {
+                    let mut lines = vec![
+                        Line::from(format!("{}  {}", entity.short_ref(), entity.display_name())),
+                        Line::from(format!(
+                            "Nearby of {}",
+                            app.timeline
+                                .nearby_seed_id
+                                .and_then(|id| workspace
+                                    .entity(id)
+                                    .map(|seed| seed.display_name().to_string()))
+                                .unwrap_or_else(|| "-".into())
+                        )),
+                    ];
+                    append_fields(&mut lines, &entity.fields, theme);
+                    return lines;
+                }
+            } else if let Some(row) = app.selected_timeline_row() {
+                let mut lines = vec![
+                    Line::from(format!("{}  {}", row.short_ref, row.title)),
+                    Line::from(format!(
+                        "{}  {}  {}",
+                        row.kind.label(),
+                        row.started_at.to_rfc3339(),
+                        if row.ended_at.is_some() {
+                            "interval"
+                        } else {
+                            "instant"
+                        }
+                    )),
+                ];
+                if let Some(ended) = row.ended_at {
+                    lines.push(Line::from(format!("Ended  {}", ended.to_rfc3339())));
+                }
+                lines.push(Line::from(format!("Origin  {:?}", row.origin)));
+                if !row.entity_ids.is_empty() {
+                    let names: Vec<String> = row
+                        .entity_ids
+                        .iter()
+                        .filter_map(|id| {
+                            workspace
+                                .entity(*id)
+                                .map(|entity| entity.display_name().to_string())
+                        })
+                        .collect();
+                    lines.push(Line::from(format!("Entities  {}", names.join(", "))));
+                }
+                if !row.description.is_empty() {
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(sanitize_text(&row.description).into_owned()));
+                }
+                return lines;
             }
         }
         View::Pages => {

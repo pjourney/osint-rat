@@ -15,8 +15,8 @@ use super::{IngestError, IngestReport, MAX_OBJECTS};
 use crate::files::sha256_hex;
 use crate::model::{
     Confidence, EntityKey, EntityKind, EvidenceBatch, Fields, NewArtifact, NewCollectedFinding,
-    NewEntity, NewRelationship, NewSource, NewTimelineEvent, Provenance, SourceKind, TimelineKind,
-    now,
+    NewEntity, NewEvent, NewRelationship, NewSource, NewTimelineEvent, Provenance, SourceKind,
+    TimelineKind, Timestamp, now, parse_timestamp_untrusted,
 };
 use crate::paths::is_safe_relative_path;
 use crate::sanitize::sanitize_text;
@@ -57,10 +57,11 @@ pub fn parse_batch_json(bytes: &[u8], origin: &str) -> Result<IngestReport, Inge
     read_batch(batch_value, origin, &mut report)?;
     if report.batch.summary.is_empty() {
         report.batch.summary = format!(
-            "ingested {} source(s), {} entit(y/ies), {} relationship(s) from {origin}",
+            "ingested {} source(s), {} entit(y/ies), {} relationship(s), {} event(s) from {origin}",
             report.batch.sources.len(),
             report.batch.entities.len(),
-            report.batch.relationships.len()
+            report.batch.relationships.len(),
+            report.batch.events.len()
         );
     }
     Ok(report)
@@ -124,6 +125,19 @@ fn read_batch(value: &Value, origin: &str, report: &mut IngestReport) -> Result<
                 report.batch.timeline.push(event);
             } else {
                 report.skipped += 1;
+            }
+        }
+    }
+    if let Some(events) = object.get("events").and_then(Value::as_array) {
+        for (index, event) in events.iter().take(MAX_OBJECTS).enumerate() {
+            match read_case_event(event) {
+                Ok(event) => report.batch.events.push(event),
+                Err(error) => {
+                    report.skipped += 1;
+                    report
+                        .warnings
+                        .push(format!("event {index}: {}", error.message));
+                }
             }
         }
     }
@@ -198,11 +212,7 @@ fn read_source(value: &Value, origin: &str) -> Result<NewSource, IngestError> {
     }
     source.fields = read_fields(value.get("fields"));
     source.provenance = Provenance::External;
-    if let Some(retrieved) = value
-        .get("retrieved_at")
-        .and_then(Value::as_str)
-        .and_then(|text| text.parse().ok())
-    {
+    if let Some(retrieved) = value.get("retrieved_at").and_then(parse_timestamp_value) {
         source.retrieved_at = retrieved;
     } else {
         source.retrieved_at = now();
@@ -255,8 +265,7 @@ fn read_relationship(value: &Value) -> Result<NewRelationship, IngestError> {
 fn read_event(value: &Value) -> Result<NewTimelineEvent, IngestError> {
     let occurred_at = value
         .get("occurred_at")
-        .and_then(Value::as_str)
-        .and_then(|text| text.parse().ok())
+        .and_then(parse_timestamp_value)
         .ok_or_else(|| IngestError::new("timeline event is missing occurred_at"))?;
     let kind = value
         .get("kind")
@@ -285,6 +294,68 @@ fn read_event(value: &Value) -> Result<NewTimelineEvent, IngestError> {
             .get("entity")
             .and_then(|entity| read_entity_key(entity).ok()),
     })
+}
+
+fn read_case_event(value: &Value) -> Result<NewEvent, IngestError> {
+    let started_at = value
+        .get("started_at")
+        .or_else(|| value.get("occurred_at"))
+        .and_then(parse_timestamp_value)
+        .ok_or_else(|| IngestError::new("event is missing started_at"))?;
+    let ended_at = value
+        .get("ended_at")
+        .and_then(parse_timestamp_value)
+        .filter(|ended| *ended >= started_at);
+    let kind = value
+        .get("kind")
+        .and_then(Value::as_str)
+        .map(TimelineKind::parse)
+        .unwrap_or(TimelineKind::Observed);
+    let title = value
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or("imported event")
+        .to_string();
+    let mut entities = Vec::new();
+    if let Some(items) = value.get("entities").and_then(Value::as_array) {
+        for item in items {
+            if let Ok(key) = read_entity_key(item) {
+                entities.push(key);
+            }
+        }
+    } else if let Some(entity) = value
+        .get("entity")
+        .and_then(|entity| read_entity_key(entity).ok())
+    {
+        entities.push(entity);
+    }
+    Ok(NewEvent {
+        started_at,
+        ended_at,
+        kind,
+        title: sanitize_text(&title).into_owned(),
+        description: value
+            .get("description")
+            .and_then(Value::as_str)
+            .map(|text| sanitize_text(text).into_owned())
+            .unwrap_or_default(),
+        source: value
+            .get("source")
+            .and_then(Value::as_u64)
+            .map(|key| key as usize),
+        entities,
+        fields: read_fields(value.get("fields")),
+    })
+}
+
+fn parse_timestamp_value(value: &Value) -> Option<Timestamp> {
+    match value {
+        Value::String(text) => parse_timestamp_untrusted(text),
+        Value::Number(number) => number
+            .as_i64()
+            .and_then(|unix| parse_timestamp_untrusted(&unix.to_string())),
+        _ => None,
+    }
 }
 
 fn read_artifact(value: &Value) -> Result<NewArtifact, IngestError> {
@@ -414,6 +485,22 @@ fn string_field(value: &Value, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn fixture_events_batch_parses_interval() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/ingest/events-batch.json");
+        let bytes = std::fs::read(path).expect("fixture");
+        let actual = parse_batch_json(&bytes, "events-batch.json").expect("parse");
+        assert_eq!(actual.batch.events.len(), 1);
+        assert_eq!(actual.batch.events[0].title, "joint window");
+        assert!(actual.batch.events[0].ended_at.is_some());
+        assert_eq!(actual.batch.events[0].entities.len(), 2);
+        assert_eq!(actual.batch.timeline.len(), 1);
+        assert_eq!(actual.batch.entities.len(), 2);
+        assert_eq!(actual.batch.entities[0].fields.get("country"), Some("US"));
+    }
 
     #[test]
     fn envelope_and_raw_batch_parse() {
@@ -488,6 +575,37 @@ mod tests {
                 .iter()
                 .any(|warning| warning.contains("resolved_findings"))
         );
+    }
+
+    #[test]
+    fn malformed_timestamps_are_skipped_without_panic() {
+        let input = r#"{
+            "timeline": [
+                {"occurred_at": "NaN", "title": "bad"},
+                {"occurred_at": "2024-13-40", "title": "oor"},
+                {"occurred_at": "2024-06-01T12:00:00-04:00", "title": "ok"}
+            ],
+            "events": [
+                {"started_at": "null", "title": "null"},
+                {
+                    "started_at": "2024-05-01T12:00:00Z",
+                    "ended_at": "2024-05-01T18:00:00Z",
+                    "title": "window",
+                    "entities": [{"kind": "ip", "value": "192.0.2.1"}]
+                }
+            ]
+        }"#;
+        let actual = parse_batch_json(input.as_bytes(), "times.json").expect("parse");
+        assert_eq!(actual.batch.timeline.len(), 1);
+        assert_eq!(actual.batch.timeline[0].title, "ok");
+        assert_eq!(
+            actual.batch.timeline[0].occurred_at,
+            chrono::Utc.with_ymd_and_hms(2024, 6, 1, 16, 0, 0).unwrap()
+        );
+        assert_eq!(actual.batch.events.len(), 1);
+        assert_eq!(actual.batch.events[0].title, "window");
+        assert!(actual.batch.events[0].ended_at.is_some());
+        assert_eq!(actual.skipped, 3);
     }
 
     #[test]

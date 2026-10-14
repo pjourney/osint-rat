@@ -84,7 +84,11 @@ HTTP(S) can use `network.proxy` (for example `socks5h://127.0.0.1:9050`). DNS an
 
 ## What happens if I collect the same target twice?
 
-The same content hash is treated as the same observation: the source is marked seen again and is not duplicated. A new hash writes an "observation changed" timeline event. A diagnostic that is now `present` clears the earlier gap finding.
+The same content hash is treated as the same observation: the source is marked seen again and is not duplicated. A new hash writes an "observation changed" timeline event and a first-class Event (`change_intelligence=observation_hash`). A diagnostic that is now `present` clears the earlier gap finding and promotes a `diagnostic_clear` Event.
+
+## How do Timeline, nearby, and GeoJSON work?
+
+Timeline overlays collection log rows (`T-n`) and Event objects (`C-n`). Filter with `[` `]` `f`. `l` lists entities that share a country or prefix. `os-int geojson` / `export --format geojson` writes Points and envelope Polygons. Coordinates come from RDAP, Team Cymru, an optional local JSON/MMDB (`collectors.geo_db_path`), or a country centroid (`geo_source` records which). Missing geo databases skip lookups; they do not fail `doctor`. Built-ins never fetch a geo service.
 
 ## Does a playbook write findings by itself?
 

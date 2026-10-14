@@ -16,7 +16,12 @@ pub struct PendingResolve {
 impl App {
     pub fn listed_entities(&self) -> Vec<&Entity> {
         match &self.workspace {
-            Some(workspace) => workspace.visible_entities(),
+            Some(workspace) => {
+                if self.timeline.nearby && self.view == View::Entities {
+                    return self.listed_nearby();
+                }
+                workspace.visible_entities()
+            }
             None => Vec::new(),
         }
     }

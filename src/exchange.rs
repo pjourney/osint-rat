@@ -18,8 +18,9 @@ use crate::storage::Store;
 /// On-disk investigation archive version (`os-int-investigation`).
 ///
 /// Import rejects any archive whose `format_version` is greater than this value.
-/// Version 2 adds `data.resolutions`. Bump rules: `docs/ontology-exchange.md`.
-pub const FORMAT_VERSION: u32 = 2;
+/// Version 3 adds `data.events` (first-class Event objects). Version 2 added
+/// `data.resolutions`. Bump rules: `docs/ontology-exchange.md`.
+pub const FORMAT_VERSION: u32 = 3;
 pub const MANIFEST_NAME: &str = "investigation.osint.json";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -187,6 +188,7 @@ fn reassign_ids(data: &mut InvestigationData) {
     let mut runs = HashMap::new();
     let mut proposals = HashMap::new();
     let mut resolutions = HashMap::new();
+    let mut events = HashMap::new();
     let mut threads = HashMap::new();
     for page in &mut data.pages {
         page.id = next_id(&mut pages, page.id);
@@ -236,6 +238,10 @@ fn reassign_ids(data: &mut InvestigationData) {
     for resolution in &mut data.resolutions {
         resolution.id = next_id(&mut resolutions, resolution.id);
         resolution.investigation_id = new_investigation;
+    }
+    for event in &mut data.events {
+        event.id = next_id(&mut events, event.id);
+        event.investigation_id = new_investigation;
     }
     for page in &mut data.pages {
         page.entity_id = mapped_opt(&entities, page.entity_id);
@@ -287,6 +293,11 @@ fn reassign_ids(data: &mut InvestigationData) {
         resolution.canonical_id = mapped(&entities, resolution.canonical_id);
         remap_uuid_list(&entities, &mut resolution.constituent_ids);
         remap_uuid_list(&sources, &mut resolution.source_writes);
+    }
+    for event in &mut data.events {
+        event.source_id = mapped_opt(&sources, event.source_id);
+        event.page_id = mapped_opt(&pages, event.page_id);
+        remap_uuid_list(&entities, &mut event.entity_ids);
     }
 }
 
@@ -434,8 +445,9 @@ mod tests {
         let text = fs::read_to_string(export_dir.join(MANIFEST_NAME)).expect("manifest");
         let manifest: ArchiveManifest = serde_json::from_str(&text).expect("parse");
         assert_eq!(manifest.format_version, FORMAT_VERSION);
-        assert_eq!(FORMAT_VERSION, 2);
+        assert_eq!(FORMAT_VERSION, 3);
         assert!(manifest.data.resolutions.is_empty());
+        assert!(manifest.data.events.is_empty());
     }
 
     #[test]
@@ -478,7 +490,7 @@ mod tests {
         export_data(&data, directory.path(), &export_dir).expect("export");
         let text = fs::read_to_string(export_dir.join(MANIFEST_NAME)).expect("manifest");
         let manifest: ArchiveManifest = serde_json::from_str(&text).expect("parse");
-        assert_eq!(manifest.format_version, 2);
+        assert_eq!(manifest.format_version, FORMAT_VERSION);
         assert_eq!(manifest.data.resolutions.len(), 1);
         let mut target = Store::open_in_memory().expect("target");
         let paths = crate::paths::AppPaths::new(
@@ -492,6 +504,70 @@ mod tests {
         assert_eq!(imported.resolutions[0].canonical_id, domain);
         assert!(imported.resolutions[0].constituent_ids.contains(&host));
         assert!(imported.is_absorbed(host));
+    }
+
+    #[test]
+    fn export_import_preserves_events_and_rename_remaps_them() {
+        let mut store = Store::open_in_memory().expect("store");
+        let investigation = store.create_investigation("Events", "").expect("created");
+        let ip = store
+            .add_entity(
+                investigation.id,
+                crate::model::EntityKind::Ip,
+                "192.0.2.1",
+                crate::model::Provenance::Collected,
+                None,
+            )
+            .expect("ip");
+        let started = now();
+        store
+            .add_event(
+                investigation.id,
+                crate::model::NewEvent {
+                    started_at: started,
+                    ended_at: Some(started),
+                    kind: crate::model::TimelineKind::Observed,
+                    title: "window".into(),
+                    description: "imported interval".into(),
+                    source: None,
+                    entities: Vec::new(),
+                    fields: crate::model::Fields::new(),
+                },
+                crate::model::Provenance::External,
+                vec![ip],
+            )
+            .expect("event");
+        let data = store.load_investigation(investigation.id).expect("load");
+        assert_eq!(data.events.len(), 1);
+        let directory = tempfile::tempdir().expect("tempdir");
+        let export_dir = directory.path().join("archive");
+        export_data(&data, directory.path(), &export_dir).expect("export");
+        let text = fs::read_to_string(export_dir.join(MANIFEST_NAME)).expect("manifest");
+        let manifest: ArchiveManifest = serde_json::from_str(&text).expect("parse");
+        assert_eq!(manifest.format_version, 3);
+        assert_eq!(manifest.data.events.len(), 1);
+        assert_eq!(manifest.data.events[0].entity_ids, vec![ip]);
+        let mut target = Store::open_in_memory().expect("target");
+        let paths = crate::paths::AppPaths::new(
+            directory.path().join("cfg"),
+            directory.path().join("data"),
+        );
+        paths.ensure_dirs().expect("dirs");
+        let imported =
+            import_investigation(&mut target, &export_dir, &paths, false).expect("import");
+        assert_eq!(imported.events.len(), 1);
+        assert_eq!(imported.events[0].title, "window");
+        assert_eq!(imported.events[0].entity_ids, vec![ip]);
+        let renamed = import_investigation(&mut store, &export_dir, &paths, true).expect("rename");
+        assert_ne!(renamed.investigation.id, investigation.id);
+        assert_ne!(renamed.events[0].id, data.events[0].id);
+        assert_ne!(renamed.events[0].entity_ids[0], ip);
+        assert!(
+            renamed
+                .entities
+                .iter()
+                .any(|entity| entity.id == renamed.events[0].entity_ids[0])
+        );
     }
 
     #[test]

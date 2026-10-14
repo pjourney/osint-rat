@@ -7,6 +7,7 @@ use rusqlite::Connection;
 use uuid::Uuid;
 
 use super::Store;
+use super::events::{EventInsert, entities_for_source, insert_event};
 use super::evidence::{
     FindingSync, NewSourceRecord, PriorObservation, TimelineInsert, clear_collected_finding,
     find_duplicate_source, find_prior_observation, insert_artifact, insert_ingested_finding,
@@ -17,7 +18,9 @@ use super::graph::{
     upsert_entity, upsert_relationship,
 };
 use super::touch_investigation;
-use crate::model::{EntityKey, EvidenceBatch, NewSource, Provenance, TimelineKind, Timestamp};
+use crate::model::{
+    EntityKey, EvidenceBatch, Fields, NewSource, Provenance, TimelineKind, Timestamp,
+};
 
 /// Where a batch is being applied.
 #[derive(Clone, Copy, Debug)]
@@ -105,6 +108,7 @@ pub(crate) fn apply_batch_on(
     let entity_ids = apply_entities(connection, context, batch, &mut summary)?;
     apply_relationships(connection, context, batch, &entity_ids, &mut summary)?;
     apply_timeline(connection, context, batch, &entity_ids, &mut summary)?;
+    apply_events(connection, context, batch, &entity_ids, &mut summary)?;
     apply_observation_changes(connection, context, &changes, &mut summary)?;
     apply_artifacts(connection, context, batch, &mut summary)?;
     apply_diagnostic_findings(connection, context, batch, &mut summary)?;
@@ -207,6 +211,28 @@ fn apply_observation_changes(
             summary.new_events += 1;
             summary.changed_observations += 1;
         }
+        let entity_ids = source_id
+            .map(|id| entities_for_source(connection, id))
+            .transpose()?
+            .unwrap_or_default();
+        let mut fields = Fields::new();
+        fields.set("change_intelligence", "observation_hash");
+        let _ = insert_event(
+            connection,
+            EventInsert {
+                investigation_id: context.investigation_id,
+                started_at: change.occurred_at,
+                ended_at: None,
+                kind: &TimelineKind::Changed,
+                title: &change.title,
+                description: &change.description,
+                provenance: Provenance::Collected,
+                source_id,
+                page_id: context.page_id,
+                fields,
+                entity_ids,
+            },
+        )?;
     }
     Ok(())
 }
@@ -221,6 +247,15 @@ fn apply_diagnostic_findings(
         for title in &batch.resolved_findings {
             if clear_collected_finding(connection, context.investigation_id, title)? {
                 summary.resolved_findings += 1;
+                promote_diagnostic_event(
+                    connection,
+                    context,
+                    title,
+                    "Collected diagnostic no longer applies.",
+                    Provenance::Collected,
+                    None,
+                    "diagnostic_clear",
+                )?;
             }
         }
     }
@@ -250,11 +285,61 @@ fn apply_diagnostic_findings(
             )?
         };
         match sync {
-            FindingSync::Created => summary.new_findings += 1,
+            FindingSync::Created => {
+                summary.new_findings += 1;
+                promote_diagnostic_event(
+                    connection,
+                    context,
+                    &finding.title,
+                    &finding.details,
+                    finding.provenance,
+                    source_ids.first().copied(),
+                    "diagnostic_open",
+                )?;
+            }
             FindingSync::Updated => summary.updated_findings += 1,
             FindingSync::LeftAlone => {}
         }
     }
+    Ok(())
+}
+
+fn promote_diagnostic_event(
+    connection: &Connection,
+    context: ApplyContext,
+    title: &str,
+    details: &str,
+    provenance: Provenance,
+    source_id: Option<Uuid>,
+    flip: &str,
+) -> rusqlite::Result<()> {
+    let entity_ids = source_id
+        .map(|id| entities_for_source(connection, id))
+        .transpose()?
+        .unwrap_or_default();
+    let mut fields = Fields::new();
+    fields.set("change_intelligence", flip);
+    let event_title = match flip {
+        "diagnostic_clear" => format!("{title} cleared"),
+        "diagnostic_open" => format!("{title} opened"),
+        other => format!("{title} {other}"),
+    };
+    let _ = insert_event(
+        connection,
+        EventInsert {
+            investigation_id: context.investigation_id,
+            started_at: crate::model::now(),
+            ended_at: None,
+            kind: &TimelineKind::Finding,
+            title: &event_title,
+            description: details,
+            provenance,
+            source_id,
+            page_id: context.page_id,
+            fields,
+            entity_ids,
+        },
+    )?;
     Ok(())
 }
 
@@ -368,6 +453,49 @@ fn apply_timeline(
                 source_id,
                 entity_id,
                 page_id: context.page_id,
+            },
+        )?;
+        if inserted {
+            summary.new_events += 1;
+        }
+    }
+    Ok(())
+}
+
+fn apply_events(
+    connection: &Connection,
+    context: ApplyContext,
+    batch: &EvidenceBatch,
+    entity_ids: &HashMap<EntityKey, Uuid>,
+    summary: &mut ApplySummary,
+) -> rusqlite::Result<()> {
+    for event in &batch.events {
+        let source_id = event
+            .source
+            .and_then(|key| summary.source_ids.get(key).copied());
+        let provenance = event
+            .source
+            .and_then(|key| batch.sources.get(key))
+            .map(|source| source.provenance)
+            .unwrap_or(Provenance::Collected);
+        let mut linked = Vec::new();
+        for key in &event.entities {
+            linked.push(resolve_entity(connection, context, entity_ids, key)?);
+        }
+        let inserted = insert_event(
+            connection,
+            EventInsert {
+                investigation_id: context.investigation_id,
+                started_at: event.started_at,
+                ended_at: event.ended_at,
+                kind: &event.kind,
+                title: &event.title,
+                description: &event.description,
+                provenance,
+                source_id,
+                page_id: context.page_id,
+                fields: event.fields.clone(),
+                entity_ids: linked,
             },
         )?;
         if inserted {

@@ -183,11 +183,15 @@ impl AgentAction {
     }
 
     /// Identity used to dedupe pending proposals: action name plus title/body.
+    /// Watch `AddFinding` notices include a change digest in `details` so a later
+    /// distinct change with the same observation count opens a new pending Action.
     pub fn identity_key(&self) -> (String, String) {
         let name = self.name().to_string();
         let body = match self {
-            AgentAction::AddFinding { title, details, .. }
-            | AgentAction::AssertFindingTemplate { title, details } => {
+            AgentAction::AddFinding { title, details, .. } => {
+                format!("{title}\n{details}")
+            }
+            AgentAction::AssertFindingTemplate { title, details } => {
                 format!("{title}\n{details}")
             }
             AgentAction::AddNote { body } => body.clone(),

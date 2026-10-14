@@ -2,7 +2,7 @@
 
 os-int keeps structured records in one SQLite file, `os-int.sqlite3`, in the data directory. Raw HTTP bodies, reports, agent context packs, and repository clones live as files under `investigations/<uuid>/` and are referenced by a relative path. `os-int config` prints both locations.
 
-This page is the map of those tables. The column list that ships starts at `V1` in [`src/storage/migrations.rs`](../src/storage/migrations.rs). `V2` adds Action audit (`proposals.decided_by`) and the per-investigation `link_types` catalog. `V3` adds `resolutions` (canonical + constituents, reversible property/source writes). `V4` adds `playbook_runs` and `automations` (local workbench rows; not exported). Migrations are append-only: add a new version, and do not edit a migration that has already shipped.
+This page is the map of those tables. The column list that ships starts at `V1` in [`src/storage/migrations.rs`](../src/storage/migrations.rs). `V2` adds Action audit (`proposals.decided_by`) and the per-investigation `link_types` catalog. `V3` adds `resolutions` (canonical + constituents, reversible property/source writes). `V4` adds `playbook_runs` and `automations` (local workbench rows; not exported). `V5` adds `events` and `event_entities` (first-class instants and intervals). Migrations are append-only: add a new version, and do not edit a migration that has already shipped.
 
 Every investigation-scoped table has:
 
@@ -30,7 +30,9 @@ Every investigation-scoped table has:
 | `page_entities` | Entities that appear on a page. |
 | `notes` | A standalone note with its own provenance. Page notes are the `notes` column on `pages`, not a row here. |
 | `artifacts` | A file in the investigation directory: kind, relative path, MIME type, size, SHA-256. |
-| `timeline_events` | Something that happened at `occurred_at` (a registration date, a certificate expiry, an observation change). |
+| `timeline_events` | Something that happened at `occurred_at` (a registration date, a certificate expiry, an observation change). Short ref `T-n`. |
+| `events` | First-class Event objects: `started_at`, optional `ended_at`, kind, title, provenance, fields. Unique on `(investigation_id, kind, started_at, title)`. Short ref `C-n`. |
+| `event_entities` | Entities linked to an Event. |
 | `jobs` | One background task: collector, tool, agent call, or report. Arguments stored here are redacted. |
 | `agent_runs` | One question and the agent's response, including the thread id used for follow-ups. |
 | `proposals` | One structured action an agent suggested. `status` stays pending until you accept or reject it. `decided_at` / `decided_by` record who and when (local user for now). |
@@ -48,7 +50,8 @@ Collectors, file ingest, and external sidecars do not write these tables. They r
 2. Upsert entities on `(kind, canonical value)` and attach them to the page.
 3. Upsert relationships on `(from, kind, to)` and record the supporting source.
 4. Sync collected findings: a `missing` or `review` diagnostic is stored, and a later `present` reading clears that finding.
-5. When the content hash of a prior observation changed, insert a timeline event of kind `changed`.
+5. When the content hash of a prior observation changed, insert a timeline log row of kind `changed` and a first-class Event with `change_intelligence=observation_hash`. New collected diagnostics and clears also promote Events (`diagnostic_open` / `diagnostic_clear`).
+6. Insert batch `events` (instants or intervals) and link `event_entities`.
 
 ## Provenance and confidence
 
@@ -62,7 +65,7 @@ Search Around does not add a table. `Store::search_around` loads the investigati
 
 `os-int export` writes `investigation.osint.json` plus a `files/` tree. The JSON document's `data` object is the same shape as `InvestigationData`: the investigation and the rows above, with paths still relative. Import rejects an archive whose investigation id is already present unless you pass `--rename`.
 
-Format name: `os-int-investigation`. Format version: `2` (`exchange::FORMAT_VERSION`). Version 2 adds `data.resolutions`. `proposals.decided_by` and `resolutions` are optional (`#[serde(default)]`); version-1 archives still import (empty resolution list). File ingest uses a **separate** envelope (`os-int-evidence-batch`, `format_version` 1) and does not bump the archive version. Playbook YAML uses a third envelope (`os-int-playbook`, `format_version` 1); `playbook_runs` / `automations` stay local like `ui_state` and do not bump the archive version. Timeline kind `playbook_run` is an additive open-enum key. Field list, EvidenceBatch ingest shape, reserved later-version keys, and bump rules: [Ontology Exchange Format](ontology-exchange.md). Connectors: [connectors.md](connectors.md). Object types and link verbs: [Ontology](ontology.md). Playbooks: [playbooks.md](playbooks.md).
+Format name: `os-int-investigation`. Format version: `3` (`exchange::FORMAT_VERSION`). Version 2 added `data.resolutions`. Version 3 adds `data.events`. `proposals.decided_by`, `resolutions`, and `events` are optional (`#[serde(default)]`); version-1 and version-2 archives still import. `--rename` remaps Event UUIDs and `entity_ids`. File ingest uses a **separate** envelope (`os-int-evidence-batch`, `format_version` 1) and does not bump the archive version. Optional batch `events` is additive. Playbook YAML uses a third envelope (`os-int-playbook`, `format_version` 1); `playbook_runs` / `automations` stay local like `ui_state` and do not bump the archive version. Timeline kind `playbook_run` is an additive open-enum key. Field list, EvidenceBatch ingest shape, reserved later-version keys, and bump rules: [Ontology Exchange Format](ontology-exchange.md). Connectors: [connectors.md](connectors.md). Object types and link verbs: [Ontology](ontology.md). Playbooks: [playbooks.md](playbooks.md). GeoJSON is a separate export (`os-int export --format geojson` or `os-int geojson`), not this archive.
 
 ## See also
 

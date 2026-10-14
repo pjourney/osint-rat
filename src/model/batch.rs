@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::artifact::ArtifactKind;
 use super::common::{Confidence, Fields, Provenance, Timestamp, now};
 use super::entity::EntityKind;
+use super::event::NewEvent;
 use super::source::SourceKind;
 use super::timeline::TimelineKind;
 
@@ -121,6 +122,9 @@ pub struct EvidenceBatch {
     pub relationships: Vec<NewRelationship>,
     #[serde(default)]
     pub timeline: Vec<NewTimelineEvent>,
+    /// First-class Event objects (intervals or instants). Optional; down-level batches omit it.
+    #[serde(default)]
+    pub events: Vec<NewEvent>,
     #[serde(default)]
     pub artifacts: Vec<NewArtifact>,
     /// Findings to store. Built-in diagnostics use `Collected` and the upsert/clear path.
@@ -297,14 +301,22 @@ impl EvidenceBatch {
         source: Option<SourceKey>,
         entity: Option<EntityKey>,
     ) {
+        let title = title.into();
         self.timeline.push(NewTimelineEvent {
             occurred_at,
-            kind,
-            title: title.into(),
+            kind: kind.clone(),
+            title: title.clone(),
             description: String::new(),
             source,
-            entity,
+            entity: entity.clone(),
         });
+        self.events
+            .push(NewEvent::instant(occurred_at, kind, title, source, entity));
+    }
+
+    /// Adds a first-class Event (instant or interval) without a duplicate timeline log row.
+    pub fn case_event(&mut self, event: NewEvent) {
+        self.events.push(event);
     }
 
     /// Merges another batch into this one, re-indexing its source keys.
@@ -341,6 +353,10 @@ impl EvidenceBatch {
             event.source = event.source.map(|key| key + offset);
             self.timeline.push(event);
         }
+        for mut event in other.events {
+            event.source = event.source.map(|key| key + offset);
+            self.events.push(event);
+        }
         for mut artifact in other.artifacts {
             artifact.source = artifact.source.map(|key| key + offset);
             self.artifacts.push(artifact);
@@ -370,7 +386,10 @@ impl EvidenceBatch {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.sources.is_empty() && self.entities.is_empty() && self.timeline.is_empty()
+        self.sources.is_empty()
+            && self.entities.is_empty()
+            && self.timeline.is_empty()
+            && self.events.is_empty()
     }
 }
 

@@ -1,0 +1,38 @@
+{
+  "format": "os-int-evidence-batch",
+  "format_version": 1,
+  "batch": {
+    "sources": [
+      {
+        "kind": "document",
+        "title": "imported interval",
+        "content": "two addresses seen together"
+      }
+    ],
+    "entities": [
+      { "kind": "ip", "value": "192.0.2.1", "fields": { "country": "US", "prefix": "192.0.2.0/24", "latitude": "38.0", "longitude": "-97.0" } },
+      { "kind": "ip", "value": "192.0.2.8", "fields": { "country": "US" } }
+    ],
+    "events": [
+      {
+        "started_at": "2024-05-01T12:00:00Z",
+        "ended_at": "2024-05-01T18:00:00Z",
+        "kind": "observed",
+        "title": "joint window",
+        "source": 0,
+        "entities": [
+          { "kind": "ip", "value": "192.0.2.1" },
+          { "kind": "ip", "value": "192.0.2.8" }
+        ]
+      }
+    ],
+    "timeline": [
+      {
+        "occurred_at": "2024-05-01T12:30:00Z",
+        "kind": "observed",
+        "title": "collected sighting",
+        "entity": { "kind": "ip", "value": "192.0.2.1" }
+      }
+    ]
+  }
+}

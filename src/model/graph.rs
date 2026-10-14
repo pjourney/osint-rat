@@ -832,6 +832,7 @@ mod tests {
             proposals: Vec::new(),
             page_entities: Vec::new(),
             resolutions: Vec::new(),
+            events: Vec::new(),
         };
         (data, domain, ip, nameserver, asn, ns_ip, isolated)
     }
@@ -1069,6 +1070,7 @@ mod tests {
             proposals: Vec::new(),
             page_entities: Vec::new(),
             resolutions: Vec::new(),
+            events: Vec::new(),
         };
         let one = search_around(&data, &SearchAroundQuery::new(vec![domain.id], 1));
         assert_eq!(one.nodes.len(), 3);
@@ -1105,6 +1107,7 @@ mod tests {
             proposals: Vec::new(),
             page_entities: Vec::new(),
             resolutions: Vec::new(),
+            events: Vec::new(),
         };
         let one = search_around(&data, &SearchAroundQuery::new(vec![alpha.id], 1));
         assert_eq!(one.nodes.len(), 3);
@@ -1143,6 +1146,7 @@ mod tests {
             proposals: Vec::new(),
             page_entities: Vec::new(),
             resolutions: Vec::new(),
+            events: Vec::new(),
         };
         let mut query = SearchAroundQuery::new(vec![domain.id], 2);
         query.link_types = vec!["resolves_to".into()];
@@ -1207,6 +1211,7 @@ mod tests {
                 property_writes: Vec::new(),
                 source_writes: Vec::new(),
             }],
+            events: Vec::new(),
         };
         data.investigation.id = domain.investigation_id;
         let result = search_around(&data, &SearchAroundQuery::new(vec![domain.id], 1));

@@ -7,7 +7,6 @@ use std::net::IpAddr;
 use std::path::Path;
 use std::time::Duration;
 
-use chrono::{DateTime, NaiveDateTime, Utc};
 use futures::future::BoxFuture;
 use serde_json::Value;
 use url::Url;
@@ -375,6 +374,8 @@ pub struct RdapSummary {
     pub country: Option<String>,
     pub network_type: Option<String>,
     pub parent_handle: Option<String>,
+    pub latitude: Option<String>,
+    pub longitude: Option<String>,
 }
 
 fn text(value: &Value, key: &str) -> Option<String> {
@@ -432,7 +433,23 @@ pub fn parse_rdap(json: &Value) -> RdapSummary {
         .and_then(|secure| secure.get("delegationSigned"))
         .and_then(Value::as_bool);
     collect_contacts(json.get("entities"), &mut summary.contacts, 0);
+    if let Some((latitude, longitude)) = rdap_coordinates(json) {
+        summary.latitude = Some(latitude);
+        summary.longitude = Some(longitude);
+    }
     summary
+}
+
+fn rdap_coordinates(json: &Value) -> Option<(String, String)> {
+    let latitude = json
+        .get("latitude")
+        .and_then(crate::model::parse_latitude_json)
+        .or_else(|| json.get("lat").and_then(crate::model::parse_latitude_json))?;
+    let longitude = json
+        .get("longitude")
+        .and_then(crate::model::parse_longitude_json)
+        .or_else(|| json.get("lon").and_then(crate::model::parse_longitude_json))?;
+    Some((latitude.to_string(), longitude.to_string()))
 }
 
 fn parse_events(value: Option<&Value>) -> Vec<(String, Timestamp)> {
@@ -452,21 +469,7 @@ fn parse_events(value: Option<&Value>) -> Vec<(String, Timestamp)> {
 }
 
 pub fn parse_date(value: &str) -> Option<Timestamp> {
-    let value = value.trim();
-    if let Ok(parsed) = DateTime::parse_from_rfc3339(value) {
-        return Some(parsed.with_timezone(&Utc));
-    }
-    if let Ok(date) = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d") {
-        return date.and_hms_opt(0, 0, 0).map(|naive| naive.and_utc());
-    }
-    [
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S%.f",
-        "%Y-%m-%d %H:%M:%S",
-    ]
-    .iter()
-    .find_map(|format| NaiveDateTime::parse_from_str(value, format).ok())
-    .map(|naive| naive.and_utc())
+    crate::model::parse_timestamp_untrusted(value)
 }
 
 fn collect_contacts(value: Option<&Value>, contacts: &mut Vec<RdapContact>, depth: usize) {
@@ -521,6 +524,7 @@ fn apply_vcard(value: Option<&Value>, contact: &mut RdapContact) {
             "org" => contact.organization = Some(value),
             "email" => contact.email = Some(value.to_ascii_lowercase()),
             "adr" => contact.country = vcard_country(property).or(contact.country.take()),
+            "geo" => {}
             _ => {}
         }
     }
@@ -692,6 +696,36 @@ pub fn build_batch(
     {
         batch.annotate(&subject, "network_name", name.clone());
     }
+    if let Some(country) = summary
+        .country
+        .as_deref()
+        .or_else(|| {
+            summary
+                .contacts
+                .iter()
+                .find_map(|contact| contact.country.as_deref())
+        })
+        .and_then(crate::model::normalize_country)
+    {
+        batch.annotate(&subject, "country", country);
+    }
+    if let (Some(latitude), Some(longitude)) = (&summary.latitude, &summary.longitude)
+        && crate::model::parse_latitude(latitude).is_some()
+        && crate::model::parse_longitude(longitude).is_some()
+    {
+        batch.annotate(&subject, "latitude", latitude.clone());
+        batch.annotate(&subject, "longitude", longitude.clone());
+        batch.annotate(&subject, "geo_source", "collected");
+    } else if let Some(country) = summary
+        .country
+        .as_deref()
+        .and_then(crate::model::normalize_country)
+        && let Some(point) = crate::model::country_centroid(&country)
+    {
+        batch.annotate(&subject, "latitude", format!("{:.6}", point.latitude));
+        batch.annotate(&subject, "longitude", format!("{:.6}", point.longitude));
+        batch.annotate(&subject, "geo_source", "country_centroid");
+    }
     for (action, date) in &summary.events {
         if let Some(kind) = timeline_kind(action) {
             let title = format!("{} {} ({})", target.value(), action, "RDAP");
@@ -730,6 +764,13 @@ fn relate_contacts(
         let organization = batch.entity(EntityKind::Organization, name, Some(key));
         if let Some(email) = &contact.email {
             batch.annotate(&organization, "email", email.clone());
+        }
+        if let Some(country) = contact
+            .country
+            .as_deref()
+            .and_then(crate::model::normalize_country)
+        {
+            batch.annotate(&organization, "country", country);
         }
         batch.relate(subject, relationship, &organization, Some(key));
     }
@@ -895,5 +936,16 @@ mod tests {
         assert!(parse_date("2020-01-02T03:04:05+02:00").is_some());
         assert!(parse_date("2011-08-11").is_some());
         assert!(parse_date("yesterday").is_none());
+        assert!(parse_date("NaN").is_none());
+        assert!(parse_date("").is_none());
+        assert!(parse_date("2024-13-40").is_none());
+    }
+
+    #[test]
+    fn nan_coordinates_are_refused() {
+        let json = serde_json::json!({"latitude": "NaN", "longitude": 0.0});
+        assert!(super::rdap_coordinates(&json).is_none());
+        let json = serde_json::json!({"lat": 91.0, "lon": 10.0});
+        assert!(super::rdap_coordinates(&json).is_none());
     }
 }

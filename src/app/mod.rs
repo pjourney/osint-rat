@@ -12,6 +12,7 @@ pub mod commands;
 pub mod graph;
 pub mod input;
 pub mod resolution;
+pub mod timeline;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -24,6 +25,7 @@ pub use action::Action;
 pub use graph::GraphState;
 pub use input::Input;
 pub use resolution::PendingResolve;
+pub use timeline::TimelineState;
 
 use crate::agent::{AgentContext, AgentRequest, AgentStatus, ContextFocus, run_agent};
 use crate::collectors::tool::run_tool;
@@ -257,6 +259,7 @@ pub struct App {
     pub agent_thread: Option<Uuid>,
     pub object_return_view: Option<View>,
     pub graph: GraphState,
+    pub timeline: TimelineState,
     pub merge_marks: Vec<Uuid>,
     pub pending_resolve: Option<PendingResolve>,
     pub pending_unresolve: Option<Uuid>,
@@ -307,6 +310,7 @@ impl App {
             agent_thread: None,
             object_return_view: None,
             graph: GraphState::default(),
+            timeline: TimelineState::default(),
             merge_marks: Vec::new(),
             pending_resolve: None,
             pending_unresolve: None,
@@ -591,6 +595,10 @@ impl App {
             Action::GraphFacetMove(delta) => self.move_graph_facet(delta),
             Action::GraphApplyFacet => self.apply_graph_facet(),
             Action::GraphClearFilters => self.clear_graph_filters(),
+            Action::TimelineFacetMove(delta) => self.move_timeline_facet(delta),
+            Action::TimelineApplyFilter => self.apply_timeline_filter(),
+            Action::TimelineClearFilter => self.clear_timeline_filter(),
+            Action::ToggleNearby => self.toggle_nearby(),
             Action::ToggleMergeMark
             | Action::ProposeMerge
             | Action::Unresolve
@@ -637,6 +645,9 @@ impl App {
                 }
                 if self.view == View::Graph {
                     self.close_graph();
+                    return;
+                }
+                if self.cancel_timeline_mode() {
                     return;
                 }
                 if self.view != View::Welcome && self.workspace.is_none() {
@@ -687,6 +698,10 @@ impl App {
             return;
         }
         self.merge_marks.clear();
+        if !matches!(view, View::Timeline | View::Entities) {
+            self.timeline.nearby = false;
+            self.timeline.nearby_seed_id = None;
+        }
         if view == View::Graph {
             self.open_graph();
             return;
@@ -764,6 +779,11 @@ impl App {
                     self.scroll = add_scroll(self.scroll, delta);
                 } else if self.view == View::Graph {
                     self.move_graph_selection(delta);
+                } else if self.view == View::Timeline {
+                    let count = self.timeline_list_len().max(1);
+                    self.selected =
+                        (self.selected as i32 + delta).rem_euclid(count as i32) as usize;
+                    self.sync_timeline_selection();
                 } else {
                     self.selected = (self.selected as i32 + delta).max(0) as usize;
                 }
@@ -847,6 +867,7 @@ impl App {
                 }
             }
             View::Graph => self.open_selected_graph_node(),
+            View::Timeline => self.select_timeline_row(),
             View::Findings => {
                 if let Some(finding) = workspace.data.findings.get(self.selected) {
                     self.finding_id = Some(finding.id);
@@ -1265,6 +1286,7 @@ impl App {
             "open_sources" => self.switch_view(View::Sources),
             "open_findings" => self.switch_view(View::Findings),
             "open_timeline" => self.switch_view(View::Timeline),
+            "toggle_nearby" => self.toggle_nearby(),
             "open_jobs" => self.switch_view(View::Jobs),
             "open_tools" => self.switch_view(View::Tools),
             "open_agent" => self.switch_view(View::Agent),
@@ -2177,6 +2199,16 @@ impl App {
             .position(|(_, candidate)| *candidate == self.view)
         {
             self.nav_index = index;
+        }
+        if self.view == View::Timeline {
+            self.restore_timeline_selection();
+        } else if self.view == View::Entities
+            && let Some(id) = self.entity_id
+        {
+            let listed = self.listed_entities();
+            if let Some(index) = listed.iter().position(|entity| entity.id == id) {
+                self.selected = index;
+            }
         }
         let _ = self.save_session();
     }
@@ -4381,5 +4413,138 @@ mod tests {
         let workspace = app.workspace.as_ref().expect("workspace");
         assert!(workspace.data.sources.is_empty());
         assert!(workspace.data.proposals.is_empty());
+    }
+
+    fn seed_temporal_geo(app: &mut App) {
+        create_named_investigation(app, "Temporal");
+        create_page(app, "192.0.2.1", "ip", "192.0.2.1");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let page_id = app.workspace.as_ref().expect("workspace").data.pages[0].id;
+        let mut batch = crate::model::EvidenceBatch::new();
+        let source = crate::model::NewSource::collected(
+            crate::model::SourceKind::IpIntel,
+            "ip",
+            "IP intelligence",
+        );
+        let key = batch.add_source(source);
+        let alpha = batch.entity(crate::model::EntityKind::Ip, "192.0.2.1", Some(key));
+        let beta = batch.entity(crate::model::EntityKind::Ip, "192.0.2.8", Some(key));
+        let asn = batch.entity(crate::model::EntityKind::Asn, "AS64496", Some(key));
+        batch.annotate(&alpha, "country", "US");
+        batch.annotate(&alpha, "prefix", "192.0.2.0/24");
+        batch.annotate(&alpha, "latitude", "38.0");
+        batch.annotate(&alpha, "longitude", "-97.0");
+        batch.annotate(&alpha, "geo_source", "collected");
+        batch.annotate(&beta, "country", "US");
+        batch.annotate(&asn, "prefix", "192.0.2.0/24");
+        let started = crate::model::now();
+        batch.event(
+            started,
+            crate::model::TimelineKind::Registration,
+            "collected",
+            Some(key),
+            Some(alpha.clone()),
+        );
+        batch.case_event(crate::model::NewEvent {
+            started_at: started,
+            ended_at: Some(started + chrono::Duration::hours(2)),
+            kind: crate::model::TimelineKind::Observed,
+            title: "imported".to_string(),
+            description: String::new(),
+            source: Some(key),
+            entities: vec![beta.clone()],
+            fields: crate::model::Fields::new(),
+        });
+        app.store
+            .apply_batch(
+                crate::storage::ApplyContext {
+                    investigation_id,
+                    page_id: Some(page_id),
+                    job_id: None,
+                },
+                &batch,
+            )
+            .expect("apply");
+        app.reload().expect("reload");
+    }
+
+    #[test]
+    fn timeline_overlay_filters_and_enter_esc_restore() {
+        let (_directory, mut app) = test_app();
+        seed_temporal_geo(&mut app);
+        app.dispatch(Action::OpenTimeline).expect("timeline");
+        app.pane = Pane::Main;
+        let rows = app.listed_timeline_rows();
+        assert!(rows.iter().any(|row| row.title == "collected"));
+        assert!(
+            rows.iter()
+                .any(|row| row.title == "imported" && row.ended_at.is_some())
+        );
+        assert!(rows.len() >= 2);
+        let collected = rows
+            .iter()
+            .position(|row| row.title == "collected")
+            .expect("collected row");
+        app.selected = collected;
+        app.sync_timeline_selection();
+        app.dispatch(Action::Select).expect("enter");
+        assert_eq!(app.view, View::Object);
+        app.dispatch(Action::Back).expect("esc");
+        assert_eq!(app.view, View::Timeline);
+        assert_eq!(app.selected, collected);
+        let candidates = app.timeline_filter_candidates();
+        assert!(!candidates.is_empty());
+        app.timeline.facet_index = 0;
+        app.dispatch(Action::TimelineApplyFilter).expect("filter");
+        assert!(app.timeline.filter_entity_id.is_some());
+        assert!(!app.listed_timeline_rows().is_empty());
+        app.dispatch(Action::Back).expect("clear filter");
+        assert!(app.timeline.filter_entity_id.is_none());
+    }
+
+    #[test]
+    fn nearby_and_empty_timeline_do_not_stale_selection() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Empty");
+        app.dispatch(Action::OpenTimeline).expect("timeline");
+        app.pane = Pane::Main;
+        app.dispatch(Action::Select).expect("enter empty");
+        assert_eq!(app.view, View::Timeline);
+        app.dispatch(Action::ToggleNearby).expect("nearby empty");
+        assert!(!app.timeline.nearby);
+        seed_temporal_geo(&mut app);
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = Pane::Main;
+        let ip_index = app
+            .listed_entities()
+            .iter()
+            .position(|entity| entity.value == "192.0.2.1")
+            .expect("ip");
+        app.selected = ip_index;
+        app.dispatch(Action::ToggleNearby).expect("nearby");
+        assert!(app.timeline.nearby);
+        assert!(
+            app.listed_nearby()
+                .iter()
+                .any(|entity| entity.value == "192.0.2.8" || entity.value == "AS64496")
+        );
+        app.dispatch(Action::Back).expect("esc nearby");
+        assert!(!app.timeline.nearby);
+        assert_eq!(app.selected, ip_index);
+        let collection =
+            crate::model::geojson_collection(&app.workspace.as_ref().expect("workspace").data);
+        assert!(collection.features.iter().any(|feature| {
+            feature
+                .geometry
+                .as_ref()
+                .is_some_and(|geometry| geometry.geometry_type == "Point")
+        }));
+        assert!(collection.features.iter().any(|feature| {
+            feature
+                .properties
+                .get("prefix")
+                .and_then(|value| value.as_str())
+                == Some("192.0.2.0/24")
+        }));
     }
 }

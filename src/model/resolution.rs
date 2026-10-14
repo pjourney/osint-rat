@@ -152,6 +152,14 @@ impl InvestigationData {
         self.canonical_id(entity_id) != entity_id
     }
 
+    /// Canonical plus every absorbed constituent. Used by Timeline filter and co-occurrence.
+    pub fn member_ids_of(&self, entity_id: Uuid) -> Vec<Uuid> {
+        let canonical = self.canonical_id(entity_id);
+        let mut ids = vec![canonical];
+        ids.extend(self.constituent_ids_of(canonical));
+        ids
+    }
+
     pub fn constituent_ids_of(&self, canonical_id: Uuid) -> Vec<Uuid> {
         let mut ids = Vec::new();
         let mut seen = HashSet::new();

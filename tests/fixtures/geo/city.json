@@ -1,0 +1,16 @@
+{
+  "records": [
+    {
+      "network": "192.0.2.0/24",
+      "country": "US",
+      "latitude": 38.0,
+      "longitude": -97.0
+    },
+    {
+      "network": "198.51.100.0/24",
+      "country": "AU",
+      "latitude": "NaN",
+      "longitude": 133.0
+    }
+  ]
+}
