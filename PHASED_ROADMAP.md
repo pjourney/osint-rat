@@ -23,7 +23,7 @@
 | 5 | Playbooks & automations | Done ([#9](https://github.com/pjourney/osint-rat/pull/9)) |
 | 6 | Temporal & geospatial | Done ([#10](https://github.com/pjourney/osint-rat/pull/10)) |
 | 7 | Team, markings & audit | Done ([#11](https://github.com/pjourney/osint-rat/pull/11)) |
-| 8 | Scale, API & STIX | In progress |
+| 8 | Scale, API & STIX | In progress ([#12](https://github.com/pjourney/osint-rat/pull/12)) |
 | 9 | Distribution, demos & open platform | Not started |
 
 ---

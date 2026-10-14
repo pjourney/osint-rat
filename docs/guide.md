@@ -546,7 +546,7 @@ The directory contains `investigation.osint.json` (format `os-int-investigation`
 
 ## HTTP API and scriptable CLI
 
-`os-int serve` binds **`127.0.0.1:8743`** by default and requires a Bearer token for `/v1/…` routes. It serves Object View JSON and accepts Action **proposals** only. Details: [api.md](api.md). Scale limits: [scale.md](scale.md).
+`os-int serve` binds **`127.0.0.1:8743`** by default and requires a Bearer token for `/v1/…` routes. A non-loopback bind is refused unless you pass `--allow-non-loopback`. It serves Object View JSON and accepts Action **proposals** only. Details: [api.md](api.md). Scale limits: [scale.md](scale.md).
 
 ```bash
 os-int get "Example Corp" E-1

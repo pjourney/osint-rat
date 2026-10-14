@@ -1,13 +1,16 @@
 //! STIX 2.1 bundle import (subset: indicator, observed-data, malware, identity,
 //! cyber observables, relationship).
 
+use std::collections::HashMap;
+
 use serde_json::Value;
 
+use super::stix_export::marking_from_stix_id;
 use super::{IngestError, IngestReport, MAX_OBJECTS};
 use crate::files::sha256_hex;
 use crate::model::{
-    Confidence, EntityKey, EntityKind, EvidenceBatch, Fields, NewEvent, NewSource, SourceKind,
-    TimelineKind, parse_timestamp_untrusted, relation,
+    Confidence, EntityKey, EntityKind, EvidenceBatch, Fields, Marking, NewEvent, NewSource,
+    OBJECT_MARKING_FIELD, SourceKind, TimelineKind, parse_timestamp_untrusted, relation,
 };
 use crate::sanitize::{sanitize_line, sanitize_text};
 
@@ -35,6 +38,7 @@ pub fn parse_stix(text: &str, origin: &str) -> Result<IngestReport, IngestError>
         .push("object_count", objects.len().to_string());
     let key = report.batch.add_source(source);
     let mut id_to_key: Vec<(String, EntityKey)> = Vec::new();
+    let marking_defs = collect_marking_definitions(&objects);
     if objects.len() > MAX_OBJECTS {
         report.skipped += objects.len() - MAX_OBJECTS;
         report
@@ -63,6 +67,9 @@ pub fn parse_stix(text: &str, origin: &str) -> Result<IngestReport, IngestError>
                     .push(format!("skipped STIX object type {other}"));
             }
         }
+    }
+    for object in objects.iter().take(MAX_OBJECTS) {
+        apply_imported_marking(object, &marking_defs, &id_to_key, &mut report);
     }
     for object in objects.iter().take(MAX_OBJECTS) {
         if object.get("type").and_then(Value::as_str) == Some("relationship") {
@@ -278,6 +285,90 @@ fn ingest_relationship(
         .filter(|value| !value.is_empty())
         .unwrap_or(mapped);
     report.batch.relate(&from, kind, &to, Some(source));
+}
+
+fn collect_marking_definitions(objects: &[&Value]) -> HashMap<String, Marking> {
+    let mut defs = HashMap::new();
+    for object in objects.iter().take(MAX_OBJECTS) {
+        if object.get("type").and_then(Value::as_str) != Some("marking-definition") {
+            continue;
+        }
+        let Some(id) = string(object, "id") else {
+            continue;
+        };
+        if let Some(marking) = parse_marking_definition(object) {
+            defs.insert(id, marking);
+        }
+    }
+    defs
+}
+
+fn parse_marking_definition(object: &Value) -> Option<Marking> {
+    if let Some(custom) = string(object, "x_osint_marking")
+        && let Ok(parsed) = Marking::parse(&custom)
+    {
+        return Some(parsed);
+    }
+    if let Some(id) = string(object, "id")
+        && let Some(marking) = marking_from_stix_id(&id)
+    {
+        return Some(marking);
+    }
+    let definition = object.get("definition")?;
+    if let Some(tlp) = definition.get("tlp").and_then(Value::as_str) {
+        return Marking::parse(tlp).ok();
+    }
+    if let Some(statement) = definition.get("statement").and_then(Value::as_str) {
+        return Marking::parse(statement).ok();
+    }
+    object
+        .get("name")
+        .and_then(Value::as_str)
+        .and_then(|name| Marking::parse(name).ok())
+}
+
+fn marking_from_refs(object: &Value, defs: &HashMap<String, Marking>) -> Marking {
+    let mut marking = Marking::Unmarked;
+    if let Some(custom) = string(object, "x_osint_marking")
+        && let Ok(parsed) = Marking::parse(&custom)
+    {
+        marking = marking.restrict(parsed);
+    }
+    let Some(refs) = object.get("object_marking_refs").and_then(Value::as_array) else {
+        return marking;
+    };
+    for value in refs {
+        let Some(id) = value.as_str() else {
+            continue;
+        };
+        if let Some(&def) = defs.get(id) {
+            marking = marking.restrict(def);
+        } else if let Some(from_id) = marking_from_stix_id(id) {
+            marking = marking.restrict(from_id);
+        }
+    }
+    marking
+}
+
+fn apply_imported_marking(
+    object: &Value,
+    defs: &HashMap<String, Marking>,
+    ids: &[(String, EntityKey)],
+    report: &mut IngestReport,
+) {
+    let Some(stix_id) = string(object, "id") else {
+        return;
+    };
+    let Some(key) = lookup(ids, &stix_id) else {
+        return;
+    };
+    let marking = marking_from_refs(object, defs);
+    if marking == Marking::Unmarked {
+        return;
+    }
+    report
+        .batch
+        .annotate(&key, OBJECT_MARKING_FIELD, marking.as_str());
 }
 
 fn ingest_top_level_sco(

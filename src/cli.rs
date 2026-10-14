@@ -282,6 +282,9 @@ pub enum Command {
         /// Bearer token. Defaults to `[api].token`, then `OS_INT_API_TOKEN`, then an ephemeral token.
         #[arg(long, env = "OS_INT_API_TOKEN")]
         token: Option<String>,
+        /// Allow binding to a non-loopback address. Refused by default.
+        #[arg(long)]
+        allow_non_loopback: bool,
     },
     /// Measure load/query times for synthetic graphs (1k / 10k / 100k).
     Bench {
@@ -575,7 +578,8 @@ pub async fn run_with(cli: Cli) -> Result<()> {
         Some(Command::Serve {
             ref bind,
             ref token,
-        }) => serve_command(&cli, bind.as_deref(), token.as_deref()).await,
+            allow_non_loopback,
+        }) => serve_command(&cli, bind.as_deref(), token.as_deref(), allow_non_loopback).await,
         Some(Command::Bench { ref sizes }) => bench_command(&cli, sizes.as_deref()),
     }
 }
@@ -1445,7 +1449,7 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
 }
 
 fn export_stix(cli: &Cli, query: &str, output: Option<&std::path::Path>) -> Result<()> {
-    let runtime = Runtime::load(cli)?;
+    let mut runtime = Runtime::load(cli)?;
     let investigation = runtime.store.require_investigation(query)?;
     let data = runtime.store.load_investigation(investigation.id)?;
     let bundle = crate::ingest::export_stix_bundle(&data);
@@ -1459,6 +1463,9 @@ fn export_stix(cli: &Cli, query: &str, output: Option<&std::path::Path>) -> Resu
     };
     crate::files::write_atomically(&destination, json.as_bytes())
         .wrap_err_with(|| format!("could not write {}", destination.display()))?;
+    runtime
+        .store
+        .record_export(investigation.id, &destination.display().to_string())?;
     let count = bundle
         .get("objects")
         .and_then(serde_json::Value::as_array)
@@ -1614,10 +1621,16 @@ fn resolve_command(cli: &Cli, command: &ResolveCommand) -> Result<()> {
     }
 }
 
-async fn serve_command(cli: &Cli, bind: Option<&str>, token: Option<&str>) -> Result<()> {
+async fn serve_command(
+    cli: &Cli,
+    bind: Option<&str>,
+    token: Option<&str>,
+    allow_non_loopback: bool,
+) -> Result<()> {
     let runtime = Runtime::load(cli)?;
-    let options = crate::api::ServeOptions::from_config(&runtime.config.api, bind, token)
+    let mut options = crate::api::ServeOptions::from_config(&runtime.config.api, bind, token)
         .map_err(user_err)?;
+    options.allow_non_loopback = allow_non_loopback;
     crate::api::serve(runtime.store, options).await
 }
 
@@ -1672,6 +1685,7 @@ fn run_bench_size(store: &mut Store, entity_count: usize) -> Result<serde_json::
     } else {
         0.0
     };
+    let patch_started = std::time::Instant::now();
     let finding = store.create_finding(crate::storage::NewFinding {
         investigation_id: investigation.id,
         page_id: None,
@@ -1681,7 +1695,6 @@ fn run_bench_size(store: &mut Store, entity_count: usize) -> Result<serde_json::
         provenance: crate::model::Provenance::Analyst,
         source_ids: Vec::new(),
     })?;
-    let patch_started = std::time::Instant::now();
     workspace.apply_delta(crate::model::WorkspaceDelta {
         findings: vec![finding],
         ..crate::model::WorkspaceDelta::default()
@@ -1826,7 +1839,26 @@ mod tests {
         ));
         let serve =
             Cli::try_parse_from(["os-int", "serve", "--bind", "127.0.0.1:0"]).expect("serve");
-        assert!(matches!(serve.command, Some(Command::Serve { .. })));
+        match serve.command {
+            Some(Command::Serve {
+                allow_non_loopback, ..
+            }) => assert!(!allow_non_loopback),
+            other => panic!("expected serve {other:?}"),
+        }
+        let exposed = Cli::try_parse_from([
+            "os-int",
+            "serve",
+            "--bind",
+            "0.0.0.0:8743",
+            "--allow-non-loopback",
+        ])
+        .expect("allow");
+        match exposed.command {
+            Some(Command::Serve {
+                allow_non_loopback, ..
+            }) => assert!(allow_non_loopback),
+            other => panic!("expected serve {other:?}"),
+        }
     }
 
     #[test]

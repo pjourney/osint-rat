@@ -3,13 +3,14 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use color_eyre::eyre::{Result, WrapErr, bail};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -23,6 +24,7 @@ use crate::query::{
 use crate::storage::Store;
 
 const OPENAPI_JSON: &str = include_str!("openapi.json");
+const API_MAX_BODY_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone)]
 struct ApiState {
@@ -35,6 +37,7 @@ pub struct ServeOptions {
     pub bind: SocketAddr,
     pub token: String,
     pub ephemeral_token: bool,
+    pub allow_non_loopback: bool,
 }
 
 impl ServeOptions {
@@ -56,12 +59,6 @@ impl ServeOptions {
         let bind: SocketAddr = bind_raw
             .parse()
             .wrap_err_with(|| format!("invalid API bind address {bind_raw:?}"))?;
-        if !bind.ip().is_loopback() {
-            tracing::warn!(
-                %bind,
-                "API bind is not loopback; ontology data will be reachable beyond this host"
-            );
-        }
         let configured = token_override
             .map(str::trim)
             .filter(|value| !value.is_empty())
@@ -75,12 +72,21 @@ impl ServeOptions {
             bind,
             token,
             ephemeral_token,
+            allow_non_loopback: false,
         })
     }
 }
 
 /// Serves the ontology HTTP API until cancelled.
 pub async fn serve(store: Store, options: ServeOptions) -> Result<()> {
+    if !options.allow_non_loopback {
+        require_loopback(options.bind)?;
+    } else if !options.bind.ip().is_loopback() {
+        tracing::warn!(
+            bind = %options.bind,
+            "API bind is not loopback; ontology data will be reachable beyond this host"
+        );
+    }
     let listener = TcpListener::bind(options.bind)
         .await
         .wrap_err_with(|| format!("could not bind {}", options.bind))?;
@@ -129,6 +135,7 @@ pub fn router(store: Store, token: impl Into<String>) -> Router {
         )
         .route("/v1/investigations/{id}/actions", post(propose_handler))
         .route("/v1/investigations/{id}/proposals", get(list_proposals))
+        .layer(DefaultBodyLimit::max(API_MAX_BODY_BYTES))
         .with_state(state)
 }
 
@@ -339,13 +346,11 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
 }
 
 fn tokens_match(expected: &str, provided: &str) -> bool {
-    if expected.len() != provided.len() {
-        return false;
-    }
-    expected
-        .bytes()
-        .zip(provided.bytes())
-        .fold(0u8, |acc, (left, right)| acc | (left ^ right))
+    let left = Sha256::digest(expected.as_bytes());
+    let right = Sha256::digest(provided.as_bytes());
+    left.iter()
+        .zip(right.iter())
+        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
         == 0
 }
 
@@ -399,10 +404,12 @@ impl IntoResponse for ApiError {
     }
 }
 
-/// Helper used by tests that want a bind failure when the token is required.
+/// Refuses a non-loopback bind unless `--allow-non-loopback` was passed.
 pub fn require_loopback(bind: SocketAddr) -> Result<()> {
     if !bind.ip().is_loopback() {
-        bail!("API bind {bind} is not loopback; pass an explicit --bind if you intend that");
+        bail!(
+            "API bind {bind} is not loopback; pass --allow-non-loopback if you intend to expose the ontology API beyond this host"
+        );
     }
     Ok(())
 }
@@ -410,7 +417,9 @@ pub fn require_loopback(bind: SocketAddr) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{EntityKind, EvidenceBatch, NewSource, Provenance, SourceKind, relation};
+    use crate::model::{
+        EntityKind, EvidenceBatch, Identity, NewSource, Provenance, Role, SourceKind, relation,
+    };
     use crate::storage::{ApplyContext, Store};
 
     async fn spawn_api(store: Store, token: &str) -> String {
@@ -521,5 +530,116 @@ mod tests {
         assert!(options.ephemeral_token);
         assert!(!options.token.is_empty());
         assert!(options.bind.ip().is_loopback());
+        assert!(!options.allow_non_loopback);
+    }
+
+    #[test]
+    fn non_loopback_bind_is_refused_without_flag() {
+        let bind: SocketAddr = "0.0.0.0:8743".parse().expect("addr");
+        let error = require_loopback(bind).expect_err("must refuse");
+        assert!(error.to_string().contains("loopback"));
+        assert!(error.to_string().contains("allow-non-loopback"));
+    }
+
+    #[tokio::test]
+    async fn non_loopback_serve_fails_without_flag() {
+        let store = Store::open_in_memory().expect("store");
+        let options = ServeOptions {
+            bind: "0.0.0.0:0".parse().expect("addr"),
+            token: "secret".into(),
+            ephemeral_token: false,
+            allow_non_loopback: false,
+        };
+        let error = serve(store, options).await.expect_err("must refuse");
+        assert!(error.to_string().contains("loopback"));
+    }
+
+    #[tokio::test]
+    async fn wrong_token_is_unauthorized() {
+        let store = seeded_store();
+        let base = spawn_api(store, "secret-token").await;
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!("{base}/v1/investigations"))
+            .header("Authorization", "Bearer wrong-token")
+            .send()
+            .await
+            .expect("send");
+        assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn x_osint_token_header_authenticates() {
+        let store = seeded_store();
+        let base = spawn_api(store, "secret-token").await;
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!("{base}/v1/investigations"))
+            .header("X-Osint-Token", "secret-token")
+            .send()
+            .await
+            .expect("send");
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn reader_post_is_forbidden() {
+        let mut store = seeded_store();
+        let investigation = store
+            .list_investigations()
+            .expect("list")
+            .into_iter()
+            .next()
+            .expect("one");
+        store
+            .add_member(investigation.investigation.id, "carol", Role::Reader)
+            .expect("member");
+        store.set_identity(Identity {
+            user_id: "carol".into(),
+            machine_name: "desk-c".into(),
+        });
+        let id = investigation.investigation.id;
+        let base = spawn_api(store, "secret-token").await;
+        let payload = serde_json::json!({
+            "actions": [{
+                "action": "ADD_FINDING",
+                "title": "reader must not write",
+                "details": ""
+            }]
+        });
+        let response = reqwest::Client::new()
+            .post(format!("{base}/v1/investigations/{id}/actions"))
+            .header("Authorization", "Bearer secret-token")
+            .header("content-type", "application/json")
+            .body(payload.to_string())
+            .send()
+            .await
+            .expect("send");
+        assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn oversized_body_is_payload_too_large() {
+        let store = seeded_store();
+        let investigation = store
+            .list_investigations()
+            .expect("list")
+            .into_iter()
+            .next()
+            .expect("one");
+        let base = spawn_api(store, "secret-token").await;
+        let body = "x".repeat(API_MAX_BODY_BYTES + 1);
+        let response = reqwest::Client::new()
+            .post(format!(
+                "{base}/v1/investigations/{}/actions",
+                investigation.investigation.id
+            ))
+            .header("Authorization", "Bearer secret-token")
+            .header("content-type", "application/json")
+            .body(body)
+            .send()
+            .await
+            .expect("send");
+        assert_eq!(response.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
     }
 }

@@ -109,9 +109,9 @@ Every imported source and finding is cited on the objects and links it produced.
 | Finding | `indicator` | Pattern from a cited entity, or `[file:name = 'title']` |
 | Event with entity links | `observed-data` | `first_observed` / `last_observed` |
 | Relationship | `relationship` | `resolves_to` → `resolves-to`; others `related-to` plus `x_osint_relationship` |
-| TLP on the case | `marking-definition` | Import still skips marking-definitions (gap) |
+| TLP on the case or object | `marking-definition` + `object_marking_refs` | Official OASIS TLP UUIDs. Each SDO/SCO/relationship gets `max(case, entity)`. TLP:CLEAR maps to TLP:WHITE. TLP:AMBER+STRICT is a statement marking with `x_osint_marking`. Import restores object markings. |
 
-**Documented gaps (acceptable fidelity):** pages, notes, artifacts, jobs, proposals, resolution bags, audit, members, and per-source collector provenance do not have STIX equivalents. Re-import stores one `SourceKind::Stix` source with provenance `external` (ingest rule). `x_osint_kind` on observables and identities, and `x_osint_relationship` on links, are restored; other `x_osint_*` properties stay in the JSON only. Absorbed resolution constituents are omitted (canonical only). TLP marking-definitions are exported and skipped on import.
+**Documented gaps (acceptable fidelity):** pages, notes, artifacts, jobs, proposals, resolution bags, audit, members, and per-source collector provenance do not have STIX equivalents. Re-import stores one `SourceKind::Stix` source with provenance `external` (ingest rule). `x_osint_kind` on observables and identities, `x_osint_relationship` on links, and `x_osint_marking` / `object_marking_refs` are restored; other `x_osint_*` properties stay in the JSON only. Absorbed resolution constituents are omitted (canonical only). Case-level TLP is not written onto the destination investigation row (objects carry the restriction).
 
 Sample fixtures: [`tests/fixtures/ingest/`](../tests/fixtures/ingest/).
 

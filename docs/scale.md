@@ -18,7 +18,7 @@ Hot paths now merge a `WorkspaceDelta`:
 | Collector `apply_batch` | Touched sources, entities, relationships, findings, page links |
 | Finished collection job | Job row (no second full reload) |
 
-`Workspace::apply_delta` upserts by UUID and updates short-ref indexes in place. A correctness test (`apply_delta_matches_full_reload_after_batch`) compares a patched snapshot to a full reload.
+`Workspace::apply_delta` upserts by UUID and updates short-ref indexes in place. Deleted findings (`resolved_findings`) are tombstoned so they do not linger. Member lists and page-entity links only append or upsert; removals still take a full reload. A correctness test (`apply_delta_matches_full_reload_after_batch`) compares patched timeline, event, artifact, and finding ids to a full reload.
 
 ## Common-action budget
 
@@ -49,7 +49,7 @@ Re-run `os-int bench` on your hardware and paste the JSON if you are filing a sc
 | `load_ms` | `load_investigation` |
 | `index_ms` | `Workspace::new` |
 | `search_around_2hop_ms` | In-memory hop expansion from `E-1` |
-| `incremental_finding_patch_ms` | `apply_delta` of one finding |
+| `incremental_finding_patch_ms` | SQLite `create_finding` plus in-memory `apply_delta` |
 | `full_reload_ms` | Another `load_investigation` |
 | `ui_mutation_budget_ms` | 50 |
 

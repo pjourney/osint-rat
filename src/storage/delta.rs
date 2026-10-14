@@ -6,11 +6,12 @@ use uuid::Uuid;
 
 use super::Store;
 use super::apply::ApplySummary;
-use super::evidence::SOURCE_COLUMNS;
+use super::events::event_by_id;
+use super::evidence::{SOURCE_COLUMNS, artifact_by_id, timeline_by_id};
 use super::rows::{RowExt, id};
 use crate::model::{
-    Confidence, Entity, EntityKind, Finding, Page, PageEntityLink, PageKind, Provenance, RefKind,
-    Relationship, ShortRef, Source, SourceKind, WorkspaceDelta,
+    Artifact, Confidence, Entity, EntityKind, Event, Finding, Page, PageEntityLink, PageKind,
+    Provenance, RefKind, Relationship, ShortRef, Source, SourceKind, TimelineEvent, WorkspaceDelta,
 };
 
 impl Store {
@@ -27,6 +28,10 @@ impl Store {
             entities: entities_by_ids(connection, &summary.entity_ids)?,
             relationships: relationships_by_ids(connection, &summary.relationship_ids)?,
             findings: findings_by_ids(connection, &summary.finding_ids)?,
+            timeline: timeline_by_ids(connection, &summary.timeline_ids)?,
+            events: events_by_ids(connection, &summary.event_ids)?,
+            artifacts: artifacts_by_ids(connection, &summary.artifact_ids)?,
+            removed_finding_ids: summary.deleted_finding_ids.clone(),
             ..WorkspaceDelta::default()
         };
         if let Some(page_id) = summary.page_id
@@ -164,6 +169,36 @@ fn sources_by_ids(connection: &Connection, ids: &[Uuid]) -> rusqlite::Result<Vec
         }
     }
     Ok(sources)
+}
+
+fn timeline_by_ids(connection: &Connection, ids: &[Uuid]) -> rusqlite::Result<Vec<TimelineEvent>> {
+    let mut events = Vec::new();
+    for event_id in ids {
+        if let Some(event) = timeline_by_id(connection, *event_id)? {
+            events.push(event);
+        }
+    }
+    Ok(events)
+}
+
+fn events_by_ids(connection: &Connection, ids: &[Uuid]) -> rusqlite::Result<Vec<Event>> {
+    let mut events = Vec::new();
+    for event_id in ids {
+        if let Some(event) = event_by_id(connection, *event_id)? {
+            events.push(event);
+        }
+    }
+    Ok(events)
+}
+
+fn artifacts_by_ids(connection: &Connection, ids: &[Uuid]) -> rusqlite::Result<Vec<Artifact>> {
+    let mut artifacts = Vec::new();
+    for artifact_id in ids {
+        if let Some(artifact) = artifact_by_id(connection, *artifact_id)? {
+            artifacts.push(artifact);
+        }
+    }
+    Ok(artifacts)
 }
 
 fn entity_by_id(connection: &Connection, entity_id: Uuid) -> rusqlite::Result<Option<Entity>> {

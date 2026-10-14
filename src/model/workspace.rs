@@ -99,6 +99,12 @@ impl ShortRefIndex {
         self.by_ref.insert(reference, id);
         self.by_id.insert(id, reference);
     }
+
+    fn unregister(&mut self, id: Uuid) {
+        if let Some(reference) = self.by_id.remove(&id) {
+            self.by_ref.remove(&reference);
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -128,11 +134,15 @@ pub struct WorkspaceDelta {
     pub jobs: Vec<JobRecord>,
     pub agent_runs: Vec<AgentRun>,
     pub proposals: Vec<Proposal>,
+    /// Page-entity links to add. Removals are not represented; those paths reload.
     pub page_entities: Vec<PageEntityLink>,
     pub resolutions: Vec<Resolution>,
     pub events: Vec<Event>,
     pub audit: Vec<AuditEntry>,
+    /// Members upserted by user_id. Removals are not represented; those paths reload.
     pub members: Vec<Member>,
+    /// Finding IDs deleted by this mutation (for example `resolved_findings`).
+    pub removed_finding_ids: Vec<Uuid>,
 }
 
 impl WorkspaceDelta {
@@ -154,6 +164,7 @@ impl WorkspaceDelta {
             && self.events.is_empty()
             && self.audit.is_empty()
             && self.members.is_empty()
+            && self.removed_finding_ids.is_empty()
     }
 }
 
@@ -347,6 +358,15 @@ impl Workspace {
             }) {
                 self.data.page_entities.push(link);
             }
+        }
+        for finding_id in delta.removed_finding_ids {
+            remove_indexed(
+                &mut self.data.findings,
+                &mut self.index.findings,
+                &mut self.index.short_refs,
+                finding_id,
+                |finding| finding.id,
+            );
         }
     }
 
@@ -656,6 +676,21 @@ fn upsert_unindexed<T>(
     }
     items.push(record);
     short_refs.register(id, kind, seq);
+}
+
+fn remove_indexed<T>(
+    items: &mut Vec<T>,
+    positions: &mut HashMap<Uuid, usize>,
+    short_refs: &mut ShortRefIndex,
+    id: Uuid,
+    get_id: fn(&T) -> Uuid,
+) {
+    let Some(_) = positions.remove(&id) else {
+        return;
+    };
+    items.retain(|item| get_id(item) != id);
+    *positions = position_map(items.iter().map(get_id));
+    short_refs.unregister(id);
 }
 
 #[cfg(test)]

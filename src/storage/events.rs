@@ -58,7 +58,7 @@ pub(crate) struct EventInsert<'a> {
 pub(crate) fn insert_event(
     connection: &Connection,
     input: EventInsert<'_>,
-) -> rusqlite::Result<bool> {
+) -> rusqlite::Result<Option<Uuid>> {
     let event = Event {
         id: Uuid::new_v4(),
         investigation_id: input.investigation_id,
@@ -75,7 +75,11 @@ pub(crate) fn insert_event(
         entity_ids: input.entity_ids,
         created_at: now(),
     };
-    Ok(insert_event_record(connection, &event)? > 0)
+    if insert_event_record(connection, &event)? > 0 {
+        Ok(Some(event.id))
+    } else {
+        Ok(None)
+    }
 }
 
 pub(crate) fn link_event_entity(
@@ -124,6 +128,43 @@ pub(crate) fn list_events(
     Ok(events)
 }
 
+pub(crate) fn event_by_id(
+    connection: &Connection,
+    event_id: Uuid,
+) -> rusqlite::Result<Option<Event>> {
+    let mut event = connection
+        .query_row(
+            "SELECT id, investigation_id, seq, kind, title, description, started_at, ended_at,
+                    provenance, source_id, page_id, fields, created_at
+             FROM events WHERE id = ?1",
+            params![id(&event_id)],
+            |row| {
+                Ok(Event {
+                    id: row.uuid(0)?,
+                    investigation_id: row.uuid(1)?,
+                    seq: row.get(2)?,
+                    kind: TimelineKind::parse(&row.get::<_, String>(3)?),
+                    title: row.get(4)?,
+                    description: row.get(5)?,
+                    started_at: row.timestamp(6)?,
+                    ended_at: row.opt_timestamp(7)?,
+                    provenance: Provenance::parse(&row.get::<_, String>(8)?)
+                        .unwrap_or(Provenance::Collected),
+                    source_id: row.opt_uuid(9)?,
+                    page_id: row.opt_uuid(10)?,
+                    fields: row.json(11)?,
+                    entity_ids: Vec::new(),
+                    created_at: row.timestamp(12)?,
+                })
+            },
+        )
+        .optional()?;
+    if let Some(event) = event.as_mut() {
+        event.entity_ids = list_event_entities(connection, event.id)?;
+    }
+    Ok(event)
+}
+
 fn list_event_entities(connection: &Connection, event_id: Uuid) -> rusqlite::Result<Vec<Uuid>> {
     let mut statement = connection
         .prepare("SELECT entity_id FROM event_entities WHERE event_id = ?1 ORDER BY entity_id")?;
@@ -169,10 +210,10 @@ impl Store {
                 entity_ids,
             },
         )?;
-        if inserted {
+        if inserted.is_some() {
             touch_investigation(self.connection(), investigation_id)?;
         }
-        Ok(inserted)
+        Ok(inserted.is_some())
     }
 
     pub fn find_event(&self, event_id: Uuid) -> rusqlite::Result<Option<Event>> {

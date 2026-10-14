@@ -9,6 +9,7 @@ Bind defaults to **`127.0.0.1:8743`**. Unauthorized requests to data routes retu
 ```bash
 os-int serve
 os-int serve --bind 127.0.0.1:8743 --token "$OS_INT_API_TOKEN"
+# Non-loopback binds are refused unless you pass --allow-non-loopback.
 ```
 
 Configuration (`config.toml`):
