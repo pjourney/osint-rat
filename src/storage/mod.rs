@@ -8,6 +8,7 @@ mod activity;
 mod apply;
 mod audit;
 mod collaboration;
+mod delta;
 mod events;
 mod evidence;
 mod graph;
@@ -17,6 +18,7 @@ mod pages;
 mod playbook;
 mod resolution;
 mod rows;
+mod scale;
 
 use std::path::{Path, PathBuf};
 

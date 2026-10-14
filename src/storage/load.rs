@@ -52,7 +52,7 @@ impl Store {
 
     /// Inserts a complete investigation with its existing IDs (used by import).
     pub fn insert_investigation_data(&mut self, data: &InvestigationData) -> Result<()> {
-        let importer = self.identity.user_id.clone();
+        let identity = self.identity.clone();
         let transaction = self.connection_mut().transaction()?;
         let investigation = &data.investigation;
         transaction.execute(
@@ -169,7 +169,7 @@ impl Store {
         for member in &data.members {
             insert_member_record(&transaction, member)?;
         }
-        ensure_importer_owner(&transaction, investigation.id, &importer)?;
+        ensure_importer_owner(&transaction, investigation.id, &identity)?;
         transaction.commit()?;
         Ok(())
     }

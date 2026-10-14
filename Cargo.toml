@@ -48,7 +48,8 @@ tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 unicode-width = "0.2.2"
 url = { version = "2.5.8", features = ["serde"] }
-uuid = { version = "1.27.0", features = ["v4", "serde"] }
+uuid = { version = "1.27.0", features = ["v4", "v5", "serde"] }
+axum = { version = "0.8.4", default-features = false, features = ["http1", "json", "tokio", "query"] }
 webpki-roots = "1.0.9"
 x509-parser = "0.18.1"
 

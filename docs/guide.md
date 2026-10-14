@@ -19,6 +19,7 @@ This is the complete guide to using os-int: the workbench, the collectors, the a
 - [External tools](#external-tools)
 - [Asking an agent](#asking-an-agent)
 - [Reports, export, and import](#reports-export-and-import)
+- [HTTP API and scriptable CLI](#http-api-and-scriptable-cli)
 - [Command-line reference](#command-line-reference)
 - [Configuration](#configuration)
 - [Keyboard](#keyboard)
@@ -541,7 +542,21 @@ os-int import ./example-corp
 os-int import ./example-corp --rename
 ```
 
-The directory contains `investigation.osint.json` (format `os-int-investigation`, version 4) plus a `files/` tree of the investigation's snapshots, notes artifacts, and reports. Paths inside the manifest are relative. Version-1–3 archives still import (empty `data.resolutions` / `data.events` / `data.audit`; unmarked). Import refuses an archive whose investigation id already exists, unless you pass `--rename`, which assigns a new investigation id, remaps every record UUID (including resolution bags, Events, and audit rows), and copies the files under the new id. `--format geojson` writes a FeatureCollection instead of an archive. The JSON fields, ingest batch, and version-bump rules are in [Ontology Exchange Format](ontology-exchange.md). Collaboration and the audit slice: [collaboration.md](collaboration.md).
+The directory contains `investigation.osint.json` (format `os-int-investigation`, version 4) plus a `files/` tree of the investigation's snapshots, notes artifacts, and reports. Paths inside the manifest are relative. Version-1–3 archives still import (empty `data.resolutions` / `data.events` / `data.audit`; unmarked). Import refuses an archive whose investigation id already exists, unless you pass `--rename`, which assigns a new investigation id, remaps every record UUID (including resolution bags, Events, and audit rows), and copies the files under the new id. `--format geojson` writes a FeatureCollection instead of an archive. `--format stix` writes a STIX 2.1 bundle (see [connectors.md](connectors.md#stix-21)). The JSON fields, ingest batch, and version-bump rules are in [Ontology Exchange Format](ontology-exchange.md). Collaboration and the audit slice: [collaboration.md](collaboration.md).
+
+## HTTP API and scriptable CLI
+
+`os-int serve` binds **`127.0.0.1:8743`** by default and requires a Bearer token for `/v1/…` routes. A non-loopback bind is refused unless you pass `--allow-non-loopback`. It serves Object View JSON and accepts Action **proposals** only. Details: [api.md](api.md). Scale limits: [scale.md](scale.md).
+
+```bash
+os-int get "Example Corp" E-1
+os-int objects "Example Corp" --kind domain
+os-int search-around "Example Corp" E-1 --hops 2
+os-int resolve suggest "Example Corp"
+os-int serve --token "$OS_INT_API_TOKEN"
+```
+
+Common TUI mutations (add a finding, set a marking) stay under **50 ms** after the case is loaded, including at ~100k objects. Opening a large case still loads the full snapshot once.
 
 Without `-o`, export uses `<sanitized-name>-<uuid>` in the current directory.
 
@@ -573,9 +588,15 @@ os-int [OPTIONS] [COMMAND]
 | `playbook run <id-or-file> --investigation <name> --target <seed>` | Run a playbook (`--dry-run` plans only) |
 | `watch --playbook <id-or-file> --investigation <name>` | Re-run collect steps (`--dry-run`, `--once`, `--interval`) |
 | `report <name> [--format markdown\|json] [-o <file>]` | Write a report |
-| `export <name> [-o <dir>] [--format archive\|geojson]` | Write a portable directory, or GeoJSON |
+| `export <name> [-o <dir>] [--format archive\|geojson\|stix]` | Write a portable directory, GeoJSON, or a STIX 2.1 bundle |
 | `geojson <name> [-o <file>]` | Write a GeoJSON FeatureCollection |
 | `cooccur <name> [--window <hours>]` | Print pairs that share an Event, source, or time window |
+| `get <name> <ref>` | Object View JSON for `E-n` / `P-n` |
+| `objects <name> [--kind domain]` | Visible entities as JSON |
+| `search-around <name> <seed> [--hops 2]` | Search Around JSON |
+| `resolve suggest\|propose\|merge\|unresolve` | Suggestions stay scored; `propose` is pending; `merge` is an analyst action |
+| `serve [--bind 127.0.0.1:8743]` | Localhost ontology HTTP API |
+| `bench [--sizes 1000,10000,100000]` | Load/query timings for synthetic graphs |
 | `import <path> [--rename]` | Import an export directory |
 | `marking get\|set <name> [TLP:…]` | Show or set the case (or `--entity`) marking |
 | `team list\|add\|set-role\|remove` | Case members (`owner` / `analyst` / `reader`) |
@@ -640,6 +661,10 @@ max_ingest_bytes = 20971520
 [identity]
 # user_id = "analyst"
 # machine_name = "workstation"
+
+# [api]
+# bind = "127.0.0.1:8743"
+# token = ""
 ```
 
 | Key | Default | Meaning |
@@ -675,6 +700,8 @@ max_ingest_bytes = 20971520
 | `tools.custom` | empty | Extra passive programs. See [External tools](#external-tools) |
 | `identity.user_id` | `$USER` / `$USERNAME` / `local` | Actor written on audit rows |
 | `identity.machine_name` | hostname / `unknown` | Machine written on audit rows |
+| `api.bind` | `127.0.0.1:8743` | `os-int serve` listen address |
+| `api.token` | empty | Bearer token; empty mints an ephemeral token at serve time |
 
 Agent profile keys under `[agents.<id>]` or the inline `[agent]` profile:
 

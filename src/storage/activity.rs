@@ -246,16 +246,40 @@ impl Store {
     }
 
     /// Marks jobs left running by a previous process as failed. Returns how many were updated.
+    ///
+    /// Jobs with no investigation (process-local) are always recovered. Jobs on a case are
+    /// recovered only when the current identity can mutate that case, so a reader opening a
+    /// shared data directory cannot rewrite another cell's rows.
     pub fn mark_interrupted_jobs(&self) -> Result<usize> {
         let timestamp = ts(&now());
-        let updated_jobs = self.connection().execute(
-            "UPDATE jobs SET status = 'failed', error = ?1, finished_at = ?2 WHERE status IN ('queued', 'running')",
+        let mut updated_jobs = self.connection().execute(
+            "UPDATE jobs SET status = 'failed', error = ?1, finished_at = ?2
+             WHERE status IN ('queued', 'running') AND investigation_id IS NULL",
             params![INTERRUPTED_MESSAGE, timestamp],
         )?;
-        self.connection().execute(
-            "UPDATE agent_runs SET status = 'failed', error = ?1, finished_at = ?2 WHERE status IN ('queued', 'running')",
-            params![INTERRUPTED_MESSAGE, timestamp],
-        )?;
+        for summary in self.list_investigations()? {
+            if !self.role_for(summary.investigation.id)?.can_write() {
+                continue;
+            }
+            updated_jobs += self.connection().execute(
+                "UPDATE jobs SET status = 'failed', error = ?1, finished_at = ?2
+                 WHERE status IN ('queued', 'running') AND investigation_id = ?3",
+                params![
+                    INTERRUPTED_MESSAGE,
+                    timestamp,
+                    id(&summary.investigation.id)
+                ],
+            )?;
+            self.connection().execute(
+                "UPDATE agent_runs SET status = 'failed', error = ?1, finished_at = ?2
+                 WHERE status IN ('queued', 'running') AND investigation_id = ?3",
+                params![
+                    INTERRUPTED_MESSAGE,
+                    timestamp,
+                    id(&summary.investigation.id)
+                ],
+            )?;
+        }
         Ok(updated_jobs)
     }
 
@@ -370,6 +394,48 @@ impl Store {
         }
         transaction.commit()?;
         Ok(())
+    }
+
+    /// Stores Actions from the HTTP API or scriptable CLI as pending proposals.
+    /// Creates a synthetic agent run for provenance. Does not apply the Actions.
+    pub fn insert_pending_actions(
+        &mut self,
+        investigation_id: Uuid,
+        origin: &str,
+        actions: Vec<AgentAction>,
+    ) -> Result<Vec<Proposal>> {
+        self.assert_can_mutate(investigation_id)?;
+        if actions.is_empty() {
+            return Ok(Vec::new());
+        }
+        let timestamp = now();
+        let mut run = AgentRun {
+            id: Uuid::new_v4(),
+            investigation_id,
+            seq: 0,
+            thread_id: Uuid::new_v4(),
+            page_id: None,
+            agent_name: origin.to_string(),
+            program: "os-int".into(),
+            args: Vec::new(),
+            question: format!("pending Actions from {origin}"),
+            response: String::new(),
+            status: JobStatus::Succeeded,
+            error: None,
+            focus: None,
+            context_artifact_id: None,
+            job_id: None,
+            model: None,
+            cost_usd: None,
+            created_at: timestamp,
+            finished_at: Some(timestamp),
+        };
+        self.insert_agent_run(&mut run)?;
+        let pending = actions
+            .into_iter()
+            .map(|action| (action, ProposalStatus::Pending, None))
+            .collect();
+        self.insert_proposals(investigation_id, run.id, pending)
     }
 
     pub fn update_proposal_action(&self, proposal_id: Uuid, action: &AgentAction) -> Result<()> {

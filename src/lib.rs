@@ -26,6 +26,8 @@
 //! | [`app`] | State and [`app::Action`]s. Testable without a terminal. |
 //! | [`tui`] | Event loop and rendering. Drawing is a function of [`app::App`]. |
 //! | [`cli`] | Clap commands. No subcommand launches the workbench. |
+//! | [`api`] | Localhost ontology HTTP API (`os-int serve`). Read + Action propose. |
+//! | [`query`] | Scriptable list/get/search-around/resolve helpers for CLI and API. |
 //! | [`report`] | Markdown and JSON reports. |
 //! | [`exchange`] | Versioned import and export. |
 //! | [`ingest`] | STIX, MISP, CSV/JSON, and Evidence Batch file ingest. |
@@ -38,6 +40,7 @@
 //! | [`logging`] | Daily log files. Log lines never go to the workbench. |
 
 pub mod agent;
+pub mod api;
 pub mod app;
 pub mod cli;
 pub mod collectors;
@@ -53,6 +56,7 @@ pub mod logging;
 pub mod model;
 pub mod paths;
 pub mod playbook;
+pub mod query;
 pub mod report;
 pub mod sanitize;
 pub mod storage;

@@ -7,7 +7,7 @@ use uuid::Uuid;
 use super::audit::append_audit_on;
 use super::rows::{RowExt, id, ts};
 use super::{Store, touch_investigation};
-use crate::model::{AuditKind, Fields, Member, Role, now, same_user};
+use crate::model::{AuditKind, Fields, Identity, Member, Role, now, same_user};
 
 pub(crate) fn list_members(
     connection: &Connection,
@@ -264,8 +264,9 @@ impl Store {
 pub(crate) fn ensure_importer_owner(
     connection: &Connection,
     investigation_id: Uuid,
-    user_id: &str,
+    identity: &Identity,
 ) -> rusqlite::Result<()> {
+    let user_id = identity.user_id.as_str();
     let members = list_members(connection, investigation_id)?;
     if members.is_empty() {
         return Ok(());
@@ -277,9 +278,23 @@ pub(crate) fn ensure_importer_owner(
         if existing.role == Role::Owner {
             return Ok(());
         }
+        let previous = existing.role;
         connection.execute(
             "UPDATE investigation_members SET role = 'owner' WHERE investigation_id = ?1 AND user_id = ?2",
             params![id(&investigation_id), existing.user_id],
+        )?;
+        let mut details = Fields::new();
+        details.push("user_id", existing.user_id.as_str());
+        details.push("from", previous.as_str());
+        details.push("to", Role::Owner.as_str());
+        append_audit_on(
+            connection,
+            investigation_id,
+            identity,
+            AuditKind::MemberRoleChanged,
+            &format!("Importer {} promoted to owner", existing.user_id),
+            details,
+            Vec::new(),
         )?;
         return Ok(());
     }
@@ -292,7 +307,20 @@ pub(crate) fn ensure_importer_owner(
             added_by: user_id.to_string(),
             added_at: now(),
         },
-    )
+    )?;
+    let mut details = Fields::new();
+    details.push("user_id", user_id);
+    details.push("role", Role::Owner.as_str());
+    append_audit_on(
+        connection,
+        investigation_id,
+        identity,
+        AuditKind::MemberAdded,
+        &format!("Importer {user_id} added as owner"),
+        details,
+        Vec::new(),
+    )?;
+    Ok(())
 }
 
 fn seed_owner_if_empty(

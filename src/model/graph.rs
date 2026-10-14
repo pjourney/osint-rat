@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::common::{Provenance, Timestamp};
@@ -68,14 +69,14 @@ impl SearchAroundQuery {
 }
 
 /// One entity reached by Search Around, with the shortest hop from a seed.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GraphNode {
     pub id: Uuid,
     pub hop: u32,
 }
 
 /// One relationship included in a Search Around result.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GraphEdge {
     pub id: Uuid,
     pub from_id: Uuid,
@@ -85,7 +86,7 @@ pub struct GraphEdge {
 }
 
 /// The neighborhood produced by [`search_around`].
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SearchAroundResult {
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,

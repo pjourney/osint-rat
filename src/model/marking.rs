@@ -10,7 +10,9 @@ pub const OBJECT_MARKING_FIELD: &str = "marking";
 /// Traffic Light Protocol label, or unmarked.
 ///
 /// Stored as a stable lowercase key (`tlp:amber`). Display uses the `TLP:` prefix.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub enum Marking {
     #[default]
     #[serde(rename = "unmarked")]
@@ -45,6 +47,26 @@ impl Marking {
             Marking::TlpAmber => "tlp:amber",
             Marking::TlpAmberStrict => "tlp:amber+strict",
             Marking::TlpRed => "tlp:red",
+        }
+    }
+
+    /// The more restrictive of two markings (TLP:RED outranks TLP:GREEN).
+    pub fn restrict(self, other: Self) -> Self {
+        if other.rank() > self.rank() {
+            other
+        } else {
+            self
+        }
+    }
+
+    fn rank(self) -> u8 {
+        match self {
+            Marking::Unmarked => 0,
+            Marking::TlpClear => 1,
+            Marking::TlpGreen => 2,
+            Marking::TlpAmber => 3,
+            Marking::TlpAmberStrict => 4,
+            Marking::TlpRed => 5,
         }
     }
 
@@ -136,6 +158,20 @@ mod tests {
         assert_eq!(Marking::parse("").expect("empty"), Marking::Unmarked);
         assert_eq!(Marking::parse("unmarked").expect("none"), Marking::Unmarked);
         assert!(Marking::parse("secret").is_err());
+    }
+
+    #[test]
+    fn restrict_picks_the_more_limited_label() {
+        assert_eq!(Marking::TlpGreen.restrict(Marking::TlpRed), Marking::TlpRed);
+        assert_eq!(Marking::TlpRed.restrict(Marking::TlpGreen), Marking::TlpRed);
+        assert_eq!(
+            Marking::TlpAmber.restrict(Marking::TlpAmberStrict),
+            Marking::TlpAmberStrict
+        );
+        assert_eq!(
+            Marking::Unmarked.restrict(Marking::TlpClear),
+            Marking::TlpClear
+        );
     }
 
     #[test]

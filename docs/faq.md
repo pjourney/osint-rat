@@ -39,6 +39,10 @@ No. The welcome screen and `os-int doctor` report optional programs as `missing`
 
 `doctor` exits non-zero when a check is `warn` (usually the database integrity check), not when an optional program is absent.
 
+## Does os-int expose an HTTP API?
+
+Yes, locally. `os-int serve` binds `127.0.0.1:8743` by default and requires a Bearer token for `/v1/…` routes. It returns Object View JSON and accepts Action **proposals** only — nothing is applied until you accept it in the workbench. See [api.md](api.md).
+
 ## Where are my investigations?
 
 Run `os-int config`. It prints the config file, the data directory, the database, and the log directory.

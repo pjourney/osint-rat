@@ -20,7 +20,7 @@ pub const LABEL_WRITE_KEY: &str = "__label";
 pub const NOTES_WRITE_KEY: &str = "__notes";
 
 /// A scored, human-reviewed merge candidate. Never applied automatically.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolutionSuggestion {
     pub entity_ids: Vec<Uuid>,
     pub score: u32,
@@ -28,7 +28,8 @@ pub struct ResolutionSuggestion {
     pub reason: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SuggestionRule {
     SameCanonicalValue,
     UsernameProfileUrl,

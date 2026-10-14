@@ -34,7 +34,7 @@ pub struct NewFinding {
     pub source_ids: Vec<Uuid>,
 }
 
-const SOURCE_COLUMNS: &str = "id, investigation_id, seq, kind, title, url, retrieved_at, last_seen_at, published_at, \
+pub(crate) const SOURCE_COLUMNS: &str = "id, investigation_id, seq, kind, title, url, retrieved_at, last_seen_at, published_at, \
      author, collector, content_hash, snapshot_path, content, fields, notes, provenance, page_id, job_id";
 
 pub(crate) fn insert_source_record(
@@ -205,8 +205,8 @@ pub(crate) fn list_sources(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FindingSync {
-    Created,
-    Updated,
+    Created(Uuid),
+    Updated(Uuid),
     LeftAlone,
 }
 
@@ -248,7 +248,7 @@ pub(crate) fn sync_collected_finding(
             )?;
         }
         replace_finding_sources(connection, finding_id, source_ids)?;
-        return Ok(FindingSync::Updated);
+        return Ok(FindingSync::Updated(finding_id));
     }
     let timestamp = now();
     let finding = Finding {
@@ -265,7 +265,7 @@ pub(crate) fn sync_collected_finding(
         updated_at: timestamp,
     };
     insert_finding_record(connection, &finding)?;
-    Ok(FindingSync::Created)
+    Ok(FindingSync::Created(finding.id))
 }
 
 /// Inserts an ingested (non-collected) finding. Never updates or deletes collected diagnostics.
@@ -301,7 +301,7 @@ pub(crate) fn insert_ingested_finding(
         updated_at: timestamp,
     };
     insert_finding_record(connection, &record)?;
-    Ok(FindingSync::Created)
+    Ok(FindingSync::Created(record.id))
 }
 
 fn finding_by_title_and_provenance(
@@ -321,23 +321,24 @@ fn finding_by_title_and_provenance(
 }
 
 /// Deletes a collected finding with this title. Other provenances are kept.
+/// Returns the deleted finding id when a row was removed.
 pub(crate) fn clear_collected_finding(
     connection: &Connection,
     investigation_id: Uuid,
     title: &str,
-) -> rusqlite::Result<bool> {
+) -> rusqlite::Result<Option<Uuid>> {
     let Some((finding_id, provenance)) = finding_by_title(connection, investigation_id, title)?
     else {
-        return Ok(false);
+        return Ok(None);
     };
     if provenance != Provenance::Collected {
-        return Ok(false);
+        return Ok(None);
     }
     let deleted = connection.execute(
         "DELETE FROM findings WHERE id = ?1",
         params![id(&finding_id)],
     )?;
-    Ok(deleted > 0)
+    Ok((deleted > 0).then_some(finding_id))
 }
 
 fn finding_by_title(
@@ -530,6 +531,36 @@ pub(crate) fn list_artifacts(
     rows.collect()
 }
 
+pub(crate) fn artifact_by_id(
+    connection: &Connection,
+    artifact_id: Uuid,
+) -> rusqlite::Result<Option<Artifact>> {
+    connection
+        .query_row(
+            "SELECT id, investigation_id, seq, page_id, kind, name, path, mime, size_bytes, sha256, fields, source_id, created_at
+             FROM artifacts WHERE id = ?1",
+            params![id(&artifact_id)],
+            |row| {
+                Ok(Artifact {
+                    id: row.uuid(0)?,
+                    investigation_id: row.uuid(1)?,
+                    seq: row.get(2)?,
+                    page_id: row.opt_uuid(3)?,
+                    kind: ArtifactKind::parse(&row.get::<_, String>(4)?),
+                    name: row.get(5)?,
+                    path: row.get(6)?,
+                    mime: row.get(7)?,
+                    size_bytes: row.get(8)?,
+                    sha256: row.get(9)?,
+                    fields: row.json(10)?,
+                    source_id: row.opt_uuid(11)?,
+                    created_at: row.timestamp(12)?,
+                })
+            },
+        )
+        .optional()
+}
+
 pub(crate) fn insert_timeline_record(
     connection: &Connection,
     event: &TimelineEvent,
@@ -568,11 +599,11 @@ pub(crate) struct TimelineInsert<'a> {
 }
 
 /// Inserts a timeline event unless an identical one (kind, time, title) already exists.
-/// Returns `true` when a new event was stored.
+/// Returns the new id when a row was stored.
 pub(crate) fn insert_timeline_event(
     connection: &Connection,
     input: TimelineInsert<'_>,
-) -> rusqlite::Result<bool> {
+) -> rusqlite::Result<Option<Uuid>> {
     let event = TimelineEvent {
         id: Uuid::new_v4(),
         investigation_id: input.investigation_id,
@@ -587,7 +618,11 @@ pub(crate) fn insert_timeline_event(
         page_id: input.page_id,
         created_at: now(),
     };
-    Ok(insert_timeline_record(connection, &event)? > 0)
+    if insert_timeline_record(connection, &event)? > 0 {
+        Ok(Some(event.id))
+    } else {
+        Ok(None)
+    }
 }
 
 pub(crate) fn list_timeline(
@@ -616,6 +651,36 @@ pub(crate) fn list_timeline(
         })
     })?;
     rows.collect()
+}
+
+pub(crate) fn timeline_by_id(
+    connection: &Connection,
+    event_id: Uuid,
+) -> rusqlite::Result<Option<TimelineEvent>> {
+    connection
+        .query_row(
+            "SELECT id, investigation_id, seq, occurred_at, kind, title, description, provenance, source_id, entity_id, page_id, created_at
+             FROM timeline_events WHERE id = ?1",
+            params![id(&event_id)],
+            |row| {
+                Ok(TimelineEvent {
+                    id: row.uuid(0)?,
+                    investigation_id: row.uuid(1)?,
+                    seq: row.get(2)?,
+                    occurred_at: row.timestamp(3)?,
+                    kind: TimelineKind::parse(&row.get::<_, String>(4)?),
+                    title: row.get(5)?,
+                    description: row.get(6)?,
+                    provenance: Provenance::parse(&row.get::<_, String>(7)?)
+                        .unwrap_or(Provenance::Collected),
+                    source_id: row.opt_uuid(8)?,
+                    entity_id: row.opt_uuid(9)?,
+                    page_id: row.opt_uuid(10)?,
+                    created_at: row.timestamp(11)?,
+                })
+            },
+        )
+        .optional()
 }
 
 impl Store {
@@ -755,7 +820,7 @@ impl Store {
                 page_id,
             },
         )?;
-        if !inserted {
+        if inserted.is_none() {
             bail!("an identical timeline event already exists");
         }
         touch_investigation(self.connection(), investigation_id)?;

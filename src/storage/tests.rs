@@ -1,8 +1,9 @@
 use super::*;
 use crate::model::{
     AgentAction, ArtifactKind, AuditKind, Confidence, EntityKey, EntityKind, EvidenceBatch,
-    Identity, JobRecord, JobStatus, Marking, NewArtifact, NewSource, PageKind, ProposalStatus,
-    Provenance, Role, SearchAroundQuery, SourceKind, Target, TargetKind, TimelineKind, Workspace,
+    Identity, InvestigationData, JobRecord, JobStatus, Marking, NewArtifact, NewSource, PageKind,
+    ProposalStatus, Provenance, Role, SearchAroundQuery, SourceKind, Target, TargetKind,
+    TimelineKind, Workspace, WorkspaceDelta,
 };
 use rusqlite::params;
 use uuid::Uuid;
@@ -496,6 +497,54 @@ fn notes_and_page_notes_persist() {
             .create_note(investigation.id, None, "   ", Provenance::Analyst)
             .is_err()
     );
+}
+
+#[test]
+fn mark_interrupted_jobs_skips_cases_the_reader_cannot_write() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("os-int.sqlite3");
+    let mut owner = Store::open(&path).expect("owner");
+    owner.set_identity(Identity {
+        user_id: "alice".into(),
+        machine_name: "desk-a".into(),
+    });
+    let investigation = owner.create_investigation("Shared", "").expect("created");
+    owner
+        .add_member(investigation.id, "carol", Role::Reader)
+        .expect("carol");
+    let mut job = JobRecord {
+        id: Uuid::new_v4(),
+        investigation_id: Some(investigation.id),
+        seq: 0,
+        kind: "collector:dns".into(),
+        label: "DNS".into(),
+        description: "DNS for example.com".into(),
+        status: JobStatus::Running,
+        program: None,
+        args: Vec::new(),
+        created_at: now(),
+        started_at: Some(now()),
+        finished_at: None,
+        progress: None,
+        log: String::new(),
+        stderr: String::new(),
+        result: None,
+        error: None,
+        page_id: None,
+    };
+    owner.insert_job(&mut job).expect("inserts");
+    drop(owner);
+    let mut reader = Store::open(&path).expect("reader");
+    reader.set_identity(Identity {
+        user_id: "carol".into(),
+        machine_name: "desk-c".into(),
+    });
+    let interrupted = reader.mark_interrupted_jobs().expect("marks");
+    assert_eq!(interrupted, 0);
+    let data = reader
+        .load_investigation(investigation.id)
+        .expect("reader load");
+    assert_eq!(data.jobs[0].status, JobStatus::Running);
 }
 
 #[test]
@@ -2059,4 +2108,281 @@ fn importer_of_a_reader_archive_becomes_owner() {
             source_ids: Vec::new(),
         })
         .expect("owner can write");
+    let kinds: Vec<_> = imported
+        .list_audit(data.investigation.id)
+        .expect("audit")
+        .into_iter()
+        .map(|entry| entry.kind)
+        .collect();
+    assert!(
+        kinds.contains(&AuditKind::MemberRoleChanged),
+        "importer promotion must be audited, got {kinds:?}"
+    );
+}
+
+fn sorted_ids<T>(items: &[T], get: fn(&T) -> Uuid) -> Vec<Uuid> {
+    let mut ids: Vec<Uuid> = items.iter().map(get).collect();
+    ids.sort();
+    ids
+}
+
+fn assert_patched_matches_reload(store: &Store, investigation_id: Uuid, workspace: &Workspace) {
+    let full = store.load_investigation(investigation_id).expect("full");
+    assert_eq!(
+        sorted_ids(&workspace.data.timeline, |event| event.id),
+        sorted_ids(&full.timeline, |event| event.id),
+        "timeline ids"
+    );
+    assert_eq!(
+        sorted_ids(&workspace.data.events, |event| event.id),
+        sorted_ids(&full.events, |event| event.id),
+        "event ids"
+    );
+    assert_eq!(
+        sorted_ids(&workspace.data.artifacts, |artifact| artifact.id),
+        sorted_ids(&full.artifacts, |artifact| artifact.id),
+        "artifact ids"
+    );
+    assert_eq!(
+        sorted_ids(&workspace.data.findings, |finding| finding.id),
+        sorted_ids(&full.findings, |finding| finding.id),
+        "finding ids"
+    );
+}
+
+#[test]
+fn apply_delta_matches_full_reload_after_batch() {
+    let (mut store, investigation) = store_with_investigation();
+    let context = ApplyContext {
+        investigation_id: investigation.id,
+        page_id: None,
+        job_id: None,
+    };
+    let mut batch = dns_batch("abc123");
+    batch.artifacts.push(NewArtifact {
+        kind: ArtifactKind::Snapshot,
+        name: "dns.txt".into(),
+        path: "snapshots/ab/abc123.txt".into(),
+        mime: Some("text/plain".into()),
+        size_bytes: 12,
+        sha256: None,
+        fields: crate::model::Fields::new(),
+        source: Some(0),
+    });
+    let summary = store.apply_batch(context, &batch).expect("apply");
+    assert!(!summary.entity_ids.is_empty());
+    assert!(!summary.timeline_ids.is_empty());
+    assert!(!summary.artifact_ids.is_empty());
+    let mut workspace = Workspace::new(InvestigationData::empty(investigation.clone()));
+    let delta = store
+        .load_apply_delta(investigation.id, &summary)
+        .expect("delta");
+    workspace.apply_delta(delta);
+    assert_patched_matches_reload(&store, investigation.id, &workspace);
+    assert!(
+        workspace
+            .entity_by_value(&EntityKind::Domain, "example.com")
+            .is_some()
+    );
+
+    let mut diagnostic = EvidenceBatch::new();
+    let mut source = NewSource::collected(SourceKind::Dns, "dns", "DNS records for example.com");
+    source.content_hash = Some("abc123".into());
+    let key = diagnostic.add_source(source);
+    diagnostic.add_finding(
+        "example.com spf",
+        "SPF is missing",
+        Confidence::Medium,
+        Some(key),
+    );
+    let opened = store.apply_batch(context, &diagnostic).expect("open");
+    assert!(!opened.finding_ids.is_empty());
+    workspace.apply_delta(
+        store
+            .load_apply_delta(investigation.id, &opened)
+            .expect("open delta"),
+    );
+    assert_patched_matches_reload(&store, investigation.id, &workspace);
+
+    let mut cleared = EvidenceBatch::new();
+    let mut source = NewSource::collected(SourceKind::Dns, "dns", "DNS records for example.com");
+    source.content_hash = Some("abc123".into());
+    cleared.add_source(source);
+    cleared.resolve_finding("example.com spf");
+    let resolved = store.apply_batch(context, &cleared).expect("clear");
+    assert!(!resolved.deleted_finding_ids.is_empty());
+    workspace.apply_delta(
+        store
+            .load_apply_delta(investigation.id, &resolved)
+            .expect("clear delta"),
+    );
+    assert_patched_matches_reload(&store, investigation.id, &workspace);
+    assert!(workspace.data.findings.is_empty());
+}
+
+#[test]
+fn stix_export_round_trips_tlp_red_entity() {
+    let (mut store, investigation) = store_with_investigation();
+    let entity_id = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Domain,
+            "secret.example",
+            Provenance::Analyst,
+            None,
+        )
+        .expect("entity");
+    store
+        .set_entity_marking(entity_id, Marking::TlpRed)
+        .expect("mark");
+    let data = store.load_investigation(investigation.id).expect("load");
+    let bundle = crate::ingest::export_stix_bundle(&data);
+    let objects = bundle["objects"].as_array().expect("objects");
+    assert!(objects.iter().any(|object| {
+        object["id"] == "marking-definition--5e57c739-391a-4eb3-b6be-7d15ca92d5ed"
+    }));
+    let domain = objects
+        .iter()
+        .find(|object| object["type"] == "domain-name")
+        .expect("domain");
+    assert_eq!(
+        domain["object_marking_refs"][0],
+        "marking-definition--5e57c739-391a-4eb3-b6be-7d15ca92d5ed"
+    );
+    let json = serde_json::to_string(&bundle).expect("json");
+    let report = crate::ingest::parse_stix(&json, "red.json").expect("parse");
+    let second = store
+        .create_investigation("STIX TLP import", "")
+        .expect("second");
+    store
+        .apply_batch(
+            ApplyContext {
+                investigation_id: second.id,
+                page_id: None,
+                job_id: None,
+            },
+            &report.batch,
+        )
+        .expect("import");
+    let imported = store.load_investigation(second.id).expect("imported");
+    let entity = imported
+        .entities
+        .iter()
+        .find(|entity| entity.value == "secret.example")
+        .expect("entity");
+    assert_eq!(entity.marking(), Marking::TlpRed);
+}
+
+#[test]
+fn stix_export_reimports_with_cited_graph() {
+    let (mut store, investigation) = store_with_investigation();
+    store
+        .apply_batch(
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            &dns_batch("stix-export"),
+        )
+        .expect("seed");
+    let data = store.load_investigation(investigation.id).expect("load");
+    let bundle = crate::ingest::export_stix_bundle(&data);
+    let json = serde_json::to_string(&bundle).expect("json");
+    let report = crate::ingest::parse_stix(&json, "export.json").expect("parse");
+    assert!(
+        report.batch.entities.iter().any(
+            |entity| entity.key.kind == EntityKind::Domain && entity.key.value == "example.com"
+        )
+    );
+    assert!(
+        report
+            .batch
+            .relationships
+            .iter()
+            .any(|relationship| relationship.kind == crate::model::relation::RESOLVES_TO)
+    );
+    let second = store
+        .create_investigation("STIX import", "")
+        .expect("second");
+    store
+        .apply_batch(
+            ApplyContext {
+                investigation_id: second.id,
+                page_id: None,
+                job_id: None,
+            },
+            &report.batch,
+        )
+        .expect("import");
+    let imported = store.load_investigation(second.id).expect("imported");
+    assert!(
+        imported
+            .entities
+            .iter()
+            .any(|entity| entity.kind == EntityKind::Domain && entity.value == "example.com")
+    );
+    assert!(
+        imported
+            .entities
+            .iter()
+            .any(|entity| entity.kind == EntityKind::Ip && entity.value == "192.0.2.10")
+    );
+    assert!(
+        imported
+            .sources
+            .iter()
+            .all(|source| source.provenance == Provenance::External)
+    );
+}
+
+#[test]
+fn pending_api_actions_are_not_applied() {
+    let (mut store, investigation) = store_with_investigation();
+    let proposals = store
+        .insert_pending_actions(
+            investigation.id,
+            "api",
+            vec![AgentAction::AddFinding {
+                title: "must stay pending".into(),
+                details: String::new(),
+                confidence: None,
+                sources: Vec::new(),
+            }],
+        )
+        .expect("propose");
+    assert_eq!(proposals.len(), 1);
+    assert_eq!(proposals[0].status, ProposalStatus::Pending);
+    let data = store.load_investigation(investigation.id).expect("load");
+    assert!(data.findings.is_empty());
+}
+
+#[test]
+fn scale_seed_and_incremental_patch_stay_consistent() {
+    let (mut store, investigation) = store_with_investigation();
+    store.seed_scale_graph(investigation.id, 250).expect("seed");
+    let data = store.load_investigation(investigation.id).expect("load");
+    assert_eq!(data.entities.len(), 250);
+    let mut workspace = Workspace::new(data);
+    let finding = store
+        .create_finding(NewFinding {
+            investigation_id: investigation.id,
+            page_id: None,
+            title: "scale note".into(),
+            details: String::new(),
+            confidence: Confidence::Low,
+            provenance: Provenance::Analyst,
+            source_ids: Vec::new(),
+        })
+        .expect("finding");
+    workspace.apply_delta(WorkspaceDelta {
+        findings: vec![finding.clone()],
+        ..WorkspaceDelta::default()
+    });
+    assert_eq!(workspace.data.findings.len(), 1);
+    assert_eq!(workspace.data.entities.len(), 250);
+    assert_eq!(
+        workspace.finding(finding.id).map(|row| row.title.as_str()),
+        Some("scale note")
+    );
 }

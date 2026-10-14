@@ -67,7 +67,9 @@ A useful order:
 | `exchange/` | Versioned, path-independent import and export of investigations. |
 | `app/` | `App` owns config, store, workspace, job manager, and all UI state (including `GraphState` and `TimelineState`). Keys map to `Action`s; `App::dispatch` performs state transitions and side effects. Per-investigation `ui_state` restores the last view, page, and agent thread after restart. Long notes open `$EDITOR` / `$VISUAL` without a shell. |
 | `tui/` | Terminal setup and restore, the async event loop, theme, keymap, widgets, screens, and overlays. Rendering is a pure function of `App`. |
-| `cli/` | Clap definitions and non-TUI commands (`list`, `new`, `open`, `export`, `import`, `collect`, `ingest`, `playbook`, `watch`, `report`, `geojson`, `cooccur`, `marking`, `team`, `audit`, `doctor`, `config`). |
+| `cli/` | Clap definitions and non-TUI commands (`list`, `new`, `open`, `export`, `import`, `collect`, `ingest`, `playbook`, `watch`, `report`, `geojson`, `cooccur`, `marking`, `team`, `audit`, `get`, `objects`, `search-around`, `resolve`, `serve`, `bench`, `doctor`, `config`). |
+| `api/` | Localhost ontology HTTP API (`os-int serve`). Token auth. Read + Action propose. OpenAPI at `/openapi.json`. |
+| `query/` | Scriptable list/get/search-around/resolve helpers shared by the CLI and the API. |
 
 ## Where to make a change
 
@@ -88,6 +90,9 @@ A useful order:
 | Change Search Around or graph caps | `model/graph.rs` (pure query), then `storage/graph.rs` (`Store::search_around`), then `app/graph.rs` and `tui/screens.rs` |
 | Change Events, overlay timeline, or co-occurrence | `model/event.rs`, `model/timeline.rs`, `model/cooccur.rs`, `storage/events.rs`, then Timeline screen / `os-int cooccur` |
 | Change markings, audit, or roles | `model/marking.rs`, `model/audit.rs`, `model/collaboration.rs`, `storage/audit.rs`, `storage/collaboration.rs`, then Overview / Audit / `os-int marking` / `os-int team` / [collaboration.md](collaboration.md) |
+| Change the HTTP API or scriptable get/search-around/resolve | `src/api/`, `src/query.rs`, `os-int serve` / `os-int get`, [api.md](api.md) |
+| Change STIX export or the Object/Link mapping | `src/ingest/stix.rs`, `src/ingest/stix_export.rs`, [connectors.md](connectors.md#stix-21) |
+| Change incremental reload or scale benches | `model/workspace.rs` (`WorkspaceDelta`), `storage/delta.rs`, `storage/scale.rs`, [scale.md](scale.md) |
 | Change geo fields or GeoJSON | `model/geo.rs`, `src/geo/`, IP/RDAP collectors, `os-int export --format geojson` |
 | Change merge, unresolve, or suggestion rules | `model/resolution.rs` (bags + scoring), `storage/resolution.rs`, then `app/resolution.rs` and Object View |
 | Add a palette command | `app/commands.rs`, then handle the id in `App::run_command` |
@@ -107,7 +112,7 @@ key press ──▶ keymap ──▶ Action ──▶ App::dispatch ──┬─
 
 - The event loop (`tui::run`) `select!`s over terminal events, job events, an optional tick (only while jobs are running, for elapsed-time display), and `SIGTERM` / `SIGHUP`. It redraws only when state is marked dirty.
 - Collector output is applied in one SQLite transaction: sources are inserted, entities are upserted by `(kind, canonical value)`, relationships are upserted by `(from, kind, to)`, and every link records its supporting source.
-- A whole-workspace reload follows mutations. That keeps the UI consistent with the database. It is fast for investigations with thousands of records.
+- Opening a case still loads a full snapshot. Hot mutations (finding, note, page, marking, member, collector apply) merge a `WorkspaceDelta` into the in-memory `Workspace` so a 100k-object case does not rebuild every index. Resolution, playbooks, ingest, and reports still reload. See [scale.md](scale.md).
 
 ## Storage layout
 
@@ -150,7 +155,8 @@ Database rows store **relative** paths inside the investigation directory, so an
 | Own text input widgets | Avoids locking the crate to a Ratatui version older than the one in use. `$EDITOR` is supported for long notes. |
 | `aws-lc-rs` as the single rustls crypto provider | It is the default for the reqwest and rustls versions this crate uses. One provider avoids compiling two. |
 | Short ids (`S-12`) are per-investigation sequence numbers. UUIDs are the primary keys | Humans and agents cite short ids. UUIDs keep import and export collision-free. |
-| Whole-workspace reload after mutations | Keeps the UI consistent with the database with very little code. Fast for investigations with thousands of records. |
+| Incremental `WorkspaceDelta` after hot mutations; full reload when opening a case or after merge/playbook/ingest | Full reload stayed simple through Phase 7. Phase 8 patches hot paths so common actions stay under 50 ms at 100k objects. |
+| Localhost HTTP API with a config token; Actions stay pending | Ontology as a bus for scripts and enterprise investigation platforms. AI / API never commits. Bind defaults to `127.0.0.1`. |
 | Collectors return batches and do not touch SQLite | The CLI and the TUI share one apply path, and collectors stay testable without a database. |
 | Evidence Batch sidecars instead of forking the crate | External connectors print versioned JSON on stdout; ingest parses it; apply stays in storage. |
 | Subprocesses go through `exec/` | One place enforces "no shell", timeouts, output bounds, cancellation, and redaction. |
@@ -187,6 +193,8 @@ Database rows store **relative** paths inside the investigation directory, so an
 - [Playbooks](playbooks.md)
 - [Ontology Exchange Format](ontology-exchange.md)
 - [Collaboration](collaboration.md)
+- [HTTP API](api.md)
+- [Scale](scale.md)
 - [Vision](../VISION.md)
 - [Phased roadmap](../PHASED_ROADMAP.md)
 - [Contributing](../CONTRIBUTING.md)

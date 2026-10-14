@@ -22,8 +22,8 @@
 | 4 | Ingest plane & connectors | Done ([#8](https://github.com/pjourney/osint-rat/pull/8)) |
 | 5 | Playbooks & automations | Done ([#9](https://github.com/pjourney/osint-rat/pull/9)) |
 | 6 | Temporal & geospatial | Done ([#10](https://github.com/pjourney/osint-rat/pull/10)) |
-| 7 | Team, markings & audit | In progress ([#11](https://github.com/pjourney/osint-rat/pull/11)) |
-| 8 | Scale, API & STIX | Not started |
+| 7 | Team, markings & audit | Done ([#11](https://github.com/pjourney/osint-rat/pull/11)) |
+| 8 | Scale, API & STIX | In progress ([#12](https://github.com/pjourney/osint-rat/pull/12)) |
 | 9 | Distribution, demos & open platform | Not started |
 
 ---
@@ -308,10 +308,10 @@ Investigations larger than whole-workspace reload; ontology as an operational bu
 
 ### Success criteria
 
-- [ ] Benchmark doc: load/query times for fixture sizes (1k / 10k / 100k entities) on reference hardware; no UI freeze > N ms on common actions (state N in PR).
-- [ ] HTTP API serves Object View data for one investigation with token auth; unauthorized requests fail.
-- [ ] STIX export imports into a second empty investigation with acceptable fidelity (documented).
-- [ ] Regression tests; CI green; `docs/api.md` published.
+- [x] Benchmark doc: load/query times for fixture sizes (1k / 10k / 100k entities) on reference hardware; no UI freeze > N ms on common actions (state N in PR).
+- [x] HTTP API serves Object View data for one investigation with token auth; unauthorized requests fail.
+- [x] STIX export imports into a second empty investigation with acceptable fidelity (documented).
+- [x] Regression tests; CI green; `docs/api.md` published.
 
 ### How to complete
 

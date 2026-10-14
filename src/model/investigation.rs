@@ -21,7 +21,7 @@ pub struct Investigation {
 }
 
 /// An investigation plus record counts, for listings.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InvestigationSummary {
     pub investigation: Investigation,
     pub page_count: i64,

@@ -319,6 +319,13 @@ fn read_automation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Automation> {
 
 fn merge_summary(into: &mut ApplySummary, part: ApplySummary) {
     into.source_ids.extend(part.source_ids);
+    into.entity_ids.extend(part.entity_ids);
+    into.relationship_ids.extend(part.relationship_ids);
+    into.finding_ids.extend(part.finding_ids);
+    into.deleted_finding_ids.extend(part.deleted_finding_ids);
+    into.timeline_ids.extend(part.timeline_ids);
+    into.event_ids.extend(part.event_ids);
+    into.artifact_ids.extend(part.artifact_ids);
     into.new_sources += part.new_sources;
     into.unchanged_sources += part.unchanged_sources;
     into.new_entities += part.new_entities;

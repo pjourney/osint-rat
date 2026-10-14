@@ -92,4 +92,4 @@ pub use source::{Source, SourceKind};
 pub use target::{Target, TargetError, TargetKind, is_subdomain_of};
 pub use time::parse_timestamp_untrusted;
 pub use timeline::{TimelineEvent, TimelineKind, TimelineRow, TimelineRowOrigin, overlay_timeline};
-pub use workspace::{InvestigationData, PageEntityLink, Workspace};
+pub use workspace::{InvestigationData, PageEntityLink, Workspace, WorkspaceDelta};

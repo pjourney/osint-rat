@@ -4,6 +4,7 @@ Two related payloads move investigation data in and out of os-int:
 
 1. **Investigation archive** — the on-disk export written by `os-int export` (`investigation.osint.json` plus a `files/` tree). This is format `os-int-investigation`, version **`4`**.
 2. **Evidence batch** — the in-memory and connector payload collectors and ingest return. `storage::apply` writes it in one transaction. On disk / sidecar stdout it uses envelope `format` `os-int-evidence-batch`, `format_version` **1** (`ingest::BATCH_FORMAT_VERSION`). That constant is not the archive `FORMAT_VERSION`.
+3. **STIX 2.1 bundle** — `os-int export --format stix` / `os-int ingest --format stix`. A separate envelope (`type: bundle`, `spec_version: 2.1`). It does **not** bump archive `FORMAT_VERSION`. Mapping and gaps: [connectors.md](connectors.md#stix-21).
 
 This page describes **today’s** shapes from [`src/exchange.rs`](../src/exchange.rs), [`src/model/batch.rs`](../src/model/batch.rs), and [`docs/schema.md`](schema.md), then reserved later-version extension points and the rules for bumping `FORMAT_VERSION`. Version 2 ships **resolution bags** as `data.resolutions`. Version 3 ships **first-class Event objects** as `data.events`. Version 4 ships **structured markings** on `investigation.marking`, **`data.audit`**, and **`data.members`**. Playbook YAML is a **separate** envelope (`os-int-playbook`, `PLAYBOOK_FORMAT_VERSION` 1) and is not this archive. Do not emit reserved keys that are not listed as implemented.
 

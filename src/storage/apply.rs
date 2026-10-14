@@ -35,6 +35,21 @@ pub struct ApplyContext {
 pub struct ApplySummary {
     /// Source IDs in the same order as `EvidenceBatch::sources`.
     pub source_ids: Vec<Uuid>,
+    /// Entity IDs upserted from this batch (created or existing).
+    pub entity_ids: Vec<Uuid>,
+    /// Relationship IDs upserted from this batch.
+    pub relationship_ids: Vec<Uuid>,
+    /// Finding IDs created or updated from this batch.
+    pub finding_ids: Vec<Uuid>,
+    /// Finding IDs deleted by `resolved_findings`.
+    pub deleted_finding_ids: Vec<Uuid>,
+    /// Timeline event IDs inserted from this batch.
+    pub timeline_ids: Vec<Uuid>,
+    /// First-class Event IDs inserted from this batch.
+    pub event_ids: Vec<Uuid>,
+    /// Artifact IDs upserted from this batch.
+    pub artifact_ids: Vec<Uuid>,
+    pub page_id: Option<Uuid>,
     pub new_sources: usize,
     pub unchanged_sources: usize,
     pub new_entities: usize,
@@ -104,7 +119,10 @@ pub(crate) fn apply_batch_on(
     context: ApplyContext,
     batch: &EvidenceBatch,
 ) -> rusqlite::Result<ApplySummary> {
-    let mut summary = ApplySummary::default();
+    let mut summary = ApplySummary {
+        page_id: context.page_id,
+        ..ApplySummary::default()
+    };
     let changes = apply_sources(connection, context, batch, &mut summary)?;
     let entity_ids = apply_entities(connection, context, batch, &mut summary)?;
     apply_relationships(connection, context, batch, &entity_ids, &mut summary)?;
@@ -208,7 +226,8 @@ fn apply_observation_changes(
                 page_id: context.page_id,
             },
         )?;
-        if inserted {
+        if let Some(timeline_id) = inserted {
+            summary.timeline_ids.push(timeline_id);
             summary.new_events += 1;
             summary.changed_observations += 1;
         }
@@ -218,7 +237,7 @@ fn apply_observation_changes(
             .unwrap_or_default();
         let mut fields = Fields::new();
         fields.set("change_intelligence", "observation_hash");
-        let _ = insert_event(
+        if let Some(event_id) = insert_event(
             connection,
             EventInsert {
                 investigation_id: context.investigation_id,
@@ -233,7 +252,9 @@ fn apply_observation_changes(
                 fields,
                 entity_ids,
             },
-        )?;
+        )? {
+            summary.event_ids.push(event_id);
+        }
     }
     Ok(())
 }
@@ -246,9 +267,12 @@ fn apply_diagnostic_findings(
 ) -> rusqlite::Result<()> {
     if honors_resolved_findings(batch) {
         for title in &batch.resolved_findings {
-            if clear_collected_finding(connection, context.investigation_id, title)? {
+            if let Some(finding_id) =
+                clear_collected_finding(connection, context.investigation_id, title)?
+            {
+                summary.deleted_finding_ids.push(finding_id);
                 summary.resolved_findings += 1;
-                promote_diagnostic_event(
+                if let Some(event_id) = promote_diagnostic_event(
                     connection,
                     context,
                     title,
@@ -256,7 +280,9 @@ fn apply_diagnostic_findings(
                     Provenance::Collected,
                     None,
                     "diagnostic_clear",
-                )?;
+                )? {
+                    summary.event_ids.push(event_id);
+                }
             }
         }
     }
@@ -286,9 +312,10 @@ fn apply_diagnostic_findings(
             )?
         };
         match sync {
-            FindingSync::Created => {
+            FindingSync::Created(finding_id) => {
                 summary.new_findings += 1;
-                promote_diagnostic_event(
+                summary.finding_ids.push(finding_id);
+                if let Some(event_id) = promote_diagnostic_event(
                     connection,
                     context,
                     &finding.title,
@@ -296,9 +323,14 @@ fn apply_diagnostic_findings(
                     finding.provenance,
                     source_ids.first().copied(),
                     "diagnostic_open",
-                )?;
+                )? {
+                    summary.event_ids.push(event_id);
+                }
             }
-            FindingSync::Updated => summary.updated_findings += 1,
+            FindingSync::Updated(finding_id) => {
+                summary.updated_findings += 1;
+                summary.finding_ids.push(finding_id);
+            }
             FindingSync::LeftAlone => {}
         }
     }
@@ -313,7 +345,7 @@ fn promote_diagnostic_event(
     provenance: Provenance,
     source_id: Option<Uuid>,
     flip: &str,
-) -> rusqlite::Result<()> {
+) -> rusqlite::Result<Option<Uuid>> {
     let entity_ids = source_id
         .map(|id| entities_for_source(connection, id))
         .transpose()?
@@ -325,7 +357,7 @@ fn promote_diagnostic_event(
         "diagnostic_open" => format!("{title} opened"),
         other => format!("{title} {other}"),
     };
-    let _ = insert_event(
+    insert_event(
         connection,
         EventInsert {
             investigation_id: context.investigation_id,
@@ -340,8 +372,7 @@ fn promote_diagnostic_event(
             fields,
             entity_ids,
         },
-    )?;
-    Ok(())
+    )
 }
 
 /// Built-in collectors emit `Collected` sources. File/sidecar ingest forces `External`,
@@ -385,6 +416,7 @@ fn apply_entities(
         if created {
             summary.new_entities += 1;
         }
+        summary.entity_ids.push(entity_id);
         entity_ids.insert(entity.key.clone(), entity_id);
     }
     Ok(entity_ids)
@@ -415,6 +447,7 @@ fn apply_relationships(
                 link_relationship_source(connection, relationship_id, *source_id)?;
             }
         }
+        summary.relationship_ids.push(relationship_id);
         if created {
             summary.new_relationships += 1;
         }
@@ -456,7 +489,8 @@ fn apply_timeline(
                 page_id: context.page_id,
             },
         )?;
-        if inserted {
+        if let Some(timeline_id) = inserted {
+            summary.timeline_ids.push(timeline_id);
             summary.new_events += 1;
         }
     }
@@ -499,7 +533,8 @@ fn apply_events(
                 entity_ids: linked,
             },
         )?;
-        if inserted {
+        if let Some(event_id) = inserted {
+            summary.event_ids.push(event_id);
             summary.new_events += 1;
         }
     }
@@ -516,13 +551,16 @@ fn apply_artifacts(
         let source_id = artifact
             .source
             .and_then(|key| summary.source_ids.get(key).copied());
-        let (_, created) = insert_artifact(
+        let (artifact_id, created) = insert_artifact(
             connection,
             context.investigation_id,
             context.page_id,
             artifact,
             source_id,
         )?;
+        if artifact_id != Uuid::nil() {
+            summary.artifact_ids.push(artifact_id);
+        }
         if created {
             summary.new_artifacts += 1;
         }

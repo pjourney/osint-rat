@@ -85,12 +85,33 @@ In the workbench: `i` or palette **Ingest file**. Left/Right cycles the format. 
 
 | Format | What is imported |
 | --- | --- |
-| STIX 2.1 | Bundle (or a single SDO): `indicator`, `observed-data`, `malware`, `identity`, `relationship`. Other types are skipped with a warning. |
+| STIX 2.1 | Bundle (or a single SDO): `indicator`, `observed-data`, `malware`, `identity`, `relationship`, and top-level cyber observables (`domain-name`, `ipv4-addr`, …). Other types are skipped with a warning. |
 | MISP | Event JSON (`{"Event": …}` or a bare event). Attributes become objects; email → domain gets `hosted_on`. Unsupported types are skipped. |
 | CSV / JSON | Observables with column mapping. Email rows also emit `hosted_on`. |
 | Batch | Envelope or raw `EvidenceBatch`. |
 
 Every imported source and finding is cited on the objects and links it produced. Provenance is `external` (never `collected` or `agent`).
+
+### STIX 2.1 export
+
+`os-int export CASE --format stix -o bundle.json` writes a STIX 2.1 bundle (not the investigation archive; `FORMAT_VERSION` is unchanged). Re-ingest with `os-int ingest bundle.json --format stix` into a second empty case.
+
+| os-int | STIX 2.1 | Notes |
+| --- | --- | --- |
+| Domain / hostname | `domain-name` | Hostname sets `x_osint_kind=hostname` so import can restore the kind |
+| IP | `ipv4-addr` / `ipv6-addr` | Colon in the value selects IPv6 |
+| Email / URL / username | `email-addr` / `url` / `user-account` | Repository also exports as `url` |
+| ASN | `autonomous-system` | |
+| File | `file` | |
+| Certificate | `x509-certificate` | SHA-256 in `hashes` |
+| Person / organization | `identity` | `identity_class` individual / organization |
+| Unknown with `stix_type=malware` | `malware` | |
+| Finding | `indicator` | Pattern from a cited entity, or `[file:name = 'title']` |
+| Event with entity links | `observed-data` | `first_observed` / `last_observed` |
+| Relationship | `relationship` | `resolves_to` → `resolves-to`; others `related-to` plus `x_osint_relationship` |
+| TLP on the case or object | `marking-definition` + `object_marking_refs` | Official OASIS TLP UUIDs. Each SDO/SCO/relationship gets `max(case, entity)`. TLP:CLEAR maps to TLP:WHITE. TLP:AMBER+STRICT is a statement marking with `x_osint_marking`. Import restores object markings. |
+
+**Documented gaps (acceptable fidelity):** pages, notes, artifacts, jobs, proposals, resolution bags, audit, members, and per-source collector provenance do not have STIX equivalents. Re-import stores one `SourceKind::Stix` source with provenance `external` (ingest rule). `x_osint_kind` on observables and identities, `x_osint_relationship` on links, and `x_osint_marking` / `object_marking_refs` are restored; other `x_osint_*` properties stay in the JSON only. Absorbed resolution constituents are omitted (canonical only). Case-level TLP is not written onto the destination investigation row (objects carry the restriction).
 
 Sample fixtures: [`tests/fixtures/ingest/`](../tests/fixtures/ingest/).
 

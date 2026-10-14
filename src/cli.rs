@@ -12,8 +12,8 @@ use crate::ingest::{
 };
 use crate::jobs::JobContext;
 use crate::model::{
-    AuditKind, JobRecord, JobStatus, MAX_CONCURRENT_PLAYBOOK_JOBS, Marking, PageKind, Role, Target,
-    TargetKind, Workspace, now,
+    AgentAction, AuditKind, DEFAULT_SEARCH_HOPS, EntityKind, JobRecord, JobStatus,
+    MAX_CONCURRENT_PLAYBOOK_JOBS, Marking, PageKind, Role, Target, TargetKind, Workspace, now,
 };
 use crate::paths::AppPaths;
 use crate::playbook::{
@@ -236,6 +236,88 @@ pub enum Command {
         /// Optional kind filter (`merge`, `accept`, `export`, `playbook`, `marking`).
         #[arg(long)]
         kind: Option<String>,
+    },
+    /// Print Object View JSON for an entity (`E-n`) or page (`P-n`).
+    Get {
+        /// Investigation name, UUID, or unique UUID prefix.
+        investigation: String,
+        /// Short reference (`E-1`) or UUID.
+        reference: String,
+    },
+    /// List visible entities as JSON (scriptable).
+    Objects {
+        /// Investigation name, UUID, or unique UUID prefix.
+        investigation: String,
+        /// Optional entity kind filter (`domain`, `ip`, …).
+        #[arg(long)]
+        kind: Option<String>,
+    },
+    /// Search Around a seed entity and print JSON.
+    #[command(name = "search-around")]
+    SearchAround {
+        /// Investigation name, UUID, or unique UUID prefix.
+        investigation: String,
+        /// Seed entity short reference (`E-1`) or UUID.
+        seed: String,
+        /// Hop depth (default 2).
+        #[arg(long)]
+        hops: Option<u32>,
+        /// Optional entity kind filter.
+        #[arg(long)]
+        kind: Option<String>,
+        /// Optional link-type filter (`resolves_to`, …).
+        #[arg(long)]
+        link: Option<String>,
+    },
+    /// Suggest, propose, or apply entity resolution. Merge is an analyst action; propose stays pending.
+    Resolve {
+        #[command(subcommand)]
+        command: ResolveCommand,
+    },
+    /// Serve the localhost ontology HTTP API (read + Action propose).
+    Serve {
+        /// Bind address. Defaults to `[api].bind` then `127.0.0.1:8743`.
+        #[arg(long)]
+        bind: Option<String>,
+        /// Bearer token. Defaults to `[api].token`, then `OS_INT_API_TOKEN`, then an ephemeral token.
+        #[arg(long, env = "OS_INT_API_TOKEN")]
+        token: Option<String>,
+        /// Allow binding to a non-loopback address. Refused by default.
+        #[arg(long)]
+        allow_non_loopback: bool,
+    },
+    /// Measure load/query times for synthetic graphs (1k / 10k / 100k).
+    Bench {
+        /// Comma-separated entity counts. Default: `1000,10000,100000`.
+        #[arg(long)]
+        sizes: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ResolveCommand {
+    /// Print scored merge suggestions. Never merges.
+    Suggest { investigation: String },
+    /// Store a pending PROPOSE_RESOLVE Action. Does not merge.
+    Propose {
+        investigation: String,
+        /// Entity refs or UUIDs. First is the intended canonical.
+        entities: Vec<String>,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Merge entities (analyst action). First id is canonical.
+    Merge {
+        investigation: String,
+        entities: Vec<String>,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Split a previously resolved bag.
+    Unresolve {
+        investigation: String,
+        /// Canonical entity or resolution ref (`E-n` / `V-n`).
+        target: String,
     },
 }
 
@@ -470,6 +552,35 @@ pub async fn run_with(cli: Cli) -> Result<()> {
             ref investigation,
             ref kind,
         }) => audit_command(&cli, investigation, kind.as_deref()),
+        Some(Command::Get {
+            ref investigation,
+            ref reference,
+        }) => get_object_command(&cli, investigation, reference),
+        Some(Command::Objects {
+            ref investigation,
+            ref kind,
+        }) => objects_command(&cli, investigation, kind.as_deref()),
+        Some(Command::SearchAround {
+            ref investigation,
+            ref seed,
+            hops,
+            ref kind,
+            ref link,
+        }) => search_around_command(
+            &cli,
+            investigation,
+            seed,
+            hops,
+            kind.as_deref(),
+            link.as_deref(),
+        ),
+        Some(Command::Resolve { ref command }) => resolve_command(&cli, command),
+        Some(Command::Serve {
+            ref bind,
+            ref token,
+            allow_non_loopback,
+        }) => serve_command(&cli, bind.as_deref(), token.as_deref(), allow_non_loopback).await,
+        Some(Command::Bench { ref sizes }) => bench_command(&cli, sizes.as_deref()),
     }
 }
 
@@ -516,8 +627,9 @@ fn export(cli: &Cli, query: &str, output: Option<&std::path::Path>, format: &str
     match format.trim().to_ascii_lowercase().as_str() {
         "archive" | "osint" | "" => export_archive(cli, query, output),
         "geojson" | "geo" => geojson(cli, query, output),
+        "stix" | "stix2" | "stix2.1" => export_stix(cli, query, output),
         other => Err(user_err(format!(
-            "unknown export format {other:?}; use archive or geojson"
+            "unknown export format {other:?}; use archive, geojson, or stix"
         ))),
     }
 }
@@ -1328,6 +1440,281 @@ fn audit_command(cli: &Cli, query: &str, kind: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+fn print_json(value: &impl serde::Serialize) -> Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(value).wrap_err("could not serialize JSON")?
+    );
+    Ok(())
+}
+
+fn export_stix(cli: &Cli, query: &str, output: Option<&std::path::Path>) -> Result<()> {
+    let mut runtime = Runtime::load(cli)?;
+    let investigation = runtime.store.require_investigation(query)?;
+    let data = runtime.store.load_investigation(investigation.id)?;
+    let bundle = crate::ingest::export_stix_bundle(&data);
+    let json = serde_json::to_string_pretty(&bundle).wrap_err("could not serialize STIX")?;
+    let destination = match output {
+        Some(path) => path.to_path_buf(),
+        None => PathBuf::from(format!(
+            "{}-stix.json",
+            crate::paths::sanitize_filename(&investigation.name)
+        )),
+    };
+    crate::files::write_atomically(&destination, json.as_bytes())
+        .wrap_err_with(|| format!("could not write {}", destination.display()))?;
+    runtime
+        .store
+        .record_export(investigation.id, &destination.display().to_string())?;
+    let count = bundle
+        .get("objects")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    println!(
+        "Wrote STIX 2.1 bundle with {count} object(s) to {}",
+        destination.display()
+    );
+    Ok(())
+}
+
+fn get_object_command(cli: &Cli, query: &str, reference: &str) -> Result<()> {
+    let runtime = Runtime::load(cli)?;
+    let investigation = runtime.store.require_investigation(query)?;
+    let view = crate::query::object_view_for_ref(&runtime.store, investigation.id, reference)
+        .map_err(user_err)?;
+    print_json(&view)
+}
+
+fn objects_command(cli: &Cli, query: &str, kind: Option<&str>) -> Result<()> {
+    let runtime = Runtime::load(cli)?;
+    let investigation = runtime.store.require_investigation(query)?;
+    let data = runtime.store.load_investigation(investigation.id)?;
+    let workspace = Workspace::new(data);
+    let parsed = kind.map(EntityKind::parse);
+    let objects = crate::query::list_objects(&workspace, parsed.as_ref());
+    print_json(&objects)
+}
+
+fn search_around_command(
+    cli: &Cli,
+    query: &str,
+    seed: &str,
+    hops: Option<u32>,
+    kind: Option<&str>,
+    link: Option<&str>,
+) -> Result<()> {
+    let runtime = Runtime::load(cli)?;
+    let investigation = runtime.store.require_investigation(query)?;
+    let data = runtime.store.load_investigation(investigation.id)?;
+    let workspace = Workspace::new(data);
+    let kinds = kind
+        .map(|value| vec![EntityKind::parse(value)])
+        .unwrap_or_default();
+    let links = link
+        .map(|value| vec![value.to_string()])
+        .unwrap_or_default();
+    let view = crate::query::search_around_view(
+        &workspace,
+        seed,
+        hops.unwrap_or(DEFAULT_SEARCH_HOPS),
+        &kinds,
+        &links,
+    )
+    .map_err(user_err)?;
+    print_json(&view)
+}
+
+fn resolve_command(cli: &Cli, command: &ResolveCommand) -> Result<()> {
+    match command {
+        ResolveCommand::Suggest { investigation } => {
+            let runtime = Runtime::load(cli)?;
+            let investigation = runtime.store.require_investigation(investigation)?;
+            let data = runtime.store.load_investigation(investigation.id)?;
+            let workspace = Workspace::new(data);
+            print_json(&crate::query::resolution_suggestion_views(&workspace))
+        }
+        ResolveCommand::Propose {
+            investigation,
+            entities,
+            reason,
+        } => {
+            let mut runtime = Runtime::load(cli)?;
+            let investigation = runtime.store.require_investigation(investigation)?;
+            if entities.len() < 2 {
+                return Err(user_err("propose needs at least two entity refs"));
+            }
+            let action = AgentAction::ProposeResolve {
+                entities: entities.clone(),
+                reason: reason.clone().unwrap_or_default(),
+            };
+            let proposals = crate::query::propose_actions(
+                &mut runtime.store,
+                investigation.id,
+                "cli",
+                vec![action],
+            )
+            .map_err(user_err)?;
+            print_json(&proposals)
+        }
+        ResolveCommand::Merge {
+            investigation,
+            entities,
+            reason,
+        } => {
+            let mut runtime = Runtime::load(cli)?;
+            let investigation = runtime.store.require_investigation(investigation)?;
+            let data = runtime.store.load_investigation(investigation.id)?;
+            let workspace = Workspace::new(data);
+            let mut ids = Vec::new();
+            for raw in entities {
+                ids.push(resolve_entity_query(&workspace, raw)?);
+            }
+            if ids.len() < 2 {
+                return Err(user_err("merge needs at least two distinct entities"));
+            }
+            let canonical = ids[0];
+            let actor = runtime.store.identity().user_id.clone();
+            let resolution = runtime.store.resolve_entities(
+                investigation.id,
+                &ids,
+                canonical,
+                reason.as_deref().unwrap_or("cli merge"),
+                &actor,
+            )?;
+            println!(
+                "Merged {} into {}",
+                ids.len(),
+                workspace
+                    .ref_of(resolution.canonical_id)
+                    .map(|reference| reference.to_string())
+                    .unwrap_or_else(|| canonical.to_string())
+            );
+            Ok(())
+        }
+        ResolveCommand::Unresolve {
+            investigation,
+            target,
+        } => {
+            let mut runtime = Runtime::load(cli)?;
+            let investigation = runtime.store.require_investigation(investigation)?;
+            let data = runtime.store.load_investigation(investigation.id)?;
+            let workspace = Workspace::new(data);
+            let resolution_id = if let Ok(reference) = target.parse::<crate::model::ShortRef>()
+                && reference.kind == crate::model::RefKind::Resolution
+            {
+                workspace
+                    .resolve_ref(reference)
+                    .ok_or_else(|| user_err(format!("unknown resolution {target}")))?
+            } else {
+                let entity_id = resolve_entity_query(&workspace, target)?;
+                workspace
+                    .latest_active_resolution(entity_id)
+                    .map(|resolution| resolution.id)
+                    .ok_or_else(|| user_err(format!("no active resolution for {target}")))?
+            };
+            let actor = runtime.store.identity().user_id.clone();
+            runtime.store.unresolve_entities(resolution_id, &actor)?;
+            println!("Unresolved {target}");
+            Ok(())
+        }
+    }
+}
+
+async fn serve_command(
+    cli: &Cli,
+    bind: Option<&str>,
+    token: Option<&str>,
+    allow_non_loopback: bool,
+) -> Result<()> {
+    let runtime = Runtime::load(cli)?;
+    let mut options = crate::api::ServeOptions::from_config(&runtime.config.api, bind, token)
+        .map_err(user_err)?;
+    options.allow_non_loopback = allow_non_loopback;
+    crate::api::serve(runtime.store, options).await
+}
+
+fn bench_command(cli: &Cli, sizes: Option<&str>) -> Result<()> {
+    let mut runtime = Runtime::load(cli)?;
+    let counts = parse_bench_sizes(sizes)?;
+    let mut rows = Vec::new();
+    for count in counts {
+        rows.push(run_bench_size(&mut runtime.store, count)?);
+    }
+    print_json(&rows)
+}
+
+fn parse_bench_sizes(sizes: Option<&str>) -> Result<Vec<usize>> {
+    let raw = sizes.unwrap_or("1000,10000,100000");
+    let mut counts = Vec::new();
+    for part in raw.split(',') {
+        let count: usize = part
+            .trim()
+            .parse()
+            .map_err(|_| user_err(format!("invalid bench size {part:?}")))?;
+        if count == 0 {
+            return Err(user_err("bench size must be > 0"));
+        }
+        counts.push(count);
+    }
+    Ok(counts)
+}
+
+fn run_bench_size(store: &mut Store, entity_count: usize) -> Result<serde_json::Value> {
+    let name = format!("bench-{entity_count}");
+    if store.find_investigation(&name)?.is_some() {
+        // Unique name per run so repeated benches do not collide.
+    }
+    let unique = format!("{name}-{}", Uuid::new_v4().simple());
+    let investigation = store.create_investigation(&unique, "scale fixture")?;
+    let seed_started = std::time::Instant::now();
+    store.seed_scale_graph(investigation.id, entity_count)?;
+    let seed_ms = seed_started.elapsed().as_secs_f64() * 1000.0;
+    let load_started = std::time::Instant::now();
+    let data = store.load_investigation(investigation.id)?;
+    let load_ms = load_started.elapsed().as_secs_f64() * 1000.0;
+    let index_started = std::time::Instant::now();
+    let mut workspace = Workspace::new(data);
+    let index_ms = index_started.elapsed().as_secs_f64() * 1000.0;
+    let seed_id = workspace.data.entities.first().map(|entity| entity.id);
+    let search_ms = if let Some(seed_id) = seed_id {
+        let started = std::time::Instant::now();
+        let query = crate::model::SearchAroundQuery::new(vec![seed_id], 2);
+        let _ = crate::model::search_around(&workspace.data, &query);
+        started.elapsed().as_secs_f64() * 1000.0
+    } else {
+        0.0
+    };
+    let patch_started = std::time::Instant::now();
+    let finding = store.create_finding(crate::storage::NewFinding {
+        investigation_id: investigation.id,
+        page_id: None,
+        title: "bench finding".into(),
+        details: String::new(),
+        confidence: crate::model::Confidence::Low,
+        provenance: crate::model::Provenance::Analyst,
+        source_ids: Vec::new(),
+    })?;
+    workspace.apply_delta(crate::model::WorkspaceDelta {
+        findings: vec![finding],
+        ..crate::model::WorkspaceDelta::default()
+    });
+    let patch_ms = patch_started.elapsed().as_secs_f64() * 1000.0;
+    let reload_started = std::time::Instant::now();
+    let _ = store.load_investigation(investigation.id)?;
+    let reload_ms = reload_started.elapsed().as_secs_f64() * 1000.0;
+    Ok(serde_json::json!({
+        "entities": entity_count,
+        "seed_ms": seed_ms,
+        "load_ms": load_ms,
+        "index_ms": index_ms,
+        "search_around_2hop_ms": search_ms,
+        "incremental_finding_patch_ms": patch_ms,
+        "full_reload_ms": reload_ms,
+        "ui_mutation_budget_ms": 50,
+    }))
+}
+
 fn resolve_entity_query(workspace: &Workspace, query: &str) -> Result<uuid::Uuid> {
     if let Ok(uuid) = uuid::Uuid::parse_str(query) {
         return Ok(uuid);
@@ -1435,6 +1822,42 @@ mod tests {
         match export.command {
             Some(Command::Export { format, .. }) => assert_eq!(format, "geojson"),
             other => panic!("expected export {other:?}"),
+        }
+        let stix = Cli::try_parse_from(["os-int", "export", "Case", "--format", "stix"])
+            .expect("stix export");
+        match stix.command {
+            Some(Command::Export { format, .. }) => assert_eq!(format, "stix"),
+            other => panic!("expected export {other:?}"),
+        }
+        let get = Cli::try_parse_from(["os-int", "get", "Case", "E-1"]).expect("get");
+        assert!(matches!(get.command, Some(Command::Get { .. })));
+        let around = Cli::try_parse_from(["os-int", "search-around", "Case", "E-1", "--hops", "2"])
+            .expect("search-around");
+        assert!(matches!(
+            around.command,
+            Some(Command::SearchAround { hops: Some(2), .. })
+        ));
+        let serve =
+            Cli::try_parse_from(["os-int", "serve", "--bind", "127.0.0.1:0"]).expect("serve");
+        match serve.command {
+            Some(Command::Serve {
+                allow_non_loopback, ..
+            }) => assert!(!allow_non_loopback),
+            other => panic!("expected serve {other:?}"),
+        }
+        let exposed = Cli::try_parse_from([
+            "os-int",
+            "serve",
+            "--bind",
+            "0.0.0.0:8743",
+            "--allow-non-loopback",
+        ])
+        .expect("allow");
+        match exposed.command {
+            Some(Command::Serve {
+                allow_non_loopback, ..
+            }) => assert!(allow_non_loopback),
+            other => panic!("expected serve {other:?}"),
         }
     }
 
