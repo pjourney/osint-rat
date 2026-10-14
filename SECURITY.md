@@ -21,7 +21,7 @@ os-int is a local investigation notebook for observation, monitoring, and diagno
 - runs local agent CLIs and passive OSINT utilities as subprocesses
 - records when a later collection of the same public record has changed
 
-Built-in collectors perform ordinary DNS queries, RDAP lookups, a single HTTP(S) fetch of a user-specified URL, a TLS handshake, a query to the public crt.sh search, inspection of public git metadata, and inspection of a local file. Diagnostics describe published records (mail policy, response headers, certificate validity, DNSSEC, and `security.txt`).
+Built-in collectors perform ordinary DNS queries, RDAP lookups, a single HTTP(S) fetch of a user-specified URL, a TLS handshake, a query to the public crt.sh search, inspection of public git metadata, inspection of a local file, public profile URL checks, and passive subdomain expansion. Diagnostics describe published records (mail policy, response headers, certificate validity, DNSSEC, and `security.txt`). File ingest (STIX, MISP, CSV, Evidence Batch) treats the file as untrusted: size-capped, decoded without panicking, sanitized before display. Optional API connectors redact keys in logs and source content.
 
 ## What the process boundary covers
 
@@ -30,7 +30,7 @@ Subprocesses are constrained by:
 - no shell — arguments are an explicit argv
 - timeouts and bounded output
 - process-group kill on cancellation
-- refusal of tools whose configuration sets `activity = "active"`
+- refusal of tools and sidecars whose configuration sets `activity = "active"`
 - for Claude Code, `--tools ""`, so that CLI's built-in tools are disabled
 - for Codex, `--sandbox read-only`
 
@@ -57,7 +57,7 @@ Collected material is sanitized before it is drawn in the terminal, and wrapped 
 
 ## Secrets
 
-Built-in collectors do not need API keys. Avoid putting tokens in `config.toml` argument lists. Values that match common secret patterns are redacted in job displays and logs. Redaction is best-effort, and a token in an argument is still passed to the program you configured.
+Built-in collectors do not need API keys. Optional URLScan / OTX wrappers read `api_key_env` (preferred) or `api_key`; prefer the environment variable. Avoid putting tokens in `config.toml` argument lists. Values that match common secret patterns are redacted in job displays and logs. Redaction is best-effort, and a token in an argument is still passed to the program you configured.
 
 ## See also
 

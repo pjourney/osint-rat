@@ -1281,3 +1281,91 @@ fn unresolve_last_bag_removes_shared_writes_and_keeps_originals() {
         )
     );
 }
+
+#[test]
+fn ingest_after_merge_cites_constituents_and_unresolve_stays_clean() {
+    let (mut store, investigation) = store_with_investigation();
+    let domain = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Domain,
+            "evil.example",
+            Provenance::Analyst,
+            None,
+        )
+        .expect("domain");
+    let host = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Hostname,
+            "www.evil.example",
+            Provenance::Collected,
+            None,
+        )
+        .expect("host");
+    store
+        .resolve_entities(
+            investigation.id,
+            &[domain, host],
+            domain,
+            "same site",
+            "tester",
+        )
+        .expect("merge");
+    let report = crate::ingest::parse_stix(
+        r#"{
+          "type": "bundle",
+          "objects": [
+            {"type": "indicator", "name": "c2", "pattern": "[domain-name:value = 'evil.example']"},
+            {"type": "identity", "name": "Example Org", "identity_class": "organization"}
+          ]
+        }"#,
+        "stix.json",
+    )
+    .expect("stix");
+    store
+        .apply_batch(
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            &report.batch,
+        )
+        .expect("ingest");
+    let data = store.load_investigation(investigation.id).expect("load");
+    let workspace = Workspace::new(data.clone());
+    assert_eq!(workspace.canonical_id(host), domain);
+    assert!(workspace.data.is_absorbed(host));
+    let view = crate::model::ObjectView::for_entity(
+        &workspace,
+        workspace.entity(domain).expect("canonical"),
+    );
+    assert!(!view.sources.is_empty());
+    store
+        .apply_batch(
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            &report.batch,
+        )
+        .expect("reingest");
+    let again = store.load_investigation(investigation.id).expect("again");
+    let stix_sources = again
+        .sources
+        .iter()
+        .filter(|source| source.collector.as_deref() == Some("ingest:stix"))
+        .count();
+    assert_eq!(
+        stix_sources, 1,
+        "identical re-ingest must not duplicate sources"
+    );
+    let resolution_id = again.resolutions[0].id;
+    store
+        .unresolve_entities(resolution_id, "tester")
+        .expect("unresolve");
+    assert_eq!(store.integrity_check().expect("integrity"), "ok");
+    assert!(store.foreign_key_violations().expect("fk").is_empty());
+}

@@ -40,7 +40,7 @@ Every investigation-scoped table has:
 
 ## How a collection lands
 
-Collectors do not write these tables. They return an `EvidenceBatch`. `storage::apply` writes the batch in one transaction:
+Collectors, file ingest, and external sidecars do not write these tables. They return an `EvidenceBatch`. `storage::apply` writes the batch in one transaction:
 
 1. Insert sources. A source with the same collector, title, URL, and content hash is marked seen again instead of inserted (`find_duplicate_source`).
 2. Upsert entities on `(kind, canonical value)` and attach them to the page.
@@ -60,7 +60,7 @@ Search Around does not add a table. `Store::search_around` loads the investigati
 
 `os-int export` writes `investigation.osint.json` plus a `files/` tree. The JSON document's `data` object is the same shape as `InvestigationData`: the investigation and the rows above, with paths still relative. Import rejects an archive whose investigation id is already present unless you pass `--rename`.
 
-Format name: `os-int-investigation`. Format version: `2` (`exchange::FORMAT_VERSION`). Version 2 adds `data.resolutions`. `proposals.decided_by` and `resolutions` are optional (`#[serde(default)]`); version-1 archives still import (empty resolution list). Field list, EvidenceBatch ingest shape, reserved later-version keys, and bump rules: [Ontology Exchange Format](ontology-exchange.md). Object types and link verbs: [Ontology](ontology.md).
+Format name: `os-int-investigation`. Format version: `2` (`exchange::FORMAT_VERSION`). Version 2 adds `data.resolutions`. `proposals.decided_by` and `resolutions` are optional (`#[serde(default)]`); version-1 archives still import (empty resolution list). File ingest uses a **separate** envelope (`os-int-evidence-batch`, `format_version` 1) and does not bump the archive version. Field list, EvidenceBatch ingest shape, reserved later-version keys, and bump rules: [Ontology Exchange Format](ontology-exchange.md). Connectors: [connectors.md](connectors.md). Object types and link verbs: [Ontology](ontology.md).
 
 ## See also
 

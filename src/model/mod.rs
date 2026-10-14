@@ -30,8 +30,8 @@ pub mod workspace;
 pub use agent::{AgentAction, AgentRun, Proposal, ProposalStatus};
 pub use artifact::{Artifact, ArtifactKind};
 pub use batch::{
-    EntityKey, EvidenceBatch, NewArtifact, NewEntity, NewRelationship, NewSource, NewTimelineEvent,
-    SourceKey,
+    EntityKey, EvidenceBatch, NewArtifact, NewCollectedFinding, NewEntity, NewRelationship,
+    NewSource, NewTimelineEvent, SourceKey,
 };
 pub use common::{Confidence, Fields, Provenance, Timestamp, now};
 pub use entity::{Entity, EntityKind};
@@ -59,6 +59,6 @@ pub use resolution::{
     suggest_resolutions,
 };
 pub use source::{Source, SourceKind};
-pub use target::{Target, TargetError, TargetKind};
+pub use target::{Target, TargetError, TargetKind, is_subdomain_of};
 pub use timeline::{TimelineEvent, TimelineKind};
 pub use workspace::{InvestigationData, PageEntityLink, Workspace};

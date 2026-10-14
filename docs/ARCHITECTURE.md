@@ -26,11 +26,11 @@ A useful order:
 
 ## Principles
 
-1. **os-int orchestrates information, tools, sources, and agents.** Built-in collectors cover the passive basics. Everything else plugs in through the external tool registry or an agent CLI.
+1. **os-int orchestrates information, tools, sources, and agents.** Built-in collectors cover the passive basics. Everything else plugs in through the external tool registry, an Evidence Batch sidecar (`[[collectors.external]]`), file ingest, or an agent CLI.
 2. **Provenance is a first-class concept.** Every observation is tied to a `Source`. Findings, entities, and relationships reference sources. Every record carries a `Provenance` (`collected`, `external`, `analyst`, `agent`) so AI inference is never silently promoted to fact.
 3. **The UI thread never blocks on I/O.** HTTP, DNS, TLS, subprocesses, agent calls, HTML parsing, and report rendering run as background jobs on Tokio and report back through a bounded channel. SQLite writes stay on the UI task because they are small, transactional, and sub-millisecond for typical investigations. See [Decisions](#decisions).
 4. **Untrusted content is data.** Everything collected from the network, files, repositories, or tool output is sanitized before it is rendered, and fenced as untrusted evidence before it is shown to an agent.
-5. **Observation, not attack.** Built-in collectors perform ordinary DNS queries, RDAP lookups, single HTTP(S) fetches of user-specified targets, TLS handshakes, a public certificate-transparency search, and public repository inspection. Diagnostics describe published records (mail policy, response headers, certificate validity, DNSSEC, and `security.txt`). Gaps become collected findings and are removed when a later collection shows the check is in a good state. Tools marked `active` are refused. When a later collection of the same record has a new content hash, storage writes an "observation changed" timeline event.
+5. **Observation, not attack.** Built-in collectors perform ordinary DNS queries, RDAP lookups, single HTTP(S) fetches of user-specified targets, TLS handshakes, a public certificate-transparency search, public repository inspection, public profile URL checks, and passive subdomain expansion. Diagnostics describe published records (mail policy, response headers, certificate validity, DNSSEC, and `security.txt`). Gaps become collected findings and are removed when a later collection shows the check is in a good state. Tools marked `active` are refused. When a later collection of the same record has a new content hash, storage writes an "observation changed" timeline event.
 
 ## Layers
 
@@ -41,7 +41,7 @@ A useful order:
                 │ app/      App state, Actions, update logic    │  ◀── testable without a terminal
                 ├──────────────┬───────────────┬───────────────┤
                 │ jobs/        │ agent/        │ report/        │
-                │ collectors/  │ tools/        │ exchange/      │
+                │ collectors/  │ tools/        │ exchange/ingest│
                 ├──────────────┴───────────────┴───────────────┤
                 │ storage/  SQLite (rusqlite) + file store      │
                 ├──────────────────────────────────────────────┤
@@ -54,7 +54,8 @@ A useful order:
 | `model/` | Domain types: `Investigation`, `Page`, `Source`, `Finding`, `Entity`, `Relationship`, `Resolution`, `Note`, `Artifact`, `TimelineEvent`, `JobRecord`, `AgentRun`, `Proposal`. Object/link/Action registries and Object View data in `ontology`. Search Around and graph visibility in `graph`. Resolution bags and suggestion rules in `resolution`. Short references (`S-12`, `E-4`, `V-1`, …). No UI or storage code. |
 | `storage/` | `Store` wraps a SQLite connection: migrations, CRUD, applying collector output transactionally, loading a full `Workspace`. Graph query (`Store::search_around`) runs the same hop expansion as `model::search_around` on a loaded snapshot. Merge/unresolve lives in `storage/resolution.rs`. |
 | `files.rs` | Investigation directory layout and content-addressed snapshot storage. |
-| `collectors/` | `Collector` trait plus built-ins: DNS, RDAP, HTTP, TLS, certificate transparency, IP intelligence, repository, file. `diagnose` turns observations into structured readings. Collectors return a `CollectionOutput` and never touch the database. |
+| `collectors/` | `Collector` trait plus built-ins: DNS, RDAP, HTTP, TLS, certificate transparency, IP intelligence, repository, file, email, username, subdomain, optional API wrappers, and `[[collectors.external]]` sidecars. `diagnose` turns observations into structured readings. Collectors return a `CollectionOutput` and never touch the database. |
+| `ingest/` | STIX 2.1, MISP, CSV/JSON observables, and Evidence Batch parsing. Untrusted files are size-capped; malformed input is an error, not a panic. |
 | `tools/` | External tool registry: `PATH` detection, built-in and user-defined tool definitions, argument templates. |
 | `exec/` | The single place where subprocesses are spawned: no shell, explicit argv, timeouts, bounded output, process-group kill, cancellation, argument redaction for display and logs. |
 | `agent/` | Agent profiles (Claude Code, Codex, generic), `AgentContext` and its prompt serialization, the streaming runner and output parsers, structured action proposals. |
@@ -63,7 +64,7 @@ A useful order:
 | `exchange/` | Versioned, path-independent import and export of investigations. |
 | `app/` | `App` owns config, store, workspace, job manager, and all UI state (including `GraphState`). Keys map to `Action`s; `App::dispatch` performs state transitions and side effects. Per-investigation `ui_state` restores the last view, page, and agent thread after restart. Long notes open `$EDITOR` / `$VISUAL` without a shell. |
 | `tui/` | Terminal setup and restore, the async event loop, theme, keymap, widgets, screens, and overlays. Rendering is a pure function of `App`. |
-| `cli/` | Clap definitions and non-TUI commands (`list`, `new`, `open`, `export`, `import`, `collect`, `report`, `doctor`, `config`). |
+| `cli/` | Clap definitions and non-TUI commands (`list`, `new`, `open`, `export`, `import`, `collect`, `ingest`, `report`, `doctor`, `config`). |
 
 ## Where to make a change
 
@@ -71,6 +72,8 @@ A useful order:
 | --- | --- |
 | Add a field to a record | `model/`, then a migration in `storage/migrations.rs`, then the row mapping in `storage/` |
 | Add a passive collector | Implement `Collector`, register it in `CollectorRegistry::builtin`, and document it in [guide.md](guide.md#collectors) |
+| Add a file ingest format | `src/ingest/`, CLI `os-int ingest`, TUI `i` / FormKind::Ingest, [connectors.md](connectors.md) |
+| Add an external sidecar | `[[collectors.external]]` emitting Evidence Batch JSON; example under `examples/connectors/` |
 | Add a diagnostic reading | `collectors/diagnose.rs`. Record gaps with `record_findings` so a later good reading clears them |
 | Add a built-in external tool | `tools/registry.rs` (`builtin_tools`). Keep `activity` passive |
 | Change how processes are spawned | `exec/` only. Callers pass an argv. They do not build shell strings |
@@ -142,6 +145,7 @@ Database rows store **relative** paths inside the investigation directory, so an
 | Short ids (`S-12`) are per-investigation sequence numbers. UUIDs are the primary keys | Humans and agents cite short ids. UUIDs keep import and export collision-free. |
 | Whole-workspace reload after mutations | Keeps the UI consistent with the database with very little code. Fast for investigations with thousands of records. |
 | Collectors return batches and do not touch SQLite | The CLI and the TUI share one apply path, and collectors stay testable without a database. |
+| Evidence Batch sidecars instead of forking the crate | External connectors print versioned JSON on stdout; ingest parses it; apply stays in storage. |
 | Subprocesses go through `exec/` | One place enforces "no shell", timeouts, output bounds, cancellation, and redaction. |
 
 ## Glossary
@@ -166,6 +170,7 @@ Database rows store **relative** paths inside the investigation directory, so an
 - [Examples](examples.md)
 - [Database tables](schema.md)
 - [Ontology](ontology.md)
+- [Connectors](connectors.md)
 - [Ontology Exchange Format](ontology-exchange.md)
 - [Vision](../VISION.md)
 - [Phased roadmap](../PHASED_ROADMAP.md)

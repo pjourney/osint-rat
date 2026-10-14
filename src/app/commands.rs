@@ -59,6 +59,26 @@ pub const COMMANDS: &[Command] = &[
         hint: "",
     },
     Command {
+        id: "run_email",
+        title: "Run Email Identity Pack",
+        hint: "",
+    },
+    Command {
+        id: "run_username",
+        title: "Run Username Pack",
+        hint: "",
+    },
+    Command {
+        id: "run_subdomain",
+        title: "Run Subdomain Expansion",
+        hint: "",
+    },
+    Command {
+        id: "ingest",
+        title: "Ingest file",
+        hint: "i",
+    },
+    Command {
         id: "ask_agent",
         title: "Ask Agent",
         hint: "a",

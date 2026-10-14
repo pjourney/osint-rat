@@ -79,6 +79,38 @@ impl Registry {
 pub type BootstrapServices = Vec<(Vec<String>, Vec<String>)>;
 
 async fn collect(target: &Target, context: &CollectorContext) -> CollectResult {
+    match collect_rdap(target, context).await {
+        Ok(mut output) => {
+            if super::whois::is_thin_rdap_batch(&output.batch) {
+                match super::whois::collect_whois(target, &context.tools, &context.job).await {
+                    Ok(whois) => {
+                        output.batch.merge(whois.batch);
+                        output.warnings.extend(whois.warnings);
+                        output
+                            .warnings
+                            .push("RDAP was thin; merged structured WHOIS".into());
+                    }
+                    Err(error) => output
+                        .warnings
+                        .push(format!("WHOIS fallback skipped: {error}")),
+                }
+            }
+            Ok(output)
+        }
+        Err(error) => match super::whois::collect_whois(target, &context.tools, &context.job).await
+        {
+            Ok(mut output) => {
+                output
+                    .warnings
+                    .push(format!("RDAP failed ({error}); used structured WHOIS"));
+                Ok(output)
+            }
+            Err(whois_error) => Err(format!("{error}; WHOIS fallback: {whois_error}")),
+        },
+    }
+}
+
+async fn collect_rdap(target: &Target, context: &CollectorContext) -> CollectResult {
     let (registry, path) = match target {
         Target::Domain(domain) => (Registry::Dns, format!("domain/{domain}")),
         Target::Ip(IpAddr::V4(ip)) => (Registry::Ipv4, format!("ip/{ip}")),

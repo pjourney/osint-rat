@@ -25,6 +25,8 @@ open_enum! {
         Web => ("web", "Web page", "page"),
         Document => ("document", "Document"),
         Manual => ("manual", "Manual entry", "note"),
+        Stix => ("stix", "STIX"),
+        Misp => ("misp", "MISP"),
     }
 }
 

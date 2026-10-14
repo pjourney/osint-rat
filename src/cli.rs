@@ -7,6 +7,9 @@ use crate::app::App;
 use crate::collectors::{CollectorContext, CollectorRegistry, CollectorSettings, NetContext};
 use crate::config::Config;
 use crate::files::InvestigationFiles;
+use crate::ingest::{
+    IngestFormat, IngestOptions, ObservableMapping, guess_format, ingest, read_ingest_file,
+};
 use crate::jobs::JobContext;
 use crate::model::{PageKind, Target, TargetKind, Workspace};
 use crate::paths::AppPaths;
@@ -92,7 +95,8 @@ pub enum Command {
     /// The first argument is a target kind (`domain`, `ip`, `url`, `email`, `asn`, `repository`,
     /// `file`, `username`) or a value os-int can guess (`example.com`). `--collector dns` runs
     /// one collector. Without it, the default set for that kind runs: a domain runs dns, rdap,
-    /// http, tls, and ct; an IP runs rdap and ip.
+    /// http, tls, ct, and subdomain; an email runs dns, ct, and email; a username runs username;
+    /// an IP runs rdap and ip.
     ///
     /// `--investigation` selects the case. A new name is created. A UUID that does not exist is
     /// an error. With no investigation flag, the most recently updated case is used, or one is
@@ -105,9 +109,29 @@ pub enum Command {
         /// Case to write into. Created when the name is new.
         #[arg(short, long)]
         investigation: Option<String>,
-        /// One collector id (`dns`, `rdap`, `http`, `tls`, `ct`, `ip`, `repository`, `file`).
+        /// One collector id (`dns`, `rdap`, `http`, `tls`, `ct`, `ip`, `repository`, `file`, `email`, `username`, `subdomain`, or a configured external id).
         #[arg(short, long)]
         collector: Option<String>,
+    },
+    /// Import STIX, MISP, CSV/JSON observables, or an Evidence Batch into a case.
+    ///
+    /// The file is parsed, then applied through the same transaction as a collector. Re-ingest
+    /// of identical content is idempotent (duplicate sources are marked seen).
+    Ingest {
+        /// Path to the STIX, MISP, CSV, JSON, or Evidence Batch file.
+        path: PathBuf,
+        /// `stix`, `misp`, `csv`, `json`, or `batch`. Guessed from the file name when omitted.
+        #[arg(short, long)]
+        format: Option<String>,
+        /// Case to write into. Created when the name is new.
+        #[arg(short, long)]
+        investigation: Option<String>,
+        /// Default entity kind for a single-column CSV (`domain`, `ip`, …).
+        #[arg(long)]
+        kind: Option<String>,
+        /// Column mapping, e.g. `kind=type,value=indicator`.
+        #[arg(long)]
+        map: Option<String>,
     },
     /// Write a Markdown or JSON report.
     ///
@@ -126,9 +150,9 @@ pub enum Command {
     /// Check the local environment.
     ///
     /// Reports the database, config file, log directory, proxy or direct network, and whether
-    /// `claude`, `codex`, `dig`, `whois`, `git`, `gh`, `exiftool`, `curl`, and `openssl` are on
-    /// PATH. A missing program is optional. A warning, usually from the database integrity
-    /// check, makes this command exit non-zero.
+    /// `claude`, `codex`, `dig`, `whois`, `git`, `gh`, `exiftool`, `curl`, `openssl`,
+    /// `subfinder`, and `amass` are on PATH. A missing program is optional. A warning, usually
+    /// from the database integrity check, makes this command exit non-zero.
     Doctor,
     /// Print the resolved configuration path and data directory.
     ///
@@ -219,6 +243,20 @@ pub async fn run() -> Result<()> {
             )
             .await
         }
+        Some(Command::Ingest {
+            ref path,
+            ref format,
+            ref investigation,
+            ref kind,
+            ref map,
+        }) => ingest_file(
+            &cli,
+            path,
+            format.as_deref(),
+            investigation.as_deref(),
+            kind.as_deref(),
+            map.as_deref(),
+        ),
         Some(Command::Report {
             ref investigation,
             ref format,
@@ -350,7 +388,7 @@ async fn collect(
     };
     let tools = Arc::new(ToolRegistry::detect(&runtime.config.tools));
     let net = Arc::new(NetContext::new(&runtime.config.network).map_err(|error| eyre!(error))?);
-    let registry = CollectorRegistry::builtin();
+    let registry = CollectorRegistry::from_config(&runtime.config);
     let collectors = if let Some(id) = collector_id {
         vec![
             registry
@@ -369,12 +407,7 @@ async fn collect(
         page.title,
         page.kind.label()
     );
-    let settings = CollectorSettings {
-        fetch_robots: runtime.config.collectors.fetch_robots,
-        check_www: runtime.config.collectors.check_www,
-        repository_history_depth: runtime.config.collectors.repository_history_depth,
-        max_file_import_bytes: runtime.config.storage.max_file_import_bytes,
-    };
+    let settings = CollectorSettings::from_config(&runtime.config);
     for collector in collectors {
         let job = JobContext::detached(true);
         let context = CollectorContext {
@@ -408,6 +441,93 @@ async fn collect(
             }
             Err(error) => println!("✗  {error}"),
         }
+    }
+    Ok(())
+}
+
+fn ingest_file(
+    cli: &Cli,
+    path: &std::path::Path,
+    format: Option<&str>,
+    investigation_query: Option<&str>,
+    kind: Option<&str>,
+    map: Option<&str>,
+) -> Result<()> {
+    let mut runtime = Runtime::load(cli)?;
+    let format = match format {
+        Some(value) => {
+            IngestFormat::parse(value).ok_or_else(|| eyre!("unknown ingest format {value:?}"))?
+        }
+        None => guess_format(path).ok_or_else(|| {
+            eyre!(
+                "could not guess ingest format from {}; pass --format stix|misp|csv|json|batch",
+                path.display()
+            )
+        })?,
+    };
+    let max_bytes = runtime.config.collectors.max_ingest_bytes;
+    let bytes = read_ingest_file(path, max_bytes).map_err(|error| eyre!(error))?;
+    let mut mapping = map
+        .map(ObservableMapping::parse)
+        .transpose()
+        .map_err(|error| eyre!(error))?
+        .unwrap_or_default();
+    if let Some(kind) = kind {
+        mapping.default_kind = Some(crate::model::EntityKind::parse(kind));
+    }
+    let origin = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("ingest")
+        .to_string();
+    let options = IngestOptions {
+        mapping,
+        origin: origin.clone(),
+    };
+    let report = ingest(format, &bytes, &options).map_err(|error| eyre!(error))?;
+    let investigation = match investigation_query {
+        Some(query) => match runtime.store.find_investigation(query)? {
+            Some(found) => found,
+            None if uuid::Uuid::parse_str(query).is_ok() => {
+                return Err(eyre!(
+                    "no investigation named {query:?}; run `os-int list` to see existing investigations"
+                ));
+            }
+            None => {
+                let created = runtime.store.create_investigation(query, "")?;
+                InvestigationFiles::new(&runtime.paths, created.id).ensure()?;
+                eprintln!("Created investigation {}", created.name);
+                created
+            }
+        },
+        None => match runtime.store.list_investigations()?.into_iter().next() {
+            Some(summary) => summary.investigation,
+            None => runtime
+                .store
+                .create_investigation(&format!("ingest-{origin}"), "")?,
+        },
+    };
+    InvestigationFiles::new(&runtime.paths, investigation.id).ensure()?;
+    let summary = runtime.store.apply_batch(
+        ApplyContext {
+            investigation_id: investigation.id,
+            page_id: None,
+            job_id: None,
+        },
+        &report.batch,
+    )?;
+    println!(
+        "Ingested {} into {} — {}",
+        path.display(),
+        investigation.name,
+        if report.batch.summary.is_empty() {
+            summary.describe()
+        } else {
+            report.batch.summary.clone()
+        }
+    );
+    for warning in report.warnings {
+        println!("  ! {warning}");
     }
     Ok(())
 }

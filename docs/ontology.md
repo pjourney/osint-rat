@@ -4,7 +4,7 @@ os-int treats an investigation as a typed graph: **objects** (entities and pages
 
 The product thesis is in [VISION.md](../VISION.md). Phase gates are in [PHASED_ROADMAP.md](../PHASED_ROADMAP.md). The on-disk archive is described in [ontology-exchange.md](ontology-exchange.md).
 
-Built-in collectors stay **passive-only**. Tools marked `active` are refused. AI only proposes Actions; nothing is written until you accept. Provenance is never relabelled.
+Built-in collectors stay **passive-only**. Tools marked `active` are refused. AI only proposes Actions; nothing is written until you accept. Provenance is never relabelled. File ingest and sidecars land through `EvidenceBatch` → `storage::apply` ([connectors.md](connectors.md)); ingested sources use provenance `external`.
 
 ## Object types
 
@@ -117,6 +117,7 @@ The screen shows:
 
 ## See also
 
+- [Connectors](connectors.md)
 - [Ontology Exchange Format](ontology-exchange.md)
 - [Database tables](schema.md)
 - [Architecture — where to make a change](ARCHITECTURE.md#where-to-make-a-change)

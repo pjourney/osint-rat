@@ -26,6 +26,9 @@ const DEFAULT_MAX_CONCURRENT_JOBS: usize = 4;
 const DEFAULT_TOOL_TIMEOUT_SECONDS: u64 = 60;
 const DEFAULT_MAX_FILE_IMPORT_BYTES: u64 = 512 * 1024 * 1024;
 const DEFAULT_REPOSITORY_HISTORY_DEPTH: u32 = 200;
+const DEFAULT_MAX_SUBDOMAINS: u32 = 80;
+const DEFAULT_MAX_USERNAME_PROFILES: u32 = 8;
+pub const DEFAULT_MAX_INGEST_BYTES: u64 = 20 * 1024 * 1024;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -180,6 +183,16 @@ pub struct CollectorConfig {
     pub max_concurrent_jobs: usize,
     /// Number of commits inspected when analysing a repository.
     pub repository_history_depth: u32,
+    /// Cap on hostnames promoted during subdomain expansion.
+    pub max_subdomains: u32,
+    /// Cap on public profile URL checks in the username pack.
+    pub max_username_profiles: u32,
+    /// Largest STIX / MISP / CSV / batch file `os-int ingest` will read.
+    pub max_ingest_bytes: u64,
+    /// Sidecar programs that print Evidence Batch JSON on stdout.
+    pub external: Vec<ExternalCollectorConfig>,
+    /// Optional URLScan / OTX wrappers. Off until enabled with a key (OTX) or `enabled`.
+    pub api: Vec<ApiConnectorConfig>,
 }
 
 impl Default for CollectorConfig {
@@ -189,6 +202,72 @@ impl Default for CollectorConfig {
             check_www: true,
             max_concurrent_jobs: DEFAULT_MAX_CONCURRENT_JOBS,
             repository_history_depth: DEFAULT_REPOSITORY_HISTORY_DEPTH,
+            max_subdomains: DEFAULT_MAX_SUBDOMAINS,
+            max_username_profiles: DEFAULT_MAX_USERNAME_PROFILES,
+            max_ingest_bytes: DEFAULT_MAX_INGEST_BYTES,
+            external: Vec::new(),
+            api: Vec::new(),
+        }
+    }
+}
+
+/// A sidecar that prints `os-int-evidence-batch` JSON on stdout.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExternalCollectorConfig {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    pub program: String,
+    /// Argument template. Extra placeholders: `{kind}`, `{value}`, `{id}`.
+    pub args: Vec<String>,
+    pub accepts: Vec<String>,
+    pub timeout_seconds: u64,
+    /// Must be `passive`.
+    pub activity: String,
+    pub runs_by_default: bool,
+    pub working_directory: Option<PathBuf>,
+}
+
+impl Default for ExternalCollectorConfig {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            label: String::new(),
+            description: String::new(),
+            program: String::new(),
+            args: Vec::new(),
+            accepts: Vec::new(),
+            timeout_seconds: DEFAULT_TOOL_TIMEOUT_SECONDS,
+            activity: "passive".into(),
+            runs_by_default: false,
+            working_directory: None,
+        }
+    }
+}
+
+/// User-configured API connector (`urlscan` or `otx`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ApiConnectorConfig {
+    pub id: String,
+    pub enabled: bool,
+    /// Prefer `api_key_env`. Inline keys are accepted but warned about.
+    pub api_key: String,
+    pub api_key_env: String,
+    pub timeout_seconds: u64,
+    pub rate_limit_per_minute: u32,
+}
+
+impl Default for ApiConnectorConfig {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            enabled: false,
+            api_key: String::new(),
+            api_key_env: String::new(),
+            timeout_seconds: DEFAULT_REQUEST_TIMEOUT_SECONDS,
+            rate_limit_per_minute: 30,
         }
     }
 }
@@ -298,6 +377,32 @@ fetch_robots = true
 check_www = true
 max_concurrent_jobs = 4
 repository_history_depth = 200
+max_subdomains = 80
+max_username_profiles = 8
+max_ingest_bytes = 20971520
+
+# Sidecar that prints Evidence Batch JSON on stdout. See docs/connectors.md.
+# [[collectors.external]]
+# id = "hello-batch"
+# label = "Hello batch"
+# program = "python3"
+# args = ["examples/connectors/hello-batch/hello_batch.py", "--target", "{target}", "--kind", "{kind}"]
+# accepts = ["domain"]
+# timeout_seconds = 30
+# activity = "passive"
+# runs_by_default = false
+
+# Optional API connectors. Secrets are redacted in logs; prefer api_key_env.
+# [[collectors.api]]
+# id = "urlscan"
+# enabled = true
+# api_key_env = "URLSCAN_API_KEY"
+# rate_limit_per_minute = 30
+#
+# [[collectors.api]]
+# id = "otx"
+# enabled = true
+# api_key_env = "OTX_API_KEY"
 
 [tools]
 # Built-in tools to hide:
@@ -390,6 +495,26 @@ impl Config {
         for tool in &self.tools.custom {
             if tool.name.trim().is_empty() || tool.program.trim().is_empty() {
                 warnings.push("a [[tools.custom]] entry is missing `name` or `program`".into());
+            }
+        }
+        for collector in &self.collectors.external {
+            if collector.id.trim().is_empty() || collector.program.trim().is_empty() {
+                warnings
+                    .push("a [[collectors.external]] entry is missing `id` or `program`".into());
+            }
+            if collector.activity.trim().eq_ignore_ascii_case("active") {
+                warnings.push(format!(
+                    "external collector {} is marked active and will be refused",
+                    collector.id
+                ));
+            }
+        }
+        for connector in &self.collectors.api {
+            if !connector.api_key.trim().is_empty() {
+                warnings.push(format!(
+                    "API connector {} stores api_key in the config file; prefer api_key_env",
+                    connector.id
+                ));
             }
         }
         warnings

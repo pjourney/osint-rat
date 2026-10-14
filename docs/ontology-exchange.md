@@ -3,7 +3,7 @@
 Two related payloads move investigation data in and out of os-int:
 
 1. **Investigation archive** — the on-disk export written by `os-int export` (`investigation.osint.json` plus a `files/` tree). This is format `os-int-investigation`, version **`2`**.
-2. **Evidence batch** — the in-memory (and, later, connector) payload collectors return. `storage::apply` writes it in one transaction. It is not versioned on disk today.
+2. **Evidence batch** — the in-memory and connector payload collectors and ingest return. `storage::apply` writes it in one transaction. On disk / sidecar stdout it uses envelope `format` `os-int-evidence-batch`, `format_version` **1** (`ingest::BATCH_FORMAT_VERSION`). That constant is not the archive `FORMAT_VERSION`.
 
 This page describes **today’s** shapes from [`src/exchange.rs`](../src/exchange.rs), [`src/model/batch.rs`](../src/model/batch.rs), and [`docs/schema.md`](schema.md), then reserved later-version extension points (Events, playbook Actions, markings, audit) and the rules for bumping `FORMAT_VERSION`. Version 2 ships **resolution bags** as `data.resolutions`. Do not emit reserved keys that are not listed as implemented.
 
@@ -83,7 +83,7 @@ Page kinds today: `generic`, `person`, `organization`, `domain`, `ip`, `asn`, `u
 
 Entity kinds today: `person`, `organization`, `domain`, `hostname`, `ip`, `email`, `username`, `url`, `repository`, `file`, `location`, `phone`, `asn`, `certificate`, `unknown`.
 
-Source kinds today: `dns`, `rdap`, `http`, `tls`, `ct`, `ip_intel`, `repository`, `file`, `command`, `web`, `document`, `manual`.
+Source kinds today: `dns`, `rdap`, `http`, `tls`, `ct`, `ip_intel`, `repository`, `file`, `command`, `web`, `document`, `manual`, `stix`, `misp`.
 
 Artifact kinds today: `snapshot`, `file`, `report`, `agent_context`, `tool_output`, `repository`.
 
@@ -132,7 +132,13 @@ Copy skips `.`, `..`, and names starting with `tmp-`. Directory depth is capped 
 
 Collectors do not write SQLite. They return an `EvidenceBatch` (`src/model/batch.rs`). `storage::apply` applies it atomically (`docs/schema.md` “How a collection lands”).
 
-This is the ingest shape Phase 4 connectors will emit as JSON. It is **not** `investigation.osint.json`. It has **no** `FORMAT_VERSION` today. When it becomes a public on-disk / sidecar format, give it its own version field — do not overload the archive `FORMAT_VERSION`.
+This is the ingest shape connectors emit as JSON. It is **not** `investigation.osint.json`. The public sidecar / file envelope is:
+
+```json
+{ "format": "os-int-evidence-batch", "format_version": 1, "batch": { … } }
+```
+
+`ingest::BATCH_FORMAT_VERSION` is **1**. A raw batch object (no envelope) is accepted. Versions greater than 1 are refused. An `os-int-investigation` archive is refused here (`os-int import` is the archive path). Do not overload the archive `FORMAT_VERSION` (still **2**). Protocol, caps, and examples: [connectors.md](connectors.md).
 
 | Field | Role |
 | --- | --- |
@@ -206,7 +212,7 @@ Bump `FORMAT_VERSION` (1 → 2, never reuse a number) when any of the following 
 - New **optional** fields with `#[serde(default)]` that a reader can ignore without changing the meaning of existing rows (for example a new optional comment on a source).
 - Additive open-enum keys (`EntityKind::Other`, new relationship verbs). Unknown kind strings already round-trip.
 - Documentation-only or TUI-only changes.
-- `EvidenceBatch` field additions that are not part of the archive. When the batch becomes a public file format, give it a **separate** version constant.
+- `EvidenceBatch` field additions that are not part of the archive. The batch file/sidecar envelope has its **own** version constant (`ingest::BATCH_FORMAT_VERSION`, currently 1). Bump that constant — not archive `FORMAT_VERSION` — when the envelope gains a required field.
 
 If an optional field is load-bearing (resolution, markings that must not be stripped, audit), bump anyway so a down-level binary does not import a silent subset and re-export it as complete.
 

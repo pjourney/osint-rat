@@ -28,6 +28,7 @@
 //! | [`cli`] | Clap commands. No subcommand launches the workbench. |
 //! | [`report`] | Markdown and JSON reports. |
 //! | [`exchange`] | Versioned import and export. |
+//! | [`ingest`] | STIX, MISP, CSV/JSON, and Evidence Batch file ingest. |
 //! | [`config`] | `config.toml`. Missing keys use the defaults in this module. |
 //! | [`paths`] | Platform config and data directories. |
 //! | [`sanitize`] | Strips terminal escapes from untrusted text. |
@@ -43,6 +44,7 @@ pub mod doctor;
 pub mod exchange;
 pub mod exec;
 pub mod files;
+pub mod ingest;
 pub mod jobs;
 pub mod logging;
 pub mod model;

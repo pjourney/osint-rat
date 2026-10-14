@@ -9,7 +9,9 @@ use crate::exec::redact::redact_args;
 use crate::exec::{CommandSpec, ExecError, run};
 use crate::files::sha256_hex;
 use crate::jobs::JobContext;
-use crate::model::{EntityKey, EntityKind, EvidenceBatch, NewSource, SourceKind, Target, relation};
+use crate::model::{
+    EntityKey, EntityKind, EvidenceBatch, NewSource, SourceKind, Target, is_subdomain_of, relation,
+};
 use crate::sanitize::{sanitize_line, sanitize_text};
 use crate::tools::template::render_args;
 use crate::tools::{Activity, OutputParser, ToolDefinition};
@@ -116,7 +118,12 @@ pub fn build_batch(
         if discovered == subject {
             continue;
         }
-        batch.relate(&subject, relation::MENTIONS, &discovered, Some(key));
+        let verb = promote_link(&subject, &discovered, target);
+        if verb == relation::SUBDOMAIN_OF {
+            batch.relate(&discovered, verb, &subject, Some(key));
+        } else {
+            batch.relate(&subject, verb, &discovered, Some(key));
+        }
     }
     batch.summary = format!(
         "{} produced {} bytes of output",
@@ -161,6 +168,38 @@ fn find_all(
         }
     }
     found
+}
+
+/// Chooses a catalog verb for a value extracted from tool output instead of always `mentions`.
+pub fn promote_link(subject: &EntityKey, discovered: &EntityKey, target: &Target) -> &'static str {
+    let _ = subject;
+    match &discovered.kind {
+        EntityKind::Ip => match target {
+            Target::Domain(_) | Target::Url(_) => relation::RESOLVES_TO,
+            _ => relation::MENTIONS,
+        },
+        EntityKind::Hostname | EntityKind::Domain => {
+            let apex = match target {
+                Target::Domain(domain) => Some(domain.clone()),
+                Target::Url(_) | Target::Email(_) => {
+                    target.hostname().filter(|host| host.contains('.'))
+                }
+                _ => None,
+            };
+            if let Some(apex) = apex {
+                if is_subdomain_of(&discovered.value, &apex) {
+                    return relation::SUBDOMAIN_OF;
+                }
+                if discovered.value == apex {
+                    return relation::ALIAS_OF;
+                }
+            }
+            relation::MENTIONS
+        }
+        EntityKind::Url => relation::REFERENCES,
+        EntityKind::Email => relation::MENTIONS,
+        _ => relation::MENTIONS,
+    }
 }
 
 fn classify_line(line: &str) -> Option<(EntityKind, String)> {
@@ -245,7 +284,46 @@ mod tests {
         assert!(secret.sources[0].content.contains("[REDACTED]"));
         assert!(!secret.sources[0].content.contains("sk-secret"));
         assert!(actual.relationships.iter().any(|relationship| {
-            relationship.kind == "mentions" && relationship.to.value == "ns1.example.net"
+            relationship.kind == "subdomain_of" && relationship.to.value == "ns1.example.net"
+                || relationship.kind == "mentions" && relationship.to.value == "ns1.example.net"
         }));
+        // ns1.example.net is not a subdomain of example.com (different registrable name).
+        let mut subfinder_tool = tool.clone();
+        subfinder_tool.name = "subfinder".into();
+        subfinder_tool.parser = OutputParser::Lines;
+        let subfinder = build_batch(
+            &subfinder_tool,
+            &target,
+            "subfinder",
+            &["-silent".into(), "-d".into(), "example.com".into()],
+            "www.example.com\napi.example.com\n192.0.2.10\n",
+            "",
+            Some(0),
+        );
+        assert!(subfinder.relationships.iter().any(|relationship| {
+            relationship.kind == "subdomain_of" && relationship.from.value == "www.example.com"
+        }));
+        assert!(subfinder.relationships.iter().any(|relationship| {
+            relationship.kind == "resolves_to" && relationship.to.value == "192.0.2.10"
+        }));
+        assert!(
+            !subfinder
+                .relationships
+                .iter()
+                .any(|relationship| relationship.kind == "mentions"
+                    && relationship.to.value == "www.example.com")
+        );
+    }
+
+    #[test]
+    fn promote_link_caps_subdomains_to_the_apex() {
+        let target = Target::Domain("example.com".into());
+        let subject = EntityKey::new(EntityKind::Domain, "example.com");
+        let host = EntityKey::new(EntityKind::Hostname, "www.example.com");
+        assert_eq!(promote_link(&subject, &host, &target), "subdomain_of");
+        let ip = EntityKey::new(EntityKind::Ip, "192.0.2.9");
+        assert_eq!(promote_link(&subject, &ip, &target), "resolves_to");
+        let other = EntityKey::new(EntityKind::Hostname, "iana.org");
+        assert_eq!(promote_link(&subject, &other, &target), "mentions");
     }
 }

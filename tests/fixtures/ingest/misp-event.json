@@ -1,0 +1,23 @@
+{
+  "Event": {
+    "id": "42",
+    "uuid": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    "info": "Toy campaign",
+    "Attribute": [
+      { "type": "domain", "value": "evil.example", "category": "Network activity" },
+      { "type": "ip-dst", "value": "192.0.2.88", "comment": "c2" },
+      { "type": "email-src", "value": "bad@evil.example" },
+      { "type": "github-username", "value": "octocat" },
+      { "type": "comment", "value": "ignore me" }
+    ],
+    "Object": [
+      {
+        "name": "domain-ip",
+        "Attribute": [
+          { "type": "domain", "value": "c2.evil.example" },
+          { "type": "ip-dst", "value": "192.0.2.89" }
+        ]
+      }
+    ]
+  }
+}

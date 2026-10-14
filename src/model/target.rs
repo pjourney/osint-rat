@@ -443,6 +443,16 @@ fn looks_like_repository(raw: &str) -> bool {
     })
 }
 
+/// Returns true when `hostname` is a strict subdomain of `apex` (not the apex itself).
+pub fn is_subdomain_of(hostname: &str, apex: &str) -> bool {
+    let host = hostname.trim().trim_end_matches('.').to_ascii_lowercase();
+    let apex = apex.trim().trim_end_matches('.').to_ascii_lowercase();
+    if host.is_empty() || apex.is_empty() || host == apex {
+        return false;
+    }
+    host.ends_with(&format!(".{apex}"))
+}
+
 /// Returns `true` for loopback, private, link-local, and other non-public addresses.
 pub fn is_non_public_ip(ip: &IpAddr) -> bool {
     match ip {
@@ -573,6 +583,15 @@ mod tests {
             Target::guess("example.com").map(|t| t.kind()),
             Ok(TargetKind::Domain)
         );
+    }
+
+    #[test]
+    fn subdomain_of_requires_a_strict_suffix() {
+        assert!(is_subdomain_of("www.example.com", "example.com"));
+        assert!(is_subdomain_of("a.b.example.com.", "example.com"));
+        assert!(!is_subdomain_of("example.com", "example.com"));
+        assert!(!is_subdomain_of("example.com.evil.net", "example.com"));
+        assert!(!is_subdomain_of("notexample.com", "example.com"));
     }
 
     #[test]

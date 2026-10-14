@@ -38,6 +38,10 @@ impl Collector for FileCollector {
         matches!(kind, TargetKind::File)
     }
 
+    fn needs_network(&self) -> bool {
+        false
+    }
+
     fn collect<'a>(
         &'a self,
         target: &'a Target,

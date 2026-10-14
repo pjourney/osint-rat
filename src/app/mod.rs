@@ -187,6 +187,8 @@ pub enum FormKind {
     NewNote,
     /// Active agent profile, optional program override, timeout, and theme.
     SettingsAgent,
+    /// Ingest a STIX, MISP, CSV, JSON, or Evidence Batch file.
+    Ingest,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -274,12 +276,13 @@ impl App {
         let agent = AgentStatus::resolve(&config, &tools);
         let net = NetContext::new(&config.network).map(Arc::new);
         let max_jobs = config.collectors.max_concurrent_jobs.max(1);
+        let collectors = CollectorRegistry::from_config(&config);
         let app = Self {
             config,
             paths,
             store,
             tools,
-            collectors: CollectorRegistry::builtin(),
+            collectors,
             net,
             jobs: JobManager::new(max_jobs),
             job_records: HashMap::new(),
@@ -1192,6 +1195,9 @@ impl App {
                 }
                 self.reload()?;
             }
+            FormKind::Ingest => {
+                self.submit_ingest(&values)?;
+            }
             FormKind::SettingsAgent => {
                 self.config.agent.active = values[0].clone();
                 self.config.agent.program =
@@ -1226,6 +1232,10 @@ impl App {
             "run_tls" => self.run_named_collector("tls")?,
             "run_ct" => self.run_named_collector("ct")?,
             "run_ip" => self.run_named_collector("ip")?,
+            "run_email" => self.run_named_collector("email")?,
+            "run_username" => self.run_named_collector("username")?,
+            "run_subdomain" => self.run_named_collector("subdomain")?,
+            "ingest" => self.open_ingest_form(),
             "ask_agent" => self.open_agent_prompt(),
             "generate_report" => self.generate_report("markdown")?,
             "add_finding" => self.overlay = Overlay::Form(finding_form()),
@@ -1261,9 +1271,18 @@ impl App {
 
     fn cycle_form(&mut self, delta: i32) {
         if let Overlay::Form(form) = &mut self.overlay
-            && form.kind == FormKind::NewPage
-            && form.index == 1
+            && ((form.kind == FormKind::NewPage && form.index == 1)
+                || (form.kind == FormKind::Ingest && form.index == 0))
         {
+            if form.kind == FormKind::Ingest {
+                let kinds = crate::ingest::IngestFormat::ALL;
+                let current = crate::ingest::IngestFormat::parse(&form.fields[0].value.value)
+                    .unwrap_or(crate::ingest::IngestFormat::Stix);
+                let index = kinds.iter().position(|kind| *kind == current).unwrap_or(0);
+                let next = kinds[(index as i32 + delta).rem_euclid(kinds.len() as i32) as usize];
+                form.fields[0].value.set(next.as_str());
+                return;
+            }
             let kinds = PageKind::KNOWN;
             let current = PageKind::parse(&form.fields[1].value.value);
             let index = kinds.iter().position(|kind| kind == &current).unwrap_or(0);
@@ -1387,18 +1406,13 @@ impl App {
         self.store.insert_job(&mut record)?;
         self.job_records.insert(job_id, record);
         let net_error = self.net.as_ref().err().cloned();
-        if collector.requires().is_empty() && net_error.is_some() && !matches!(id, "file") {
+        if collector.needs_network() && net_error.is_some() {
             return Err(eyre!(net_error.unwrap_or_default()));
         }
         let tools = Arc::clone(&self.tools);
         let files = self.files().ok_or_else(|| eyre!("no investigation"))?;
         let cache_dir = self.paths.cache_dir();
-        let settings = CollectorSettings {
-            fetch_robots: self.config.collectors.fetch_robots,
-            check_www: self.config.collectors.check_www,
-            repository_history_depth: self.config.collectors.repository_history_depth,
-            max_file_import_bytes: self.config.storage.max_file_import_bytes,
-        };
+        let settings = CollectorSettings::from_config(&self.config);
         let net = self.net.as_ref().ok().cloned();
         self.jobs.spawn(job_id, move |job| async move {
             let net = net.ok_or_else(|| "network is not available".to_string())?;
@@ -2346,6 +2360,78 @@ impl App {
         self.view = View::Jobs;
         Ok(())
     }
+
+    fn open_ingest_form(&mut self) {
+        if self.workspace.is_none() {
+            self.status = "Open an investigation before ingesting a file.".into();
+            return;
+        }
+        self.overlay = Overlay::Form(ingest_form());
+    }
+
+    fn submit_ingest(&mut self, values: &[String]) -> Result<()> {
+        let workspace = self
+            .workspace
+            .as_ref()
+            .ok_or_else(|| eyre!("no investigation"))?;
+        let format = crate::ingest::IngestFormat::parse(
+            values.first().map(String::as_str).unwrap_or("stix"),
+        )
+        .ok_or_else(|| eyre!("unknown ingest format"))?;
+        let path = values.get(1).map(String::as_str).unwrap_or("").trim();
+        if path.is_empty() {
+            bail_status(&mut self.status, "Ingest needs a file path.");
+            return Ok(());
+        }
+        let selected = self.selected;
+        let entity_id = self.entity_id;
+        let max_bytes = self.config.collectors.max_ingest_bytes;
+        let bytes = crate::ingest::read_ingest_file(std::path::Path::new(path), max_bytes)
+            .map_err(|error| eyre!(error))?;
+        let mut mapping = values
+            .get(3)
+            .filter(|value| !value.is_empty())
+            .map(|spec| crate::ingest::ObservableMapping::parse(spec))
+            .transpose()
+            .map_err(|error| eyre!(error))?
+            .unwrap_or_default();
+        if let Some(kind) = values.get(2).filter(|value| !value.is_empty()) {
+            mapping.default_kind = Some(crate::model::EntityKind::parse(kind));
+        }
+        let origin = std::path::Path::new(path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("ingest")
+            .to_string();
+        let report = crate::ingest::ingest(
+            format,
+            &bytes,
+            &crate::ingest::IngestOptions { mapping, origin },
+        )
+        .map_err(|error| eyre!(error))?;
+        let summary = self.store.apply_batch(
+            ApplyContext {
+                investigation_id: workspace.id(),
+                page_id: self.page_id,
+                job_id: None,
+            },
+            &report.batch,
+        )?;
+        self.reload()?;
+        self.selected = selected;
+        if let Some(id) = entity_id {
+            self.entity_id = self
+                .workspace
+                .as_ref()
+                .and_then(|workspace| workspace.entity(id).map(|_| workspace.canonical_id(id)));
+        }
+        self.status = if report.batch.summary.is_empty() {
+            summary.describe()
+        } else {
+            report.batch.summary
+        };
+        Ok(())
+    }
 }
 
 fn field(label: &str, value: &str, hint: &str) -> Field {
@@ -2381,6 +2467,18 @@ fn finding_form() -> FormState {
 
 fn note_form() -> FormState {
     FormState::new(FormKind::NewNote, vec![field("Note", "", "Markdown")])
+}
+
+fn ingest_form() -> FormState {
+    FormState::new(
+        FormKind::Ingest,
+        vec![
+            field("Format", "stix", "Left/Right: stix misp csv json batch"),
+            field("Path", "", "path to the file"),
+            field("Kind", "", "optional default kind for CSV"),
+            field("Mapping", "", "optional kind=col,value=col"),
+        ],
+    )
 }
 
 fn resolve_entity(workspace: &Workspace, raw: &str) -> Option<Uuid> {
@@ -3613,5 +3711,76 @@ mod tests {
                 .resolutions
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn ingest_form_esc_restores_entity_selection() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let paths = AppPaths::new(
+            directory.path().join("config.toml"),
+            directory.path().join("data"),
+        );
+        paths.ensure_dirs().expect("dirs");
+        let store = Store::open(&paths.database()).expect("store");
+        let mut app = App::new(Config::default(), paths, store);
+        create_named_investigation(&mut app, "Ingest Sel");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        app.store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Domain,
+                "alpha.example",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("a");
+        app.store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Ip,
+                "192.0.2.44",
+                crate::model::Provenance::Collected,
+                None,
+            )
+            .expect("b");
+        app.reload().expect("reload");
+        app.view = View::Entities;
+        app.pane = Pane::Main;
+        app.selected = 1;
+        let listed = app.workspace.as_ref().expect("ws").visible_entities();
+        let focused = listed.get(1).map(|entity| entity.id);
+        app.entity_id = focused;
+        app.dispatch(Action::Command("ingest")).expect("i");
+        assert!(matches!(
+            app.overlay,
+            Overlay::Form(ref form) if form.kind == FormKind::Ingest
+        ));
+        app.dispatch(Action::Cancel).expect("esc");
+        assert_eq!(app.overlay, Overlay::None);
+        assert_eq!(app.view, View::Entities);
+        assert_eq!(app.selected, 1);
+        assert_eq!(app.entity_id, focused);
+        let fixture = directory.path().join("obs.csv");
+        std::fs::write(&fixture, "kind,value\ndomain,beta.example\n").expect("csv");
+        app.dispatch(Action::Command("ingest")).expect("i again");
+        if let Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set("csv");
+            form.fields[1].value.set(fixture.display().to_string());
+        }
+        app.dispatch(Action::Submit).expect("enter");
+        assert_eq!(app.overlay, Overlay::None);
+        assert_eq!(app.view, View::Entities);
+        assert_eq!(app.selected, 1);
+        let workspace = app.workspace.as_ref().expect("workspace");
+        assert!(
+            workspace
+                .data
+                .entities
+                .iter()
+                .any(|entity| entity.value == "beta.example")
+        );
+        if let Some(id) = focused {
+            assert_eq!(app.entity_id, Some(workspace.canonical_id(id)));
+        }
     }
 }

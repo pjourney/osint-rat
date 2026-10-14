@@ -59,6 +59,13 @@ impl NewSource {
             provenance: Provenance::Collected,
         }
     }
+
+    /// Original material supplied by the analyst (import, connector file, archive sidecars).
+    pub fn external(kind: SourceKind, collector: &str, title: impl Into<String>) -> Self {
+        let mut source = Self::collected(kind, collector, title);
+        source.provenance = Provenance::External;
+        source
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -106,10 +113,15 @@ pub struct NewArtifact {
 /// Everything a single collection produced.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EvidenceBatch {
+    #[serde(default)]
     pub sources: Vec<NewSource>,
+    #[serde(default)]
     pub entities: Vec<NewEntity>,
+    #[serde(default)]
     pub relationships: Vec<NewRelationship>,
+    #[serde(default)]
     pub timeline: Vec<NewTimelineEvent>,
+    #[serde(default)]
     pub artifacts: Vec<NewArtifact>,
     /// Diagnostic gaps to store as collected findings. Present checks are listed in
     /// `resolved_findings` so an earlier gap can be cleared.
@@ -119,6 +131,7 @@ pub struct EvidenceBatch {
     #[serde(default)]
     pub resolved_findings: Vec<String>,
     /// One-line human summary for the job result.
+    #[serde(default)]
     pub summary: String,
 }
 
