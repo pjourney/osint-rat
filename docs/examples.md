@@ -29,7 +29,7 @@ Inside the workbench:
 | `1` | The `example.com` page: target, entities, findings |
 | `3` | Sources. `S-1` onward are the raw observations |
 | `4` | Findings. `[COL]` marks a collected diagnostic |
-| `5` | Entities such as the domain, its addresses, and its nameservers |
+| `5` | Entities such as the domain, its addresses, and its nameservers. `Enter` opens Object View |
 | `6` | Timeline, including registration dates and later observation changes |
 | `8` | Jobs, if a collector is still running or a previous one failed |
 | `/` | Search. Try `example.com` or a short id such as `E-1` |

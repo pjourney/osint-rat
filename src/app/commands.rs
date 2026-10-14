@@ -124,6 +124,11 @@ pub const COMMANDS: &[Command] = &[
         hint: "",
     },
     Command {
+        id: "open_object",
+        title: "Object View",
+        hint: "v",
+    },
+    Command {
         id: "doctor",
         title: "Doctor",
         hint: "d",

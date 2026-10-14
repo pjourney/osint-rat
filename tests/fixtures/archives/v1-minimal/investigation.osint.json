@@ -1,0 +1,125 @@
+{
+  "format": "os-int-investigation",
+  "format_version": 1,
+  "exported_at": "2020-01-01T00:00:00.000+00:00",
+  "data": {
+    "investigation": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "name": "v1 fixture",
+      "description": "Checked-in format version 1 archive for back-compat import.",
+      "tags": [],
+      "created_at": "2020-01-01T00:00:00.000+00:00",
+      "updated_at": "2020-01-01T00:00:00.000+00:00"
+    },
+    "pages": [
+      {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "investigation_id": "11111111-1111-4111-8111-111111111111",
+        "seq": 1,
+        "title": "example.com",
+        "kind": "domain",
+        "target": "example.com",
+        "description": "",
+        "notes": "",
+        "entity_id": "33333333-3333-4333-8333-333333333333",
+        "created_at": "2020-01-01T00:00:00.000+00:00",
+        "updated_at": "2020-01-01T00:00:00.000+00:00"
+      }
+    ],
+    "sources": [
+      {
+        "id": "66666666-6666-4666-8666-666666666666",
+        "investigation_id": "11111111-1111-4111-8111-111111111111",
+        "seq": 1,
+        "kind": "dns",
+        "title": "DNS records for example.com",
+        "url": null,
+        "retrieved_at": "2020-01-01T00:00:00.000+00:00",
+        "last_seen_at": null,
+        "published_at": null,
+        "author": null,
+        "collector": "dns",
+        "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "snapshot_path": null,
+        "content": "example.com. 300 IN A 192.0.2.10",
+        "fields": [],
+        "notes": "",
+        "provenance": "collected",
+        "page_id": "22222222-2222-4222-8222-222222222222",
+        "job_id": null
+      }
+    ],
+    "findings": [
+      {
+        "id": "77777777-7777-4777-8777-777777777777",
+        "investigation_id": "11111111-1111-4111-8111-111111111111",
+        "seq": 1,
+        "page_id": "22222222-2222-4222-8222-222222222222",
+        "title": "example.com resolves to documentation range",
+        "details": "",
+        "confidence": "high",
+        "provenance": "collected",
+        "source_ids": ["66666666-6666-4666-8666-666666666666"],
+        "created_at": "2020-01-01T00:00:00.000+00:00",
+        "updated_at": "2020-01-01T00:00:00.000+00:00"
+      }
+    ],
+    "entities": [
+      {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "investigation_id": "11111111-1111-4111-8111-111111111111",
+        "seq": 1,
+        "kind": "domain",
+        "value": "example.com",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [["registrar", "Example Registrar"]],
+        "source_ids": ["66666666-6666-4666-8666-666666666666"],
+        "created_at": "2020-01-01T00:00:00.000+00:00",
+        "updated_at": "2020-01-01T00:00:00.000+00:00"
+      },
+      {
+        "id": "44444444-4444-4444-8444-444444444444",
+        "investigation_id": "11111111-1111-4111-8111-111111111111",
+        "seq": 2,
+        "kind": "ip",
+        "value": "192.0.2.10",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [],
+        "source_ids": ["66666666-6666-4666-8666-666666666666"],
+        "created_at": "2020-01-01T00:00:00.000+00:00",
+        "updated_at": "2020-01-01T00:00:00.000+00:00"
+      }
+    ],
+    "relationships": [
+      {
+        "id": "55555555-5555-4555-8555-555555555555",
+        "investigation_id": "11111111-1111-4111-8111-111111111111",
+        "seq": 1,
+        "from_id": "33333333-3333-4333-8333-333333333333",
+        "to_id": "44444444-4444-4444-8444-444444444444",
+        "kind": "resolves_to",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": ["66666666-6666-4666-8666-666666666666"],
+        "created_at": "2020-01-01T00:00:00.000+00:00"
+      }
+    ],
+    "notes": [],
+    "artifacts": [],
+    "timeline": [],
+    "jobs": [],
+    "agent_runs": [],
+    "proposals": [],
+    "page_entities": [
+      {
+        "page_id": "22222222-2222-4222-8222-222222222222",
+        "entity_id": "33333333-3333-4333-8333-333333333333"
+      }
+    ]
+  }
+}

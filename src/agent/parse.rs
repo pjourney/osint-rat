@@ -326,4 +326,23 @@ mod tests {
     fn invalid_action_blocks_are_ignored() {
         assert!(parse_actions("```os-int-actions\nnot json\n```").is_empty());
     }
+
+    #[test]
+    fn reserved_actions_are_parsed_from_fenced_json() {
+        let input = r#"```os-int-actions
+[
+  {"action":"PROPOSE_RESOLVE","entities":["E-1","E-2"],"reason":"same registrant"},
+  {"action":"PROPOSE_UNRESOLVE","entity":"E-3"},
+  {"action":"RUN_PLAYBOOK","playbook":"domain-triage"},
+  {"action":"ASSERT_FINDING_TEMPLATE","title":"Template"}
+]
+```"#;
+        let actual = parse_actions(input);
+        assert_eq!(actual.len(), 4);
+        assert_eq!(actual[0].name(), "PROPOSE_RESOLVE");
+        assert_eq!(actual[1].name(), "PROPOSE_UNRESOLVE");
+        assert_eq!(actual[2].name(), "RUN_PLAYBOOK");
+        assert_eq!(actual[3].name(), "ASSERT_FINDING_TEMPLATE");
+        assert!(actual.iter().all(AgentAction::is_reserved));
+    }
 }

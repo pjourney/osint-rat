@@ -16,7 +16,7 @@
 | Phase | Name | Status |
 | --- | --- | --- |
 | 0 | Foundation & vision freeze | Done ([#4](https://github.com/pjourney/osint-rat/pull/4)) |
-| 1 | Ontology runtime v1 | Not started |
+| 1 | Ontology runtime v1 | Done ([#5](https://github.com/pjourney/osint-rat/pull/5)) |
 | 2 | Graph & Search Around | Not started |
 | 3 | Entity resolution | Not started |
 | 4 | Ingest plane & connectors | Not started |
@@ -80,12 +80,12 @@ Make Objects, properties, link types, and Actions first-class—not only freefor
 
 ### Success criteria
 
-- [ ] Object View can open any entity in a real investigation and show ≥1 property group and linked objects when relationships exist.
-- [ ] Link-type catalog is used when collectors emit known verbs (unknown verbs still store, but appear under “Other”).
-- [ ] Unit tests cover catalog lookup, inverse registration, and migration apply/rollback or forward-only safety.
-- [ ] `os-int doctor` still passes; existing investigations open without data loss.
-- [ ] Export/import round-trip still works for a fixture case (document any format bump).
-- [ ] Architecture + ontology docs updated; CI green.
+- [x] Object View can open any entity in a real investigation and show ≥1 property group and linked objects when relationships exist.
+- [x] Link-type catalog is used when collectors emit known verbs (unknown verbs still store, but appear under “Other”).
+- [x] Unit tests cover catalog lookup, inverse registration, and migration apply/rollback or forward-only safety.
+- [x] `os-int doctor` still passes; existing investigations open without data loss.
+- [x] Export/import round-trip still works for a fixture case (document any format bump).
+- [x] Architecture + ontology docs updated; CI green.
 
 ### How to complete
 

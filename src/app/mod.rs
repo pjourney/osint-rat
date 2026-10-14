@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use color_eyre::eyre::{Result, WrapErr, eyre};
+use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use uuid::Uuid;
 
 pub use action::Action;
@@ -71,6 +71,8 @@ pub enum View {
     Settings,
     /// Files stored for this investigation: snapshots, reports, context packs.
     Artifacts,
+    /// Typed properties, catalogued links, sources, and findings for one object.
+    Object,
 }
 
 impl View {
@@ -89,6 +91,7 @@ impl View {
             View::Tools => "tools",
             View::Settings => "settings",
             View::Artifacts => "artifacts",
+            View::Object => "object",
         }
     }
 
@@ -107,6 +110,7 @@ impl View {
             "tools" => View::Tools,
             "settings" => View::Settings,
             "artifacts" => View::Artifacts,
+            "object" => View::Object,
             _ => return None,
         })
     }
@@ -233,6 +237,7 @@ pub struct App {
     pub finding_id: Option<Uuid>,
     pub agent_run_id: Option<Uuid>,
     pub agent_thread: Option<Uuid>,
+    pub object_return_view: Option<View>,
     pub status: String,
     pub dirty: bool,
     pub should_quit: bool,
@@ -277,6 +282,7 @@ impl App {
             finding_id: None,
             agent_run_id: None,
             agent_thread: None,
+            object_return_view: None,
             status: "Press [?] for help, [p] for commands.".into(),
             dirty: true,
             should_quit: false,
@@ -365,12 +371,26 @@ impl App {
         {
             self.page_id = Some(page_id);
         }
+        if let Some(entity) = self.store.get_state(&scope, "entity")? {
+            if entity.is_empty() {
+                self.entity_id = None;
+            } else if let Ok(entity_id) = Uuid::parse_str(&entity)
+                && self
+                    .workspace
+                    .as_ref()
+                    .is_some_and(|workspace| workspace.entity(entity_id).is_some())
+            {
+                self.entity_id = Some(entity_id);
+            }
+        }
         if let Some(view) = self.store.get_state(&scope, "view")?
             && let Some(view) = View::parse(&view)
             && view != View::Welcome
         {
             self.view = view;
-            if let Some(index) = self
+            if view == View::Object {
+                self.select_nav_for_object_view();
+            } else if let Some(index) = self
                 .nav_items()
                 .iter()
                 .position(|(_, candidate)| *candidate == view)
@@ -413,6 +433,14 @@ impl App {
         if let Some(page_id) = self.page_id {
             self.store.set_state(&scope, "page", &page_id.to_string())?;
         }
+        self.store.set_state(
+            &scope,
+            "entity",
+            &self
+                .entity_id
+                .map(|entity_id| entity_id.to_string())
+                .unwrap_or_default(),
+        )?;
         if let Some(thread) = self.agent_thread {
             self.store
                 .set_state(&scope, "agent_thread", &thread.to_string())?;
@@ -490,6 +518,7 @@ impl App {
             Action::OpenTimeline => self.switch_view(View::Timeline),
             Action::OpenAgent => self.switch_view(View::Agent),
             Action::OpenOverview => self.switch_view(View::Overview),
+            Action::OpenObjectView => self.open_object_view(),
             Action::Command(id) => self.run_command(id)?,
             Action::Submit => self.submit()?,
             Action::Cycle(delta) => self.cycle_form(delta),
@@ -524,6 +553,10 @@ impl App {
     fn cancel(&mut self) {
         match &self.overlay {
             Overlay::None => {
+                if self.view == View::Object {
+                    self.close_object_view();
+                    return;
+                }
                 if self.view != View::Welcome && self.workspace.is_none() {
                     self.view = View::Welcome;
                 }
@@ -619,6 +652,8 @@ impl App {
                     let count = self.nav_items().len().max(1);
                     self.nav_index =
                         (self.nav_index as i32 + delta).rem_euclid(count as i32) as usize;
+                } else if self.view == View::Object {
+                    self.scroll = add_scroll(self.scroll, delta);
                 } else {
                     self.selected = (self.selected as i32 + delta).max(0) as usize;
                 }
@@ -690,6 +725,7 @@ impl App {
             View::Entities => {
                 if let Some(entity) = workspace.data.entities.get(self.selected) {
                     self.entity_id = Some(entity.id);
+                    self.open_object_view();
                 }
             }
             View::Findings => {
@@ -1093,6 +1129,7 @@ impl App {
             "open_agent" => self.switch_view(View::Agent),
             "open_settings" => self.switch_view(View::Settings),
             "open_artifacts" => self.switch_view(View::Artifacts),
+            "open_object" => self.open_object_view(),
             "doctor" => self.overlay = Overlay::Doctor,
             "help" => self.overlay = Overlay::Help,
             "cancel_job" => self.cancel_selected_job(),
@@ -1368,7 +1405,7 @@ impl App {
     fn focus_ref(&self) -> Option<String> {
         let workspace = self.workspace.as_ref()?;
         let id = match self.view {
-            View::Entities => self.entity_id,
+            View::Entities | View::Object => self.entity_id,
             View::Sources => self.source_id,
             View::Findings => self.finding_id,
             _ => None,
@@ -1377,7 +1414,7 @@ impl App {
     }
 
     fn focus_label(&self) -> Option<String> {
-        if self.view != View::Entities {
+        if !matches!(self.view, View::Entities | View::Object) {
             return None;
         }
         let workspace = self.workspace.as_ref()?;
@@ -1694,6 +1731,12 @@ impl App {
     }
 
     fn apply_proposal(&mut self, action: &AgentAction) -> Result<()> {
+        if action.is_reserved() {
+            bail!(
+                "{} is reserved and cannot be applied yet; AI only proposes implemented Actions",
+                action.name()
+            );
+        }
         let workspace = self
             .workspace
             .as_ref()
@@ -1782,8 +1825,137 @@ impl App {
             AgentAction::GenerateReport { format } => {
                 self.generate_report(format.as_deref().unwrap_or("markdown"))?;
             }
+            AgentAction::ProposeResolve { .. }
+            | AgentAction::ProposeUnresolve { .. }
+            | AgentAction::RunPlaybook { .. }
+            | AgentAction::AssertFindingTemplate { .. } => {
+                unreachable!("reserved actions are refused before apply")
+            }
         }
         Ok(())
+    }
+
+    fn open_object_view(&mut self) {
+        let Some(workspace) = self.workspace.as_ref() else {
+            self.status = "Create or open an investigation first.".into();
+            return;
+        };
+        let highlighted_entity = workspace
+            .data
+            .entities
+            .get(self.selected)
+            .map(|entity| entity.id);
+        let current_page = self
+            .page_id
+            .and_then(|id| workspace.page(id).map(|page| (page.id, page.entity_id)))
+            .or_else(|| {
+                workspace
+                    .data
+                    .pages
+                    .get(self.selected)
+                    .map(|page| (page.id, page.entity_id))
+            });
+        match self.view {
+            View::Entities => {
+                self.entity_id = highlighted_entity;
+            }
+            View::Object => {}
+            View::Pages
+            | View::Overview
+            | View::Welcome
+            | View::Sources
+            | View::Findings
+            | View::Timeline
+            | View::Notes
+            | View::Agent
+            | View::Jobs
+            | View::Tools
+            | View::Settings
+            | View::Artifacts => {
+                if let Some((page_id, entity_id)) = current_page {
+                    self.page_id = Some(page_id);
+                    self.entity_id = entity_id;
+                } else {
+                    self.entity_id = None;
+                }
+            }
+        }
+        let has_entity = self
+            .entity_id
+            .and_then(|id| {
+                self.workspace
+                    .as_ref()
+                    .and_then(|workspace| workspace.entity(id))
+            })
+            .is_some();
+        let has_page = self
+            .page_id
+            .and_then(|id| {
+                self.workspace
+                    .as_ref()
+                    .and_then(|workspace| workspace.page(id))
+            })
+            .is_some();
+        if !has_entity && !has_page {
+            self.status = "Select an entity or page to open Object View.".into();
+            return;
+        }
+        if self.view != View::Object {
+            self.object_return_view = Some(self.view);
+        }
+        self.view = View::Object;
+        self.scroll = 0;
+        self.overlay = Overlay::None;
+        self.select_nav_for_object_view();
+        self.status = "Object View. Esc returns.".into();
+        let _ = self.save_session();
+    }
+
+    fn select_nav_for_object_view(&mut self) {
+        let target = if self.entity_id.is_some() {
+            View::Entities
+        } else if self.page_id.is_some() {
+            View::Pages
+        } else {
+            View::Overview
+        };
+        if let Some(index) = self
+            .nav_items()
+            .iter()
+            .position(|(_, candidate)| *candidate == target)
+        {
+            self.nav_index = index;
+        }
+    }
+
+    fn close_object_view(&mut self) {
+        let return_view = self.object_return_view.take().unwrap_or(View::Entities);
+        self.view = if return_view == View::Object {
+            View::Entities
+        } else {
+            return_view
+        };
+        self.scroll = 0;
+        if let Some(index) = self
+            .nav_items()
+            .iter()
+            .position(|(_, candidate)| *candidate == self.view)
+        {
+            self.nav_index = index;
+        }
+        let _ = self.save_session();
+    }
+
+    pub fn current_object_view(&self) -> Option<crate::model::ObjectView> {
+        let workspace = self.workspace.as_ref()?;
+        if let Some(entity) = self.entity_id.and_then(|id| workspace.entity(id)) {
+            return Some(crate::model::ObjectView::for_entity(workspace, entity));
+        }
+        let page = self
+            .page_id
+            .and_then(|id| workspace.page(id))
+            .or_else(|| workspace.data.pages.get(self.selected))?;
+        Some(crate::model::ObjectView::for_page(workspace, page))
     }
 
     pub fn search_hits(&self, query: &str) -> Vec<SearchHit> {
@@ -2507,5 +2679,150 @@ mod tests {
         app.view = View::Entities;
         assert_eq!(app.focus_ref().as_deref(), Some("E-1"));
         assert_eq!(app.focus_label().as_deref(), Some("example.com"));
+    }
+
+    #[test]
+    fn enter_on_entities_opens_object_view_with_property_group_and_links() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Example Corp");
+        create_page(&mut app, "example.com", "domain", "example.com");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let page_id = app.workspace.as_ref().expect("workspace").data.pages[0].id;
+        let mut batch = crate::model::EvidenceBatch::new();
+        let source = crate::model::NewSource::collected(
+            crate::model::SourceKind::Dns,
+            "dns",
+            "DNS records for example.com",
+        );
+        let key = batch.add_source(source);
+        let domain = crate::model::EntityKey::new(crate::model::EntityKind::Domain, "example.com");
+        let ip = crate::model::EntityKey::new(crate::model::EntityKind::Ip, "192.0.2.10");
+        batch.relate(&domain, "resolves_to", &ip, Some(key));
+        batch.annotate(&domain, "registrar", "Example Registrar");
+        batch.relate(&domain, "spotted_near", &ip, Some(key));
+        app.store
+            .apply_batch(
+                crate::storage::ApplyContext {
+                    investigation_id,
+                    page_id: Some(page_id),
+                    job_id: None,
+                },
+                &batch,
+            )
+            .expect("applies");
+        app.reload().expect("reload");
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = Pane::Main;
+        app.selected = 0;
+        app.dispatch(Action::Select).expect("object view");
+        assert_eq!(app.view, View::Object);
+        let view = app.current_object_view().expect("object view");
+        assert!(
+            view.groups
+                .iter()
+                .any(|group| group.id == "identity" && !group.properties.is_empty())
+        );
+        assert!(view.links.iter().any(|group| group.catalogued));
+        assert!(
+            view.links
+                .iter()
+                .any(|group| group.label == crate::model::ontology::OTHER_LINK_GROUP)
+        );
+        app.dispatch(Action::Back).expect("back");
+        assert_eq!(app.view, View::Entities);
+    }
+
+    #[test]
+    fn open_object_view_uses_highlighted_entity_not_leftover() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Example Corp");
+        create_page(&mut app, "alpha.example", "domain", "alpha.example");
+        create_page(&mut app, "beta.example", "domain", "beta.example");
+        app.reload().expect("reload");
+        let (entity_a, entity_b) = {
+            let workspace = app.workspace.as_ref().expect("workspace");
+            (workspace.data.entities[0].id, workspace.data.entities[1].id)
+        };
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = Pane::Main;
+        app.selected = 0;
+        app.dispatch(Action::OpenObjectView).expect("open A");
+        assert_eq!(app.entity_id, Some(entity_a));
+        assert_eq!(app.current_object_view().expect("A").title, "alpha.example");
+        app.dispatch(Action::Back).expect("return");
+        app.selected = 1;
+        app.dispatch(Action::OpenObjectView).expect("open B");
+        assert_eq!(app.entity_id, Some(entity_b));
+        assert_eq!(app.current_object_view().expect("B").title, "beta.example");
+    }
+
+    #[test]
+    fn restoring_object_view_selects_entities_nav() {
+        let (directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Example Corp");
+        create_page(&mut app, "example.com", "domain", "example.com");
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = Pane::Main;
+        app.dispatch(Action::OpenObjectView).expect("object");
+        assert_eq!(app.view, View::Object);
+        app.dispatch(Action::Quit).expect("save session");
+        let paths = AppPaths::new(
+            directory.path().join("config.toml"),
+            directory.path().join("data"),
+        );
+        let store = Store::open(&paths.database()).expect("reopen");
+        let mut restarted = App::new(Config::default(), paths, store);
+        restarted.open_last_or_welcome().expect("restore");
+        assert_eq!(restarted.view, View::Object);
+        assert_eq!(restarted.nav_items()[restarted.nav_index].1, View::Entities);
+    }
+
+    #[test]
+    fn reserved_action_is_refused_and_records_the_local_actor() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Example Corp");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let mut run = sample_run(investigation_id, Uuid::new_v4(), Uuid::new_v4(), "Merge?");
+        app.store.insert_agent_run(&mut run).expect("run");
+        let proposals = app
+            .store
+            .insert_proposals(
+                investigation_id,
+                run.id,
+                vec![(
+                    AgentAction::ProposeResolve {
+                        entities: vec!["E-1".into(), "E-2".into()],
+                        reason: "same domain".into(),
+                    },
+                    ProposalStatus::Pending,
+                    None,
+                )],
+            )
+            .expect("proposals");
+        app.reload().expect("reload");
+        app.overlay = Overlay::Proposals {
+            run_id: run.id,
+            selected: 0,
+        };
+        app.dispatch(Action::Accept).expect("accept");
+        let data = app
+            .store
+            .load_investigation(investigation_id)
+            .expect("loads");
+        let proposal = data
+            .proposals
+            .iter()
+            .find(|item| item.id == proposals[0].id)
+            .expect("proposal");
+        assert_eq!(proposal.status, ProposalStatus::Invalid);
+        assert!(proposal.decided_at.is_some());
+        assert!(proposal.decided_by.is_some());
+        assert!(
+            proposal
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("reserved")
+        );
     }
 }

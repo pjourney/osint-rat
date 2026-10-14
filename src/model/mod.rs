@@ -17,6 +17,7 @@ pub mod ids;
 pub mod investigation;
 pub mod job;
 pub mod note;
+pub mod ontology;
 pub mod page;
 pub mod relationship;
 pub mod source;
@@ -37,6 +38,11 @@ pub use ids::{RefKind, ShortRef, find_refs, parse_ref_list};
 pub use investigation::{Investigation, InvestigationSummary};
 pub use job::{JobRecord, JobStatus};
 pub use note::Note;
+pub use ontology::{
+    ACTION_TYPES, ActionType, CataloguedLink, LINK_TYPES, LinkDirection, LinkType, OBJECT_TYPES,
+    ObjectType, ObjectView, action_type, inverse_of, link_group_label, link_type, local_actor,
+    object_type,
+};
 pub use page::{Page, PageKind};
 pub use relationship::{Relationship, kinds as relation, normalize_relationship_kind};
 pub use source::{Source, SourceKind};

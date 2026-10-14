@@ -24,7 +24,8 @@ pub use evidence::{NewFinding, NewSourceRecord};
 pub use pages::NewPage;
 use rows::{RowExt, id, json, ts};
 
-use crate::model::{Investigation, InvestigationSummary, now};
+use crate::model::{CataloguedLink, Investigation, InvestigationSummary, now};
+use graph::{backfill_link_catalog, list_link_types};
 
 const BUSY_TIMEOUT_MS: u64 = 5_000;
 const MIN_ID_PREFIX_LENGTH: usize = 4;
@@ -131,6 +132,7 @@ impl Store {
             )
             .wrap_err("could not configure database")?;
         migrations::migrate(&mut connection).wrap_err("database migration failed")?;
+        backfill_link_catalog(&connection).wrap_err("could not catalogue existing link types")?;
         Ok(Store { connection, path })
     }
 
@@ -148,6 +150,11 @@ impl Store {
 
     pub fn schema_version(&self) -> Result<i64> {
         Ok(migrations::current_version(&self.connection)?)
+    }
+
+    /// Link verbs seen in this investigation, including custom snake_case first-use entries.
+    pub fn list_link_types(&self, investigation_id: Uuid) -> Result<Vec<CataloguedLink>> {
+        Ok(list_link_types(self.connection(), investigation_id)?)
     }
 
     /// Runs SQLite's integrity check; returns `"ok"` when healthy.
