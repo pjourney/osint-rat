@@ -49,6 +49,8 @@ pub struct Config {
     pub tools: ToolsConfig,
     /// Local actor recorded on audit rows. Empty values fall back to the environment.
     pub identity: IdentityConfig,
+    /// Localhost ontology HTTP API (`os-int serve`).
+    pub api: ApiConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -156,6 +158,26 @@ impl Default for NetworkConfig {
         }
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ApiConfig {
+    /// Bind address. Defaults to loopback. `os-int serve` uses this unless `--bind` is set.
+    pub bind: String,
+    /// Bearer token. Empty means `os-int serve` mints an ephemeral token and prints it.
+    pub token: String,
+}
+
+impl Default for ApiConfig {
+    fn default() -> Self {
+        Self {
+            bind: DEFAULT_API_BIND.into(),
+            token: String::new(),
+        }
+    }
+}
+
+pub const DEFAULT_API_BIND: &str = "127.0.0.1:8743";
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -442,6 +464,11 @@ max_ingest_bytes = 20971520
 # user_id = "analyst"
 # Machine name written on audit rows (defaults to the hostname).
 # machine_name = "workstation"
+
+# Local ontology HTTP API. os-int serve binds 127.0.0.1 by default.
+# [api]
+# bind = "127.0.0.1:8743"
+# token = ""
 "#;
 
 /// The result of loading configuration.
@@ -649,6 +676,15 @@ parser = "hostnames"
         let actual = Config::parse(input).expect("parses");
         assert_eq!(actual.identity.user_id, "pat");
         assert_eq!(actual.identity.machine_name, "lab-1");
+    }
+
+    #[test]
+    fn api_section_parses() {
+        let input = "[api]\nbind = \"127.0.0.1:9000\"\ntoken = \"secret\"\n";
+        let actual = Config::parse(input).expect("parses");
+        assert_eq!(actual.api.bind, "127.0.0.1:9000");
+        assert_eq!(actual.api.token, "secret");
+        assert_eq!(Config::default().api.bind, DEFAULT_API_BIND);
     }
 
     #[test]

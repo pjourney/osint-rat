@@ -12,7 +12,7 @@ use uuid::Uuid;
 use super::agent::{AgentRun, Proposal, ProposalStatus};
 use super::artifact::Artifact;
 use super::audit::AuditEntry;
-use super::collaboration::Member;
+use super::collaboration::{Member, same_user};
 use super::entity::{Entity, EntityKind};
 use super::event::Event;
 use super::finding::Finding;
@@ -88,6 +88,20 @@ impl InvestigationData {
 }
 
 #[derive(Debug, Default)]
+struct ShortRefIndex {
+    by_ref: HashMap<ShortRef, Uuid>,
+    by_id: HashMap<Uuid, ShortRef>,
+}
+
+impl ShortRefIndex {
+    fn register(&mut self, id: Uuid, kind: RefKind, seq: i64) {
+        let reference = ShortRef::new(kind, seq);
+        self.by_ref.insert(reference, id);
+        self.by_id.insert(id, reference);
+    }
+}
+
+#[derive(Debug, Default)]
 struct WorkspaceIndex {
     pages: HashMap<Uuid, usize>,
     sources: HashMap<Uuid, usize>,
@@ -96,8 +110,51 @@ struct WorkspaceIndex {
     notes: HashMap<Uuid, usize>,
     artifacts: HashMap<Uuid, usize>,
     agent_runs: HashMap<Uuid, usize>,
-    by_ref: HashMap<ShortRef, Uuid>,
-    refs: HashMap<Uuid, ShortRef>,
+    short_refs: ShortRefIndex,
+}
+
+/// Records produced by one mutation, merged into a loaded [`Workspace`] without a full reload.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WorkspaceDelta {
+    pub investigation: Option<Investigation>,
+    pub pages: Vec<Page>,
+    pub sources: Vec<Source>,
+    pub findings: Vec<Finding>,
+    pub entities: Vec<Entity>,
+    pub relationships: Vec<Relationship>,
+    pub notes: Vec<Note>,
+    pub artifacts: Vec<Artifact>,
+    pub timeline: Vec<TimelineEvent>,
+    pub jobs: Vec<JobRecord>,
+    pub agent_runs: Vec<AgentRun>,
+    pub proposals: Vec<Proposal>,
+    pub page_entities: Vec<PageEntityLink>,
+    pub resolutions: Vec<Resolution>,
+    pub events: Vec<Event>,
+    pub audit: Vec<AuditEntry>,
+    pub members: Vec<Member>,
+}
+
+impl WorkspaceDelta {
+    pub fn is_empty(&self) -> bool {
+        self.investigation.is_none()
+            && self.pages.is_empty()
+            && self.sources.is_empty()
+            && self.findings.is_empty()
+            && self.entities.is_empty()
+            && self.relationships.is_empty()
+            && self.notes.is_empty()
+            && self.artifacts.is_empty()
+            && self.timeline.is_empty()
+            && self.jobs.is_empty()
+            && self.agent_runs.is_empty()
+            && self.proposals.is_empty()
+            && self.page_entities.is_empty()
+            && self.resolutions.is_empty()
+            && self.events.is_empty()
+            && self.audit.is_empty()
+            && self.members.is_empty()
+    }
 }
 
 /// An investigation loaded for interactive use.
@@ -111,6 +168,186 @@ impl Workspace {
     pub fn new(data: InvestigationData) -> Self {
         let index = build_index(&data);
         Self { data, index }
+    }
+
+    /// Merges records from a mutation into this snapshot and updates lookup indexes in place.
+    pub fn apply_delta(&mut self, delta: WorkspaceDelta) {
+        if let Some(investigation) = delta.investigation {
+            self.data.investigation = investigation;
+        }
+        for page in delta.pages {
+            upsert_indexed(
+                &mut self.data.pages,
+                &mut self.index.pages,
+                &mut self.index.short_refs,
+                page.id,
+                RefKind::Page,
+                page.seq,
+                page,
+            );
+        }
+        for source in delta.sources {
+            upsert_indexed(
+                &mut self.data.sources,
+                &mut self.index.sources,
+                &mut self.index.short_refs,
+                source.id,
+                RefKind::Source,
+                source.seq,
+                source,
+            );
+        }
+        for finding in delta.findings {
+            upsert_indexed(
+                &mut self.data.findings,
+                &mut self.index.findings,
+                &mut self.index.short_refs,
+                finding.id,
+                RefKind::Finding,
+                finding.seq,
+                finding,
+            );
+        }
+        for entity in delta.entities {
+            upsert_indexed(
+                &mut self.data.entities,
+                &mut self.index.entities,
+                &mut self.index.short_refs,
+                entity.id,
+                RefKind::Entity,
+                entity.seq,
+                entity,
+            );
+        }
+        for relationship in delta.relationships {
+            upsert_unindexed(
+                &mut self.data.relationships,
+                &mut self.index.short_refs,
+                relationship.id,
+                RefKind::Relationship,
+                relationship.seq,
+                |item| item.id,
+                relationship,
+            );
+        }
+        for note in delta.notes {
+            upsert_indexed(
+                &mut self.data.notes,
+                &mut self.index.notes,
+                &mut self.index.short_refs,
+                note.id,
+                RefKind::Note,
+                note.seq,
+                note,
+            );
+        }
+        for artifact in delta.artifacts {
+            upsert_indexed(
+                &mut self.data.artifacts,
+                &mut self.index.artifacts,
+                &mut self.index.short_refs,
+                artifact.id,
+                RefKind::Artifact,
+                artifact.seq,
+                artifact,
+            );
+        }
+        for event in delta.timeline {
+            upsert_unindexed(
+                &mut self.data.timeline,
+                &mut self.index.short_refs,
+                event.id,
+                RefKind::Timeline,
+                event.seq,
+                |item| item.id,
+                event,
+            );
+        }
+        for job in delta.jobs {
+            upsert_unindexed(
+                &mut self.data.jobs,
+                &mut self.index.short_refs,
+                job.id,
+                RefKind::Job,
+                job.seq,
+                |item| item.id,
+                job,
+            );
+        }
+        for run in delta.agent_runs {
+            upsert_indexed(
+                &mut self.data.agent_runs,
+                &mut self.index.agent_runs,
+                &mut self.index.short_refs,
+                run.id,
+                RefKind::AgentRun,
+                run.seq,
+                run,
+            );
+        }
+        for proposal in delta.proposals {
+            upsert_unindexed(
+                &mut self.data.proposals,
+                &mut self.index.short_refs,
+                proposal.id,
+                RefKind::Proposal,
+                proposal.seq,
+                |item| item.id,
+                proposal,
+            );
+        }
+        for resolution in delta.resolutions {
+            upsert_unindexed(
+                &mut self.data.resolutions,
+                &mut self.index.short_refs,
+                resolution.id,
+                RefKind::Resolution,
+                resolution.seq,
+                |item| item.id,
+                resolution,
+            );
+        }
+        for event in delta.events {
+            upsert_unindexed(
+                &mut self.data.events,
+                &mut self.index.short_refs,
+                event.id,
+                RefKind::Event,
+                event.seq,
+                |item| item.id,
+                event,
+            );
+        }
+        for entry in delta.audit {
+            upsert_unindexed(
+                &mut self.data.audit,
+                &mut self.index.short_refs,
+                entry.id,
+                RefKind::Audit,
+                entry.seq,
+                |item| item.id,
+                entry,
+            );
+        }
+        for member in delta.members {
+            if let Some(existing) = self
+                .data
+                .members
+                .iter_mut()
+                .find(|candidate| same_user(&candidate.user_id, &member.user_id))
+            {
+                *existing = member;
+            } else {
+                self.data.members.push(member);
+            }
+        }
+        for link in delta.page_entities {
+            if !self.data.page_entities.iter().any(|existing| {
+                existing.page_id == link.page_id && existing.entity_id == link.entity_id
+            }) {
+                self.data.page_entities.push(link);
+            }
+        }
     }
 
     pub fn investigation(&self) -> &Investigation {
@@ -167,12 +404,12 @@ impl Workspace {
 
     /// Resolves a short reference (`S-12`) to the record's UUID.
     pub fn resolve_ref(&self, reference: ShortRef) -> Option<Uuid> {
-        self.index.by_ref.get(&reference).copied()
+        self.index.short_refs.by_ref.get(&reference).copied()
     }
 
     /// The short reference for a record UUID.
     pub fn ref_of(&self, id: Uuid) -> Option<ShortRef> {
-        self.index.refs.get(&id).copied()
+        self.index.short_refs.by_id.get(&id).copied()
     }
 
     /// Formats a list of source IDs as `S-1, S-2`.
@@ -325,9 +562,7 @@ impl Workspace {
 fn build_index(data: &InvestigationData) -> WorkspaceIndex {
     let mut index = WorkspaceIndex::default();
     let mut register = |id: Uuid, kind: RefKind, seq: i64| {
-        let reference = ShortRef::new(kind, seq);
-        index.by_ref.insert(reference, id);
-        index.refs.insert(id, reference);
+        index.short_refs.register(id, kind, seq);
     };
     for page in &data.pages {
         register(page.id, RefKind::Page, page.seq);
@@ -385,4 +620,106 @@ fn position_map(ids: impl Iterator<Item = Uuid>) -> HashMap<Uuid, usize> {
     ids.enumerate()
         .map(|(position, id)| (id, position))
         .collect()
+}
+
+fn upsert_indexed<T>(
+    items: &mut Vec<T>,
+    positions: &mut HashMap<Uuid, usize>,
+    short_refs: &mut ShortRefIndex,
+    id: Uuid,
+    kind: RefKind,
+    seq: i64,
+    record: T,
+) {
+    if let Some(&position) = positions.get(&id) {
+        items[position] = record;
+        return;
+    }
+    let position = items.len();
+    items.push(record);
+    positions.insert(id, position);
+    short_refs.register(id, kind, seq);
+}
+
+fn upsert_unindexed<T>(
+    items: &mut Vec<T>,
+    short_refs: &mut ShortRefIndex,
+    id: Uuid,
+    kind: RefKind,
+    seq: i64,
+    get_id: fn(&T) -> Uuid,
+    record: T,
+) {
+    if let Some(existing) = items.iter_mut().find(|item| get_id(item) == id) {
+        *existing = record;
+        return;
+    }
+    items.push(record);
+    short_refs.register(id, kind, seq);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{EntityKind, Investigation, Marking, Provenance, now};
+
+    fn sample_entity(investigation_id: Uuid, seq: i64, value: &str) -> Entity {
+        let timestamp = now();
+        Entity {
+            id: Uuid::new_v4(),
+            investigation_id,
+            seq,
+            kind: EntityKind::Domain,
+            value: value.into(),
+            label: String::new(),
+            notes: String::new(),
+            provenance: Provenance::Analyst,
+            fields: crate::model::Fields::new(),
+            source_ids: Vec::new(),
+            created_at: timestamp,
+            updated_at: timestamp,
+        }
+    }
+
+    #[test]
+    fn apply_delta_upserts_without_dropping_existing_records() {
+        let timestamp = now();
+        let investigation = Investigation {
+            id: Uuid::new_v4(),
+            name: "Case".into(),
+            description: String::new(),
+            tags: Vec::new(),
+            marking: Marking::Unmarked,
+            created_at: timestamp,
+            updated_at: timestamp,
+        };
+        let first = sample_entity(investigation.id, 1, "one.example");
+        let second = sample_entity(investigation.id, 2, "two.example");
+        let mut data = InvestigationData::empty(investigation.clone());
+        data.entities.push(first.clone());
+        let mut workspace = Workspace::new(data);
+        let mut updated_first = first.clone();
+        updated_first.label = "One".into();
+        workspace.apply_delta(WorkspaceDelta {
+            entities: vec![updated_first.clone(), second.clone()],
+            ..WorkspaceDelta::default()
+        });
+        assert_eq!(workspace.data.entities.len(), 2);
+        assert_eq!(
+            workspace.entity(first.id).map(|e| e.label.as_str()),
+            Some("One")
+        );
+        assert_eq!(
+            workspace.entity(second.id).map(|e| e.value.as_str()),
+            Some("two.example")
+        );
+        assert_eq!(
+            workspace.ref_of(second.id).map(|r| r.to_string()),
+            Some("E-2".into())
+        );
+        assert_eq!(
+            workspace.resolve_ref("E-1".parse().expect("ref")),
+            Some(first.id)
+        );
+    }
 }

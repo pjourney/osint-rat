@@ -37,7 +37,8 @@ use crate::files::InvestigationFiles;
 use crate::jobs::{JobEvent, JobManager, JobOutcome, JobOutput};
 use crate::model::{
     AgentAction, AgentRun, Artifact, ArtifactKind, Confidence, JobRecord, JobStatus, NewArtifact,
-    Page, PageKind, Proposal, ProposalStatus, Provenance, Target, Workspace, now,
+    Page, PageEntityLink, PageKind, Proposal, ProposalStatus, Provenance, Target, Workspace,
+    WorkspaceDelta, now,
 };
 use crate::paths::AppPaths;
 use crate::report::write_report;
@@ -549,6 +550,21 @@ impl App {
         Ok(())
     }
 
+    fn apply_workspace_delta(&mut self, delta: WorkspaceDelta) -> Result<()> {
+        if delta.is_empty() {
+            return Ok(());
+        }
+        match self.workspace.as_mut() {
+            Some(workspace) => {
+                workspace.apply_delta(delta);
+                self.remap_focus_after_resolution();
+                self.mark_dirty();
+                Ok(())
+            }
+            None => self.reload(),
+        }
+    }
+
     fn files(&self) -> Option<InvestigationFiles> {
         self.workspace
             .as_ref()
@@ -590,10 +606,26 @@ impl App {
                     selected: 0,
                 }
             }
-            Action::AskAgent => self.open_agent_prompt(),
-            Action::NewItem => self.open_new()?,
-            Action::Edit => self.open_edit()?,
-            Action::Refresh => self.run_default_collectors()?,
+            Action::AskAgent => {
+                self.require_open_write()?;
+                self.open_agent_prompt();
+            }
+            Action::NewItem => {
+                if self.workspace.is_some() && self.view != View::Welcome {
+                    self.require_open_write()?;
+                }
+                self.open_new()?;
+            }
+            Action::Edit => {
+                if self.view != View::Settings && self.workspace.is_some() {
+                    self.require_open_write()?;
+                }
+                self.open_edit()?;
+            }
+            Action::Refresh => {
+                self.require_open_write()?;
+                self.run_default_collectors()?;
+            }
             Action::OpenJobs => self.switch_view(View::Jobs),
             Action::OpenTools => self.switch_view(View::Tools),
             Action::OpenSettings => self.switch_view(View::Settings),
@@ -1066,7 +1098,14 @@ impl App {
         let notes = std::fs::read_to_string(&session.path).unwrap_or_default();
         let _ = std::fs::remove_file(&session.path);
         self.store.update_page_notes(session.page_id, &notes)?;
-        self.reload()?;
+        if let Some(page) = self.store.load_page(session.page_id)? {
+            self.apply_workspace_delta(WorkspaceDelta {
+                pages: vec![page],
+                ..WorkspaceDelta::default()
+            })?;
+        } else {
+            self.reload()?;
+        }
         self.status = "Notes updated.".into();
         Ok(())
     }
@@ -1207,7 +1246,20 @@ impl App {
                     target,
                 ))?;
                 self.page_id = Some(page.id);
-                self.reload()?;
+                let mut delta = WorkspaceDelta {
+                    pages: vec![page.clone()],
+                    ..WorkspaceDelta::default()
+                };
+                if let Some(entity_id) = page.entity_id {
+                    delta.page_entities.push(PageEntityLink {
+                        page_id: page.id,
+                        entity_id,
+                    });
+                    if let Some(entity) = self.store.load_entity(entity_id)? {
+                        delta.entities.push(entity);
+                    }
+                }
+                self.apply_workspace_delta(delta)?;
                 self.view = View::Overview;
                 self.status = format!("Created {} — press r to run collectors", page.title);
             }
@@ -1225,7 +1277,7 @@ impl App {
                     .into_iter()
                     .filter_map(|reference| workspace.resolve_ref(reference))
                     .collect();
-                self.store.create_finding(NewFinding {
+                let finding = self.store.create_finding(NewFinding {
                     investigation_id: workspace.id(),
                     page_id: self.page_id,
                     title: values[0].clone(),
@@ -1234,7 +1286,10 @@ impl App {
                     provenance: Provenance::Analyst,
                     source_ids,
                 })?;
-                self.reload()?;
+                self.apply_workspace_delta(WorkspaceDelta {
+                    findings: vec![finding],
+                    ..WorkspaceDelta::default()
+                })?;
                 self.status = "Finding added.".into();
             }
             FormKind::NewNote => {
@@ -1244,14 +1299,26 @@ impl App {
                             .update_page_notes(page_id, values.first().unwrap_or(&String::new()))?;
                     }
                 } else if let Some(workspace) = &self.workspace {
-                    self.store.create_note(
+                    let note = self.store.create_note(
                         workspace.id(),
                         self.page_id,
                         values.first().unwrap_or(&String::new()),
                         Provenance::Analyst,
                     )?;
+                    self.apply_workspace_delta(WorkspaceDelta {
+                        notes: vec![note],
+                        ..WorkspaceDelta::default()
+                    })?;
                 }
-                self.reload()?;
+                if (self.view == View::Overview || self.current_page().is_some())
+                    && let Some(page_id) = self.page_id
+                    && let Some(page) = self.store.load_page(page_id)?
+                {
+                    self.apply_workspace_delta(WorkspaceDelta {
+                        pages: vec![page],
+                        ..WorkspaceDelta::default()
+                    })?;
+                }
             }
             FormKind::Ingest | FormKind::Playbook | FormKind::PlaybookPrompt | FormKind::Watch => {
                 self.submit_ingest_form(form)?;
@@ -1266,7 +1333,15 @@ impl App {
                         .map_err(|error| eyre!("{error}"))?;
                 let investigation_id = workspace.id();
                 self.store.set_marking(investigation_id, marking)?;
-                self.reload()?;
+                let investigation = self
+                    .store
+                    .get_investigation(investigation_id)?
+                    .ok_or_else(|| eyre!("investigation disappeared"))?;
+                self.apply_workspace_delta(WorkspaceDelta {
+                    investigation: Some(investigation),
+                    audit: self.store.list_audit(investigation_id)?,
+                    ..WorkspaceDelta::default()
+                })?;
                 self.status = format!("Marking set to {}", marking.label());
             }
             FormKind::TeamMember => {
@@ -1279,7 +1354,10 @@ impl App {
                     .map_err(|error| eyre!("{error}"))?;
                 let investigation_id = workspace.id();
                 self.store.add_member(investigation_id, &user_id, role)?;
-                self.reload()?;
+                self.apply_workspace_delta(WorkspaceDelta {
+                    members: self.store.list_members(investigation_id)?,
+                    ..WorkspaceDelta::default()
+                })?;
                 self.status = format!("Added {user_id} as {}", role.as_str());
             }
             FormKind::SettingsAgent => {
@@ -1849,10 +1927,12 @@ impl App {
         let mut result_text = None;
         let mut error_text = None;
         let mut status = JobStatus::Succeeded;
+        let mut patched_in_place = false;
         match outcome {
             JobOutcome::Succeeded(output) => match *output {
                 JobOutput::Collection(collected) => {
                     self.apply_collection(job_id, collected)?;
+                    patched_in_place = true;
                     result_text = self
                         .job_records
                         .get(&job_id)
@@ -1895,7 +1975,16 @@ impl App {
         if let Some(error) = error_text {
             self.status = error;
         }
-        self.reload()?;
+        if patched_in_place {
+            if let Some(job) = self.job_records.get(&job_id).cloned() {
+                self.apply_workspace_delta(WorkspaceDelta {
+                    jobs: vec![job],
+                    ..WorkspaceDelta::default()
+                })?;
+            }
+        } else {
+            self.reload()?;
+        }
         Ok(())
     }
 
@@ -1908,9 +1997,10 @@ impl App {
         } else {
             self.page_id
         };
+        let investigation_id = workspace.id();
         let summary = self.store.apply_batch(
             ApplyContext {
-                investigation_id: workspace.id(),
+                investigation_id,
                 page_id,
                 job_id: Some(job_id),
             },
@@ -1923,6 +2013,8 @@ impl App {
                 output.batch.summary.clone()
             });
         }
+        let delta = self.store.load_apply_delta(investigation_id, &summary)?;
+        self.apply_workspace_delta(delta)?;
         self.status = output.batch.summary;
         Ok(())
     }
@@ -3576,6 +3668,12 @@ mod tests {
         let error = app
             .dispatch(Action::Command("run_collectors"))
             .expect_err("collect");
+        assert!(error.to_string().contains("reader"), "{error}");
+        let error = app.dispatch(Action::NewItem).expect_err("keyboard n");
+        assert!(error.to_string().contains("reader"), "{error}");
+        let error = app.dispatch(Action::Refresh).expect_err("keyboard r");
+        assert!(error.to_string().contains("reader"), "{error}");
+        let error = app.dispatch(Action::AskAgent).expect_err("keyboard a");
         assert!(error.to_string().contains("reader"), "{error}");
     }
 

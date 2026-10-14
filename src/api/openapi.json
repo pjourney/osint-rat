@@ -1,0 +1,131 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "os-int ontology API",
+    "version": "0.1.0",
+    "description": "Localhost read + Action propose API. Actions stay pending until an analyst accepts them in the workbench. Bind defaults to 127.0.0.1. Send Authorization: Bearer <token> (or X-Osint-Token)."
+  },
+  "servers": [
+    { "url": "http://127.0.0.1:8743" }
+  ],
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/health": {
+      "get": {
+        "security": [],
+        "summary": "Liveness",
+        "responses": { "200": { "description": "Process is serving" } }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "security": [],
+        "summary": "This document",
+        "responses": { "200": { "description": "OpenAPI 3.0.3 document" } }
+      }
+    },
+    "/v1/investigations": {
+      "get": {
+        "summary": "List investigations",
+        "responses": {
+          "200": { "description": "Investigation summaries" },
+          "401": { "description": "Missing or wrong token" }
+        }
+      }
+    },
+    "/v1/investigations/{id}": {
+      "get": {
+        "summary": "Get one investigation",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Investigation" },
+          "401": { "description": "Unauthorized" },
+          "404": { "description": "Unknown investigation" }
+        }
+      }
+    },
+    "/v1/investigations/{id}/objects": {
+      "get": {
+        "summary": "List visible entities",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "kind", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Object summaries" } }
+      }
+    },
+    "/v1/investigations/{id}/objects/{reference}": {
+      "get": {
+        "summary": "Object View for an entity (E-n) or page (P-n)",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "reference", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Object View" },
+          "401": { "description": "Unauthorized" },
+          "404": { "description": "Unknown object" }
+        }
+      }
+    },
+    "/v1/investigations/{id}/search-around": {
+      "get": {
+        "summary": "Search Around from a seed entity",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "seed", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "hops", "in": "query", "schema": { "type": "integer" } },
+          { "name": "kind", "in": "query", "schema": { "type": "string" } },
+          { "name": "link", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Neighborhood" } }
+      }
+    },
+    "/v1/investigations/{id}/resolutions/suggest": {
+      "get": {
+        "summary": "Scored merge suggestions (never auto-applied)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Suggestions" } }
+      }
+    },
+    "/v1/investigations/{id}/actions": {
+      "post": {
+        "summary": "Propose Actions. They stay pending until an analyst accepts them.",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "actions": { "type": "array", "items": { "type": "object" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "Pending proposals" },
+          "401": { "description": "Unauthorized" },
+          "403": { "description": "Role cannot propose" }
+        }
+      }
+    },
+    "/v1/investigations/{id}/proposals": {
+      "get": {
+        "summary": "List proposals for the investigation",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Proposals" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

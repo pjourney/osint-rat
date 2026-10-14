@@ -31,7 +31,7 @@ It orchestrates information, tools, sources, and agents. Built-in collectors cov
 | --- | --- |
 | **New here** | [Install](#install), then [your first investigation](#your-first-investigation) |
 | **Day to day** | [How a case is organized](#how-a-case-is-organized), [keyboard](#keyboard), [command line](#command-line) |
-| **Going further** | [Vision](VISION.md) · [Phased roadmap](PHASED_ROADMAP.md) · [User guide](docs/guide.md) · [Examples](docs/examples.md) · [FAQ](docs/faq.md) · [Connectors](docs/connectors.md) · [Playbooks](docs/playbooks.md) · [Collaboration](docs/collaboration.md) · [Ontology exchange](docs/ontology-exchange.md) |
+| **Going further** | [Vision](VISION.md) · [Phased roadmap](PHASED_ROADMAP.md) · [User guide](docs/guide.md) · [Examples](docs/examples.md) · [FAQ](docs/faq.md) · [Connectors](docs/connectors.md) · [Playbooks](docs/playbooks.md) · [Collaboration](docs/collaboration.md) · [HTTP API](docs/api.md) · [Scale](docs/scale.md) · [Ontology exchange](docs/ontology-exchange.md) |
 | **Contributing** | [Architecture](docs/ARCHITECTURE.md) · [Ontology](docs/ontology.md) · [Database tables](docs/schema.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) |
 
 ---
@@ -40,7 +40,7 @@ It orchestrates information, tools, sources, and agents. Built-in collectors cov
 
 **This is** a local-first investigation ontology for OSINT and cyber cases. You fuse public sources into objects and links, keep provenance on every record, and stay in control of every Action—including those a local AI agent proposes. Collectors are plugins. The graph and the resolution engine are the product. Delivery is gated by phase: [vision](VISION.md), [roadmap](PHASED_ROADMAP.md).
 
-**This is not** a recon CLI, a collector-count contest, or an active-probing toolkit. Built-in collectors stay passive. There is no silent AI writeback, no automatic identity merge, and no cloud requirement. The bar is an enterprise-class investigative loop (ontology, fusion, resolution, Search Around, playbooks, governed Actions)—not module-count parity. Graph, Search Around, entity resolution, ingest, playbooks, timeline/geo, markings, and audit ship now. Remaining phases land only when their criteria pass.
+**This is not** a recon CLI, a collector-count contest, or an active-probing toolkit. Built-in collectors stay passive. There is no silent AI writeback, no automatic identity merge, and no cloud requirement. The bar is an enterprise-class investigative loop (ontology, fusion, resolution, Search Around, playbooks, governed Actions)—not module-count parity. Graph, Search Around, entity resolution, ingest, playbooks, timeline/geo, markings, audit, a localhost ontology API, and STIX export ship now. Remaining phases land only when their criteria pass.
 
 The [Boundaries](#boundaries) section is the operational rule for what built-in collectors may do. It is not relaxed by the vision.
 
@@ -214,6 +214,10 @@ os-int playbook run domain-infra --investigation "Example Corp" --target example
 os-int watch --playbook domain-infra --investigation "Example Corp" --dry-run
 os-int report "Example Corp" --format markdown -o ./example.md
 os-int export "Example Corp" -o ./export
+os-int export "Example Corp" --format stix -o ./bundle.json
+os-int get "Example Corp" E-1
+os-int search-around "Example Corp" E-1 --hops 2
+os-int serve --token "$OS_INT_API_TOKEN"
 os-int import ./export --rename             # --rename only if the id already exists
 os-int marking set "Example Corp" TLP:AMBER
 os-int team add "Example Corp" bob --role analyst

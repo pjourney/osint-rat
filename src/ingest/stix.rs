@@ -1,4 +1,5 @@
-//! STIX 2.1 bundle import (subset: indicator, observed-data, malware, identity, relationship).
+//! STIX 2.1 bundle import (subset: indicator, observed-data, malware, identity,
+//! cyber observables, relationship).
 
 use serde_json::Value;
 
@@ -50,6 +51,10 @@ pub fn parse_stix(text: &str, origin: &str) -> Result<IngestReport, IngestError>
             "observed-data" => ingest_observed_data(object, key, &mut report, &mut id_to_key),
             "malware" => ingest_malware(object, key, &mut report, &mut id_to_key),
             "identity" => ingest_identity(object, key, &mut report, &mut id_to_key),
+            "domain-name" | "hostname" | "ipv4-addr" | "ipv6-addr" | "email-addr" | "url"
+            | "user-account" | "autonomous-system" | "file" | "x509-certificate" => {
+                ingest_top_level_sco(object, key, &mut report, &mut id_to_key);
+            }
             "relationship" | "bundle" | "marking-definition" | "" => {}
             other => {
                 report.skipped += 1;
@@ -71,7 +76,7 @@ pub fn parse_stix(text: &str, origin: &str) -> Result<IngestReport, IngestError>
     );
     if report.batch.entities.is_empty() && report.batch.findings.is_empty() {
         return Err(IngestError::new(
-            "STIX bundle contained no supported objects (indicator, observed-data, malware, identity, relationship)",
+            "STIX bundle contained no supported objects (indicator, observed-data, malware, identity, cyber observable, relationship)",
         ));
     }
     Ok(report)
@@ -223,11 +228,14 @@ fn ingest_identity(
 ) {
     let name = string(object, "name").unwrap_or_else(|| fallback_id(object));
     let class = string(object, "identity_class").unwrap_or_default();
-    let kind = if class.eq_ignore_ascii_case("individual") {
+    let mut kind = if class.eq_ignore_ascii_case("individual") {
         EntityKind::Person
     } else {
         EntityKind::Organization
     };
+    if let Some(override_kind) = string(object, "x_osint_kind") {
+        kind = EntityKind::parse(&override_kind);
+    }
     let key = report.batch.entity(kind, &name, Some(source));
     report.batch.label(&key, name);
     remember_id(object, key, ids);
@@ -261,13 +269,37 @@ fn ingest_relationship(
             .push(format!("STIX relationship target_ref {to_id} is unknown"));
         return;
     };
-    let kind = map_stix_relationship(string(object, "relationship_type").as_deref().unwrap_or(""));
+    let mapped =
+        map_stix_relationship(string(object, "relationship_type").as_deref().unwrap_or(""));
+    let custom = string(object, "x_osint_relationship");
+    let kind = custom
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(mapped);
     report.batch.relate(&from, kind, &to, Some(source));
+}
+
+fn ingest_top_level_sco(
+    object: &Value,
+    source: usize,
+    report: &mut IngestReport,
+    ids: &mut Vec<(String, EntityKey)>,
+) {
+    if let Some(entity_key) = sco_to_entity(object, source, report) {
+        remember_id(object, entity_key, ids);
+        return;
+    }
+    report.skipped += 1;
+    report.warnings.push(format!(
+        "skipped STIX cyber observable {}",
+        fallback_id(object)
+    ));
 }
 
 fn sco_to_entity(object: &Value, source: usize, report: &mut IngestReport) -> Option<EntityKey> {
     let type_name = object.get("type").and_then(Value::as_str)?;
-    let (kind, raw) = match type_name {
+    let (mut kind, raw) = match type_name {
         "domain-name" | "hostname" => (
             if type_name == "hostname" {
                 EntityKind::Hostname
@@ -301,8 +333,15 @@ fn sco_to_entity(object: &Value, source: usize, report: &mut IngestReport) -> Op
             EntityKind::File,
             string(object, "name").or_else(|| hash_value(object))?,
         ),
+        "x509-certificate" => (
+            EntityKind::Certificate,
+            hash_value(object).or_else(|| string(object, "subject"))?,
+        ),
         _ => return None,
     };
+    if let Some(override_kind) = string(object, "x_osint_kind") {
+        kind = EntityKind::parse(&override_kind);
+    }
     Some(report.batch.entity(kind, &raw, Some(source)))
 }
 
@@ -549,6 +588,53 @@ mod tests {
                 .relationships
                 .iter()
                 .any(|relationship| relationship.kind == relation::OPERATED_BY)
+        );
+    }
+
+    #[test]
+    fn top_level_scos_restore_resolves_to() {
+        let input = r#"{
+          "type": "bundle",
+          "spec_version": "2.1",
+          "objects": [
+            {"type": "domain-name", "id": "domain-name--1", "value": "example.com",
+             "x_osint_kind": "domain"},
+            {"type": "ipv4-addr", "id": "ipv4-addr--1", "value": "192.0.2.10"},
+            {"type": "hostname", "id": "hostname--1", "value": "ns1.example.net",
+             "x_osint_kind": "hostname"},
+            {"type": "relationship", "id": "relationship--1",
+             "source_ref": "domain-name--1", "target_ref": "ipv4-addr--1",
+             "relationship_type": "resolves-to", "x_osint_relationship": "resolves_to"},
+            {"type": "relationship", "id": "relationship--2",
+             "source_ref": "domain-name--1", "target_ref": "hostname--1",
+             "relationship_type": "related-to", "x_osint_relationship": "uses_nameserver"}
+          ]
+        }"#;
+        let actual = parse_stix(input, "scos.json").expect("parse");
+        assert!(actual.batch.entities.iter().any(
+            |entity| entity.key.kind == EntityKind::Domain && entity.key.value == "example.com"
+        ));
+        assert!(
+            actual
+                .batch
+                .entities
+                .iter()
+                .any(|entity| entity.key.kind == EntityKind::Hostname
+                    && entity.key.value == "ns1.example.net")
+        );
+        assert!(
+            actual
+                .batch
+                .relationships
+                .iter()
+                .any(|relationship| relationship.kind == relation::RESOLVES_TO)
+        );
+        assert!(
+            actual
+                .batch
+                .relationships
+                .iter()
+                .any(|relationship| relationship.kind == "uses_nameserver")
         );
     }
 

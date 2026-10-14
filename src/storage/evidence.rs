@@ -34,7 +34,7 @@ pub struct NewFinding {
     pub source_ids: Vec<Uuid>,
 }
 
-const SOURCE_COLUMNS: &str = "id, investigation_id, seq, kind, title, url, retrieved_at, last_seen_at, published_at, \
+pub(crate) const SOURCE_COLUMNS: &str = "id, investigation_id, seq, kind, title, url, retrieved_at, last_seen_at, published_at, \
      author, collector, content_hash, snapshot_path, content, fields, notes, provenance, page_id, job_id";
 
 pub(crate) fn insert_source_record(
@@ -205,8 +205,8 @@ pub(crate) fn list_sources(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FindingSync {
-    Created,
-    Updated,
+    Created(Uuid),
+    Updated(Uuid),
     LeftAlone,
 }
 
@@ -248,7 +248,7 @@ pub(crate) fn sync_collected_finding(
             )?;
         }
         replace_finding_sources(connection, finding_id, source_ids)?;
-        return Ok(FindingSync::Updated);
+        return Ok(FindingSync::Updated(finding_id));
     }
     let timestamp = now();
     let finding = Finding {
@@ -265,7 +265,7 @@ pub(crate) fn sync_collected_finding(
         updated_at: timestamp,
     };
     insert_finding_record(connection, &finding)?;
-    Ok(FindingSync::Created)
+    Ok(FindingSync::Created(finding.id))
 }
 
 /// Inserts an ingested (non-collected) finding. Never updates or deletes collected diagnostics.
@@ -301,7 +301,7 @@ pub(crate) fn insert_ingested_finding(
         updated_at: timestamp,
     };
     insert_finding_record(connection, &record)?;
-    Ok(FindingSync::Created)
+    Ok(FindingSync::Created(record.id))
 }
 
 fn finding_by_title_and_provenance(

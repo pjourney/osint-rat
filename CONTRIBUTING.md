@@ -49,6 +49,9 @@ These three commands stay required. Phase work is merge-gated: do not start phas
 | An object type, property, or link verb | `src/model/ontology.rs` and [docs/ontology.md](docs/ontology.md) |
 | A passive collector or diagnostic | `src/collectors/` |
 | File ingest (STIX, MISP, CSV, batch) | `src/ingest/` and [docs/connectors.md](docs/connectors.md) |
+| STIX export | `src/ingest/stix_export.rs`, `os-int export --format stix` |
+| Localhost HTTP API | `src/api/`, `os-int serve`, [docs/api.md](docs/api.md) |
+| Incremental UI store / scale benches | `src/model/workspace.rs`, `src/storage/delta.rs`, [docs/scale.md](docs/scale.md) |
 | A playbook or watch set | YAML under `playbooks/`, code in `src/playbook/`, [docs/playbooks.md](docs/playbooks.md) |
 | An external sidecar | `[[collectors.external]]` emitting Evidence Batch JSON; example under `examples/connectors/` |
 | A built-in external tool | `src/tools/registry.rs` |

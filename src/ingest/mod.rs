@@ -8,6 +8,7 @@ mod batch;
 mod misp;
 mod observables;
 mod stix;
+mod stix_export;
 
 use std::fs::File;
 use std::io::{self, Read};
@@ -19,6 +20,7 @@ pub use batch::{BATCH_FORMAT, BATCH_FORMAT_VERSION, parse_batch_json};
 pub use misp::parse_misp;
 pub use observables::{ObservableMapping, parse_csv_observables, parse_json_observables};
 pub use stix::parse_stix;
+pub use stix_export::export_stix_bundle;
 
 /// Default cap on an ingest file. Larger files are refused before they are fully decoded.
 pub const DEFAULT_MAX_BYTES: u64 = 20 * 1024 * 1024;

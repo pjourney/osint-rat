@@ -35,6 +35,13 @@ pub struct ApplyContext {
 pub struct ApplySummary {
     /// Source IDs in the same order as `EvidenceBatch::sources`.
     pub source_ids: Vec<Uuid>,
+    /// Entity IDs upserted from this batch (created or existing).
+    pub entity_ids: Vec<Uuid>,
+    /// Relationship IDs upserted from this batch.
+    pub relationship_ids: Vec<Uuid>,
+    /// Finding IDs created or updated from this batch.
+    pub finding_ids: Vec<Uuid>,
+    pub page_id: Option<Uuid>,
     pub new_sources: usize,
     pub unchanged_sources: usize,
     pub new_entities: usize,
@@ -104,7 +111,10 @@ pub(crate) fn apply_batch_on(
     context: ApplyContext,
     batch: &EvidenceBatch,
 ) -> rusqlite::Result<ApplySummary> {
-    let mut summary = ApplySummary::default();
+    let mut summary = ApplySummary {
+        page_id: context.page_id,
+        ..ApplySummary::default()
+    };
     let changes = apply_sources(connection, context, batch, &mut summary)?;
     let entity_ids = apply_entities(connection, context, batch, &mut summary)?;
     apply_relationships(connection, context, batch, &entity_ids, &mut summary)?;
@@ -286,8 +296,9 @@ fn apply_diagnostic_findings(
             )?
         };
         match sync {
-            FindingSync::Created => {
+            FindingSync::Created(finding_id) => {
                 summary.new_findings += 1;
+                summary.finding_ids.push(finding_id);
                 promote_diagnostic_event(
                     connection,
                     context,
@@ -298,7 +309,10 @@ fn apply_diagnostic_findings(
                     "diagnostic_open",
                 )?;
             }
-            FindingSync::Updated => summary.updated_findings += 1,
+            FindingSync::Updated(finding_id) => {
+                summary.updated_findings += 1;
+                summary.finding_ids.push(finding_id);
+            }
             FindingSync::LeftAlone => {}
         }
     }
@@ -385,6 +399,7 @@ fn apply_entities(
         if created {
             summary.new_entities += 1;
         }
+        summary.entity_ids.push(entity_id);
         entity_ids.insert(entity.key.clone(), entity_id);
     }
     Ok(entity_ids)
@@ -415,6 +430,7 @@ fn apply_relationships(
                 link_relationship_source(connection, relationship_id, *source_id)?;
             }
         }
+        summary.relationship_ids.push(relationship_id);
         if created {
             summary.new_relationships += 1;
         }

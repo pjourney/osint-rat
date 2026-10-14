@@ -7,6 +7,8 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use serde::{Deserialize, Serialize};
+
 use super::agent::AgentAction;
 use super::common::Fields;
 use super::entity::{Entity, EntityKind};
@@ -1080,7 +1082,7 @@ pub fn local_actor() -> String {
 }
 
 /// One property shown in Object View.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PropertyValue {
     pub key: String,
     pub label: String,
@@ -1089,7 +1091,7 @@ pub struct PropertyValue {
 }
 
 /// A property group with the values present on this object.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PropertyGroupView {
     pub id: String,
     pub label: String,
@@ -1097,7 +1099,7 @@ pub struct PropertyGroupView {
 }
 
 /// A linked object grouped under a catalog verb (or "Other").
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinkedObject {
     pub direction: LinkDirection,
     pub relationship_kind: String,
@@ -1106,14 +1108,15 @@ pub struct LinkedObject {
     pub entity_kind: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum LinkDirection {
     Outgoing,
     Incoming,
 }
 
 /// Linked objects that share a catalog group label.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinkGroupView {
     pub label: String,
     pub catalogued: bool,
@@ -1121,7 +1124,7 @@ pub struct LinkGroupView {
 }
 
 /// Supporting source row for Object View.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObjectSource {
     pub reference: String,
     pub title: String,
@@ -1129,7 +1132,7 @@ pub struct ObjectSource {
 }
 
 /// Finding row for Object View.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObjectFinding {
     pub reference: String,
     pub title: String,
@@ -1137,7 +1140,7 @@ pub struct ObjectFinding {
 }
 
 /// A constituent absorbed into the canonical object.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObjectConstituent {
     pub reference: String,
     pub kind: String,
@@ -1146,7 +1149,7 @@ pub struct ObjectConstituent {
 }
 
 /// Read model for the Object View screen. Built from a workspace snapshot; no I/O.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObjectView {
     pub object_type: String,
     pub object_label: String,
