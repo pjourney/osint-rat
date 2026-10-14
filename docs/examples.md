@@ -90,6 +90,20 @@ os-int-learn collect file ./evidence.pdf --investigation "Example Corp"
 
 The page target is the path you passed. The stored artifact lives under the investigation's `files/` directory, content-addressed, so the original path is not required later.
 
+## Run a playbook
+
+Bundled playbooks live under [`playbooks/`](../playbooks/) and in the binary. Collect steps run; finding templates stay pending until you accept them. `--dry-run` prints the plan and writes nothing: it does not create an investigation or investigation directories, and it errors if the named case is missing.
+
+```bash
+os-int-learn playbook list
+os-int-learn playbook validate domain-infra
+os-int-learn playbook run domain-infra --investigation "Example Corp" --target example.com --dry-run
+os-int-learn playbook run domain-infra --investigation "Example Corp" --target example.com
+os-int-learn watch --playbook domain-infra --investigation "Example Corp" --target example.com --once
+```
+
+Inside the workbench, `b` opens **Run playbook**. Left/Right cycles bundled ids. Esc leaves the entity selection in place. Palette **Playbook prompt** seeds the agent question; the agent still only proposes. YAML schema and caps: [playbooks.md](playbooks.md).
+
 ## Look at a public repository
 
 This collector needs `git`. `gh` is optional and adds a GitHub summary when the remote is on GitHub. The clone is shallow, stored inside the investigation, and run with an empty credential helper.
@@ -185,4 +199,5 @@ os-int-learn report "Example Corp" --format markdown
 - [FAQ](faq.md)
 - [Database tables](schema.md)
 - [Ontology Exchange Format](ontology-exchange.md)
+- [Playbooks](playbooks.md)
 - [Configuration reference](guide.md#configuration)

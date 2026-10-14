@@ -1,4 +1,4 @@
-//! Background jobs: collectors, external tools, agent calls, and report generation.
+//! Background jobs: collectors, external tools, agent calls, playbooks, and report generation.
 //!
 //! Jobs run on Tokio tasks and report back through a bounded channel. Long-running work
 //! never touches UI state directly; the UI applies results when `JobEvent::Finished` arrives.
@@ -13,6 +13,7 @@ pub use manager::JobManager;
 
 use crate::agent::AgentOutcome;
 use crate::collectors::CollectionOutput;
+use crate::model::PlaybookOutput;
 
 /// Capacity of the job event channel. Log lines are dropped (and counted) rather than
 /// blocking a job when the UI falls behind; results are never dropped.
@@ -53,6 +54,7 @@ pub enum JobOutput {
     Collection(CollectionOutput),
     Agent(AgentOutcome),
     Report(ReportOutput),
+    Playbook(Box<PlaybookOutput>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,9 +102,14 @@ impl JobContext {
 
     /// A context for running work outside the TUI (CLI commands, tests).
     pub fn detached(echo_to_stderr: bool) -> Self {
+        Self::with_cancel(echo_to_stderr, CancellationToken::new())
+    }
+
+    /// CLI/watch context that shares a cancellation token (Ctrl+C cancels the current pass).
+    pub fn with_cancel(echo_to_stderr: bool, cancel: CancellationToken) -> Self {
         Self {
             job_id: Uuid::new_v4(),
-            cancel: CancellationToken::new(),
+            cancel,
             sender: None,
             echo_to_stderr,
         }

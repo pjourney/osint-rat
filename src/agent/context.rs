@@ -174,11 +174,14 @@ pub fn agent_instructions() -> String {
         r#"  {"action":"RUN_COLLECTOR","collector":"dns","target":"example.com"},"#,
         r#"  {"action":"GENERATE_REPORT","format":"markdown"},"#,
         r#"  {"action":"PROPOSE_RESOLVE","entities":["E-1","E-2"],"reason":"same registrant"},"#,
-        r#"  {"action":"PROPOSE_UNRESOLVE","entity":"E-1"}"#,
+        r#"  {"action":"PROPOSE_UNRESOLVE","entity":"E-1"},"#,
+        r#"  {"action":"RUN_PLAYBOOK","playbook":"domain-infra"},"#,
+        r#"  {"action":"ASSERT_FINDING_TEMPLATE","title":"...","details":"..."}"#,
         "]",
         "```",
-        "Supported actions: ADD_FINDING, ADD_NOTE, CREATE_PAGE, LINK_ENTITY, RUN_COLLECTOR, GENERATE_REPORT, PROPOSE_RESOLVE, PROPOSE_UNRESOLVE.",
-        "PROPOSE_RESOLVE and PROPOSE_UNRESOLVE never apply themselves. The analyst must accept.",
+        "Supported actions: ADD_FINDING, ADD_NOTE, CREATE_PAGE, LINK_ENTITY, RUN_COLLECTOR, GENERATE_REPORT, PROPOSE_RESOLVE, PROPOSE_UNRESOLVE, RUN_PLAYBOOK, ASSERT_FINDING_TEMPLATE.",
+        "PROPOSE_RESOLVE, PROPOSE_UNRESOLVE, RUN_PLAYBOOK, and ASSERT_FINDING_TEMPLATE never apply themselves. The analyst must accept.",
+        "RUN_PLAYBOOK may only name a bundled playbook (domain-infra, mail-policy, cert-estate, repo-surface). Nested playbooks are refused. Active tools are refused.",
         "os-int will preview every action for the analyst. Nothing is applied automatically.",
     ]
     .join("\n")

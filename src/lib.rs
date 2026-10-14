@@ -29,6 +29,7 @@
 //! | [`report`] | Markdown and JSON reports. |
 //! | [`exchange`] | Versioned import and export. |
 //! | [`ingest`] | STIX, MISP, CSV/JSON, and Evidence Batch file ingest. |
+//! | [`playbook`] | YAML playbooks and watch-set automations. Collectors still return batches. |
 //! | [`config`] | `config.toml`. Missing keys use the defaults in this module. |
 //! | [`paths`] | Platform config and data directories. |
 //! | [`sanitize`] | Strips terminal escapes from untrusted text. |
@@ -49,6 +50,7 @@ pub mod jobs;
 pub mod logging;
 pub mod model;
 pub mod paths;
+pub mod playbook;
 pub mod report;
 pub mod sanitize;
 pub mod storage;

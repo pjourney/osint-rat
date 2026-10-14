@@ -19,8 +19,8 @@
 | 1 | Ontology runtime v1 | Done ([#5](https://github.com/pjourney/osint-rat/pull/5)) |
 | 2 | Graph & Search Around | Done ([#6](https://github.com/pjourney/osint-rat/pull/6)) |
 | 3 | Entity resolution | Done ([#7](https://github.com/pjourney/osint-rat/pull/7)) |
-| 4 | Ingest plane & connectors | In progress ([#8](https://github.com/pjourney/osint-rat/pull/8)) |
-| 5 | Playbooks & automations | Not started |
+| 4 | Ingest plane & connectors | Done ([#8](https://github.com/pjourney/osint-rat/pull/8)) |
+| 5 | Playbooks & automations | In progress ([#9](https://github.com/pjourney/osint-rat/pull/9)) |
 | 6 | Temporal & geospatial | Not started |
 | 7 | Team, markings & audit | Not started |
 | 8 | Scale, API & STIX | Not started |
@@ -203,7 +203,7 @@ Multi-source fusion: anything an analyst has becomes ontology Objects/Links with
 
 ### Goal
 
-Capture analyst logic as reusable, reviewable workflows (enterprise ontology platforms templated analysis tools / enterprise investigation platforms investigative templates analogue).
+Capture analyst logic as reusable, reviewable workflows: templated analysis steps and investigative playbooks that stay under human control.
 
 ### Features
 
@@ -215,17 +215,17 @@ Capture analyst logic as reusable, reviewable workflows (enterprise ontology pla
 
 ### Success criteria
 
-- [ ] Bundled `domain-infra` playbook runs on `example.com` (or fixture) and leaves a cited graph + optional pending proposals only.
-- [ ] Invalid playbook YAML fails with a clear error; no partial DB corruption (transactional apply).
-- [ ] Automation dry-run mode shows planned Actions without applying.
-- [ ] Docs + examples; tests for playbook parser and one integration test; CI green.
+- [x] Bundled `domain-infra` playbook runs on `example.com` (or fixture) and leaves a cited graph + optional pending proposals only.
+- [x] Invalid playbook YAML fails with a clear error; no partial DB corruption (transactional apply).
+- [x] Automation dry-run mode shows planned Actions without applying.
+- [x] Docs + examples; tests for playbook parser and one integration test; CI green.
 
 ### How to complete
 
 1. Design YAML schema; implement parser + executor using existing JobManager/collectors/Search Around.
 2. Add bundled files under `playbooks/`.
 3. Wire CLI + palette + automation stub (cron-like local scheduler or `os-int watch` loop).
-4. PR `phase-5: playbooks and automations`; merge on checklist.
+4. PR `phase-5: playbooks & automations`; merge on checklist.
 
 ---
 

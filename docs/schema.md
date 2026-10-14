@@ -2,7 +2,7 @@
 
 os-int keeps structured records in one SQLite file, `os-int.sqlite3`, in the data directory. Raw HTTP bodies, reports, agent context packs, and repository clones live as files under `investigations/<uuid>/` and are referenced by a relative path. `os-int config` prints both locations.
 
-This page is the map of those tables. The column list that ships starts at `V1` in [`src/storage/migrations.rs`](../src/storage/migrations.rs). `V2` adds Action audit (`proposals.decided_by`) and the per-investigation `link_types` catalog. `V3` adds `resolutions` (canonical + constituents, reversible property/source writes). Migrations are append-only: add a new version, and do not edit a migration that has already shipped.
+This page is the map of those tables. The column list that ships starts at `V1` in [`src/storage/migrations.rs`](../src/storage/migrations.rs). `V2` adds Action audit (`proposals.decided_by`) and the per-investigation `link_types` catalog. `V3` adds `resolutions` (canonical + constituents, reversible property/source writes). `V4` adds `playbook_runs` and `automations` (local workbench rows; not exported). Migrations are append-only: add a new version, and do not edit a migration that has already shipped.
 
 Every investigation-scoped table has:
 
@@ -37,6 +37,8 @@ Every investigation-scoped table has:
 | `link_types` | First-seen relationship verbs in an investigation. Built-in catalog metadata is copied; custom snake_case verbs are stored with an empty description. Rebuilt from `relationships` on import. Not part of the archive. |
 | `resolutions` | One merge bag: canonical entity, constituent UUIDs, status (`active` / `unresolved`), actor, reason, property writes, and source citations copied onto the canonical. Constituent entity rows are not deleted. `canonical_id` is a real foreign key. `constituent_ids` is a JSON array of UUIDs, so SQLite / `PRAGMA foreign_key_check` / `os-int doctor` cannot see orphans inside it. |
 | `ui_state` | Small key/value pairs: the last investigation, and per-investigation view, page, entity, and agent thread. `scope` is `global` or an investigation id. |
+| `playbook_runs` | One playbook execution. Local workbench chrome, like `ui_state`. Not exported. |
+| `automations` | Watch-set rows: playbook id, seed, last digest, optional interval. Local; not exported. |
 
 ## How a collection lands
 
@@ -60,11 +62,12 @@ Search Around does not add a table. `Store::search_around` loads the investigati
 
 `os-int export` writes `investigation.osint.json` plus a `files/` tree. The JSON document's `data` object is the same shape as `InvestigationData`: the investigation and the rows above, with paths still relative. Import rejects an archive whose investigation id is already present unless you pass `--rename`.
 
-Format name: `os-int-investigation`. Format version: `2` (`exchange::FORMAT_VERSION`). Version 2 adds `data.resolutions`. `proposals.decided_by` and `resolutions` are optional (`#[serde(default)]`); version-1 archives still import (empty resolution list). File ingest uses a **separate** envelope (`os-int-evidence-batch`, `format_version` 1) and does not bump the archive version. Field list, EvidenceBatch ingest shape, reserved later-version keys, and bump rules: [Ontology Exchange Format](ontology-exchange.md). Connectors: [connectors.md](connectors.md). Object types and link verbs: [Ontology](ontology.md).
+Format name: `os-int-investigation`. Format version: `2` (`exchange::FORMAT_VERSION`). Version 2 adds `data.resolutions`. `proposals.decided_by` and `resolutions` are optional (`#[serde(default)]`); version-1 archives still import (empty resolution list). File ingest uses a **separate** envelope (`os-int-evidence-batch`, `format_version` 1) and does not bump the archive version. Playbook YAML uses a third envelope (`os-int-playbook`, `format_version` 1); `playbook_runs` / `automations` stay local like `ui_state` and do not bump the archive version. Timeline kind `playbook_run` is an additive open-enum key. Field list, EvidenceBatch ingest shape, reserved later-version keys, and bump rules: [Ontology Exchange Format](ontology-exchange.md). Connectors: [connectors.md](connectors.md). Object types and link verbs: [Ontology](ontology.md). Playbooks: [playbooks.md](playbooks.md).
 
 ## See also
 
 - [Ontology Exchange Format](ontology-exchange.md)
+- [Playbooks](playbooks.md)
 - [Architecture — storage layout](ARCHITECTURE.md#storage-layout)
 - [User guide — where files live](guide.md#where-files-live)
 - [Examples — export and import](examples.md#write-a-report-and-hand-the-case-over)

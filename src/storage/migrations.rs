@@ -18,6 +18,11 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
         "entity resolution bags with reversible property and source writes",
         V3,
     ),
+    (
+        4,
+        "playbook runs and watch-set automations (local; not archived)",
+        V4,
+    ),
 ];
 
 const V1: &str = r#"
@@ -288,6 +293,44 @@ CREATE TABLE resolutions (
 CREATE INDEX resolutions_investigation ON resolutions (investigation_id, status);
 "#;
 
+/// Playbook runs and automations. Forward-only: do not edit. Not exported (like ui_state).
+const V4: &str = r#"
+CREATE TABLE playbook_runs (
+    id TEXT PRIMARY KEY,
+    investigation_id TEXT NOT NULL REFERENCES investigations (id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    playbook_id TEXT NOT NULL,
+    playbook_name TEXT NOT NULL,
+    seed_kind TEXT NOT NULL,
+    seed_value TEXT NOT NULL,
+    dry_run INTEGER NOT NULL DEFAULT 0,
+    automation INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    error TEXT,
+    created_at TEXT NOT NULL,
+    finished_at TEXT,
+    UNIQUE (investigation_id, seq)
+);
+CREATE INDEX playbook_runs_investigation ON playbook_runs (investigation_id);
+
+CREATE TABLE automations (
+    id TEXT PRIMARY KEY,
+    investigation_id TEXT NOT NULL REFERENCES investigations (id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    playbook_id TEXT NOT NULL,
+    seed_kind TEXT NOT NULL,
+    seed_value TEXT NOT NULL,
+    interval_seconds INTEGER,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_run_at TEXT,
+    last_digest TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (investigation_id, seq)
+);
+CREATE INDEX automations_investigation ON automations (investigation_id, playbook_id);
+"#;
+
 /// Applies all pending migrations inside individual transactions. Returns the number applied.
 pub fn migrate(connection: &mut Connection) -> rusqlite::Result<usize> {
     connection.execute_batch(
@@ -417,7 +460,7 @@ mod tests {
             .expect("v1 finding");
         assert_eq!(current_version(&connection).expect("v1 version"), 1);
         let applied = migrate(&mut connection).expect("applies later versions");
-        assert_eq!(applied, 2);
+        assert_eq!(applied, 3);
         assert_eq!(
             current_version(&connection).expect("latest"),
             latest_version()
@@ -465,7 +508,7 @@ mod tests {
         assert_eq!(count, 1);
         let down: i64 = connection
             .query_row(
-                "SELECT COUNT(*) FROM schema_migrations WHERE version > 3",
+                "SELECT COUNT(*) FROM schema_migrations WHERE version > 4",
                 [],
                 |row| row.get(0),
             )
@@ -516,9 +559,12 @@ mod tests {
             )
             .expect("entity");
         assert_eq!(current_version(&connection).expect("v2 version"), 2);
-        let applied = migrate(&mut connection).expect("applies v3");
-        assert_eq!(applied, 1);
-        assert_eq!(current_version(&connection).expect("v3 version"), 3);
+        let applied = migrate(&mut connection).expect("applies v3+");
+        assert_eq!(applied, 2);
+        assert_eq!(
+            current_version(&connection).expect("latest"),
+            latest_version()
+        );
         assert_eq!(migrate(&mut connection).expect("idempotent"), 0);
         let entity_value: String = connection
             .query_row(
@@ -532,6 +578,72 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM resolutions", [], |row| row.get(0))
             .expect("empty resolutions");
         assert_eq!(count, 0);
+        let playbook_runs: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'playbook_runs'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("playbook_runs");
+        assert_eq!(playbook_runs, 1);
+    }
+
+    #[test]
+    fn v4_is_forward_only_and_preserves_v3_rows() {
+        let mut connection = Connection::open_in_memory().expect("in-memory db");
+        connection
+            .execute_batch(
+                "CREATE TABLE schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    description TEXT NOT NULL,
+                    applied_at TEXT NOT NULL
+                );",
+            )
+            .expect("migrations table");
+        connection.execute_batch(V1).expect("v1");
+        connection.execute_batch(V2).expect("v2");
+        connection.execute_batch(V3).expect("v3");
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, description, applied_at) VALUES (1, 'initial schema', ?1), (2, 'ontology runtime', ?1), (3, 'resolution bags', ?1)",
+                params![now().to_rfc3339()],
+            )
+            .expect("record v1-v3");
+        connection
+            .execute(
+                "INSERT INTO investigations (id, name, description, tags, created_at, updated_at)
+                 VALUES ('11111111-1111-4111-8111-111111111111', 'V3 Case', '', '[]', ?1, ?1)",
+                params![now().to_rfc3339()],
+            )
+            .expect("investigation");
+        connection
+            .execute(
+                "INSERT INTO entities (id, investigation_id, seq, kind, value, label, notes, provenance, fields, created_at, updated_at)
+                 VALUES ('55555555-5555-4555-8555-555555555555', '11111111-1111-4111-8111-111111111111', 1, 'domain', 'example.com', '', '', 'analyst', '[]', ?1, ?1)",
+                params![now().to_rfc3339()],
+            )
+            .expect("entity");
+        assert_eq!(current_version(&connection).expect("v3 version"), 3);
+        let applied = migrate(&mut connection).expect("applies v4");
+        assert_eq!(applied, 1);
+        assert_eq!(current_version(&connection).expect("v4 version"), 4);
+        assert_eq!(migrate(&mut connection).expect("idempotent"), 0);
+        let entity_value: String = connection
+            .query_row(
+                "SELECT value FROM entities WHERE id = '55555555-5555-4555-8555-555555555555'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("entity survives");
+        assert_eq!(entity_value, "example.com");
+        let down: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version > 4",
+                [],
+                |row| row.get(0),
+            )
+            .expect("no down migration");
+        assert_eq!(down, 0);
     }
 
     #[test]
@@ -549,6 +661,8 @@ mod tests {
             "jobs",
             "agent_runs",
             "resolutions",
+            "playbook_runs",
+            "automations",
         ];
         for table in expected {
             let count: i64 = connection

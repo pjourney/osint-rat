@@ -49,6 +49,7 @@ These three commands stay required. Phase work is merge-gated: do not start phas
 | An object type, property, or link verb | `src/model/ontology.rs` and [docs/ontology.md](docs/ontology.md) |
 | A passive collector or diagnostic | `src/collectors/` |
 | File ingest (STIX, MISP, CSV, batch) | `src/ingest/` and [docs/connectors.md](docs/connectors.md) |
+| A playbook or watch set | YAML under `playbooks/`, code in `src/playbook/`, [docs/playbooks.md](docs/playbooks.md) |
 | An external sidecar | `[[collectors.external]]` emitting Evidence Batch JSON; example under `examples/connectors/` |
 | A built-in external tool | `src/tools/registry.rs` |
 | Process spawning, timeouts, redaction | `src/exec/` |
@@ -121,5 +122,6 @@ Please follow [SECURITY.md](SECURITY.md). Use a private report rather than a pub
 - [FAQ](docs/faq.md)
 - [Database tables](docs/schema.md)
 - [Ontology Exchange Format](docs/ontology-exchange.md)
+- [Playbooks](docs/playbooks.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Code of conduct](CODE_OF_CONDUCT.md)

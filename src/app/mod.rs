@@ -189,6 +189,12 @@ pub enum FormKind {
     SettingsAgent,
     /// Ingest a STIX, MISP, CSV, JSON, or Evidence Batch file.
     Ingest,
+    /// Run a bundled playbook or YAML file.
+    Playbook,
+    /// Seed the agent prompt from a playbook.
+    PlaybookPrompt,
+    /// Watch set: re-run collect steps; dry-run lists planned Actions.
+    Watch,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1101,7 +1107,15 @@ impl App {
                 self.overlay = Overlay::None;
                 self.ask_agent(&question)?;
             }
-            Overlay::Form(form) if form.kind == FormKind::Ingest => {
+            Overlay::Form(form)
+                if matches!(
+                    form.kind,
+                    FormKind::Ingest
+                        | FormKind::Playbook
+                        | FormKind::PlaybookPrompt
+                        | FormKind::Watch
+                ) =>
+            {
                 let form = form.clone();
                 self.submit_ingest_form(form)?;
             }
@@ -1199,7 +1213,7 @@ impl App {
                 }
                 self.reload()?;
             }
-            FormKind::Ingest => {
+            FormKind::Ingest | FormKind::Playbook | FormKind::PlaybookPrompt | FormKind::Watch => {
                 self.submit_ingest_form(form)?;
             }
             FormKind::SettingsAgent => {
@@ -1240,6 +1254,9 @@ impl App {
             "run_username" => self.run_named_collector("username")?,
             "run_subdomain" => self.run_named_collector("subdomain")?,
             "ingest" => self.open_ingest_form(),
+            "run_playbook" => self.open_playbook_form(FormKind::Playbook),
+            "playbook_prompt" => self.open_playbook_form(FormKind::PlaybookPrompt),
+            "watch_playbook" => self.open_playbook_form(FormKind::Watch),
             "ask_agent" => self.open_agent_prompt(),
             "generate_report" => self.generate_report("markdown")?,
             "add_finding" => self.overlay = Overlay::Form(finding_form()),
@@ -1276,8 +1293,19 @@ impl App {
     fn cycle_form(&mut self, delta: i32) {
         if let Overlay::Form(form) = &mut self.overlay
             && ((form.kind == FormKind::NewPage && form.index == 1)
-                || (form.kind == FormKind::Ingest && form.index == 0))
+                || (form.kind == FormKind::Ingest && form.index == 0)
+                || (matches!(
+                    form.kind,
+                    FormKind::Playbook | FormKind::PlaybookPrompt | FormKind::Watch
+                ) && (form.index == 0 || form.index == 2)))
         {
+            if matches!(
+                form.kind,
+                FormKind::Playbook | FormKind::PlaybookPrompt | FormKind::Watch
+            ) {
+                cycle_playbook_form(form, delta);
+                return;
+            }
             if form.kind == FormKind::Ingest {
                 let kinds = crate::ingest::IngestFormat::ALL;
                 let current = crate::ingest::IngestFormat::parse(&form.fields[0].value.value)
@@ -1681,6 +1709,13 @@ impl App {
                 JobOutput::Report(report) => {
                     result_text = Some(format!("Wrote {}", report.relative_path));
                 }
+                JobOutput::Playbook(output) => {
+                    self.apply_playbook_output(*output)?;
+                    result_text = self
+                        .job_records
+                        .get(&job_id)
+                        .and_then(|job| job.result.clone());
+                }
             },
             JobOutcome::Failed(error) => {
                 status = JobStatus::Failed;
@@ -1842,7 +1877,7 @@ impl App {
             return Ok(());
         }
         if status == ProposalStatus::Accepted
-            && let Err(error) = self.apply_proposal(&proposal.action)
+            && let Err(error) = self.apply_proposal(&proposal)
         {
             self.store.update_proposal(
                 proposal.id,
@@ -1866,7 +1901,8 @@ impl App {
         Ok(())
     }
 
-    fn apply_proposal(&mut self, action: &AgentAction) -> Result<()> {
+    fn apply_proposal(&mut self, proposal: &Proposal) -> Result<()> {
+        let action = &proposal.action;
         if action.is_reserved() {
             bail!(
                 "{} is reserved and cannot be applied yet; AI only proposes implemented Actions",
@@ -1878,6 +1914,16 @@ impl App {
             AgentAction::ProposeResolve { .. } | AgentAction::ProposeUnresolve { .. }
         ) {
             self.apply_resolve_action(action)?;
+            return Ok(());
+        }
+        if let AgentAction::RunPlaybook { playbook } = action {
+            if !crate::playbook::is_bundled_id(playbook) {
+                bail!(
+                    "RUN_PLAYBOOK may only name a bundled playbook ({}), not a file path",
+                    crate::playbook::bundled_ids().join(", ")
+                );
+            }
+            self.spawn_named_playbook(playbook, false)?;
             return Ok(());
         }
         let workspace = self
@@ -1971,8 +2017,37 @@ impl App {
             AgentAction::ProposeResolve { .. } | AgentAction::ProposeUnresolve { .. } => {
                 unreachable!("resolution actions apply before this match")
             }
-            AgentAction::RunPlaybook { .. } | AgentAction::AssertFindingTemplate { .. } => {
-                unreachable!("reserved actions are refused before apply")
+            AgentAction::RunPlaybook { .. } => {
+                unreachable!("RUN_PLAYBOOK applies before this match")
+            }
+            AgentAction::AssertFindingTemplate { title, details } => {
+                let provenance = self
+                    .workspace
+                    .as_ref()
+                    .and_then(|workspace| {
+                        workspace
+                            .data
+                            .agent_runs
+                            .iter()
+                            .find(|run| run.id == proposal.agent_run_id)
+                    })
+                    .map(|run| {
+                        if run.agent_name == crate::storage::PLAYBOOK_AGENT_NAME {
+                            Provenance::Analyst
+                        } else {
+                            Provenance::Agent
+                        }
+                    })
+                    .unwrap_or(Provenance::Agent);
+                self.store.create_finding(NewFinding {
+                    investigation_id,
+                    page_id: self.page_id,
+                    title: title.clone(),
+                    details: details.clone(),
+                    confidence: Confidence::Medium,
+                    provenance,
+                    source_ids: Vec::new(),
+                })?;
             }
         }
         Ok(())
@@ -2379,14 +2454,27 @@ impl App {
             .iter()
             .map(|field| field.value.value.trim().to_string())
             .collect();
-        let path = values.get(1).map(String::as_str).unwrap_or("");
-        if path.is_empty() {
-            self.status = "Ingest needs a file path.".into();
-            return Ok(());
-        }
-        match self.apply_ingest(&values) {
+        let result = match form.kind {
+            FormKind::Ingest => {
+                let path = values.get(1).map(String::as_str).unwrap_or("");
+                if path.is_empty() {
+                    self.status = "Ingest needs a file path.".into();
+                    return Ok(());
+                }
+                self.apply_ingest(&values)
+            }
+            FormKind::Playbook | FormKind::Watch => self.submit_playbook_form(&form, &values),
+            FormKind::PlaybookPrompt => self.submit_playbook_prompt(&values),
+            _ => Ok(()),
+        };
+        match result {
             Ok(()) => {
-                self.overlay = Overlay::None;
+                if !matches!(
+                    self.overlay,
+                    Overlay::AgentPrompt { .. } | Overlay::Text { .. } | Overlay::Proposals { .. }
+                ) {
+                    self.overlay = Overlay::None;
+                }
                 Ok(())
             }
             Err(error) => {
@@ -2394,6 +2482,276 @@ impl App {
                 Ok(())
             }
         }
+    }
+
+    fn open_playbook_form(&mut self, kind: FormKind) {
+        if self.workspace.is_none() {
+            self.status = "Open an investigation before running a playbook.".into();
+            return;
+        }
+        let target = self
+            .current_target()
+            .map(|target| target.value())
+            .unwrap_or_default();
+        self.overlay = Overlay::Form(playbook_form(kind, &target));
+    }
+
+    fn submit_playbook_form(&mut self, form: &FormState, values: &[String]) -> Result<()> {
+        let spec = values.first().map(String::as_str).unwrap_or("").trim();
+        if spec.is_empty() {
+            bail!("choose a bundled playbook or a YAML file");
+        }
+        let target_raw = values.get(1).map(String::as_str).unwrap_or("").trim();
+        let mode = values.get(2).map(String::as_str).unwrap_or("run");
+        let dry_run = mode == "dry-run";
+        let automation = form.kind == FormKind::Watch;
+        self.launch_playbook(spec, target_raw, dry_run, automation)
+    }
+
+    fn submit_playbook_prompt(&mut self, values: &[String]) -> Result<()> {
+        let spec = values.first().map(String::as_str).unwrap_or("domain-infra");
+        let playbook =
+            crate::playbook::load_playbook(spec).map_err(|error| eyre!(error.to_string()))?;
+        let seed = values
+            .get(1)
+            .map(String::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| self.current_target().map(|target| target.value()))
+            .unwrap_or_else(|| "example.com".into());
+        let question = crate::playbook::bundled_prompt(&playbook, &seed);
+        self.overlay = Overlay::AgentPrompt {
+            input: Input::new(&question),
+        };
+        self.status = "Playbook prompt seeded. Edit if needed, then Enter to send.".into();
+        Ok(())
+    }
+
+    fn launch_playbook(
+        &mut self,
+        spec: &str,
+        target_raw: &str,
+        dry_run: bool,
+        automation: bool,
+    ) -> Result<()> {
+        let selected = self.selected;
+        let entity_id = self.entity_id;
+        let playbook =
+            crate::playbook::load_playbook(spec).map_err(|error| eyre!(error.to_string()))?;
+        let seed = self.playbook_seed(&playbook, target_raw)?;
+        let tools = Arc::clone(&self.tools);
+        let job = crate::jobs::JobContext::detached(false);
+        if dry_run {
+            let mut plan =
+                crate::playbook::plan_playbook(&playbook, &seed, &tools, automation, &job)
+                    .map_err(|error| eyre!(error.to_string()))?;
+            if let Some(workspace) = &self.workspace {
+                crate::playbook::bind_resolve_plan(&mut plan, &workspace.data, &playbook);
+            }
+            self.selected = selected;
+            self.entity_id = entity_id;
+            self.overlay = Overlay::Text {
+                title: if automation {
+                    "Automation dry-run".into()
+                } else {
+                    "Playbook dry-run".into()
+                },
+                body: plan.describe(),
+                scroll: 0,
+            };
+            self.status = "Dry-run: nothing was applied.".into();
+            return Ok(());
+        }
+        self.spawn_playbook_job(playbook, seed, automation)?;
+        self.selected = selected;
+        if let Some(id) = entity_id {
+            self.entity_id = self
+                .workspace
+                .as_ref()
+                .and_then(|workspace| workspace.entity(id).map(|_| workspace.canonical_id(id)));
+        }
+        Ok(())
+    }
+
+    fn playbook_seed(&self, playbook: &crate::model::Playbook, target_raw: &str) -> Result<Target> {
+        if !target_raw.is_empty() {
+            return Target::parse(playbook.seed.kind, target_raw).map_err(|error| eyre!(error));
+        }
+        if let Some(target) = self.current_target()
+            && target.kind() == playbook.seed.kind
+        {
+            return Ok(target);
+        }
+        bail!(
+            "playbook {} needs a {} seed; enter a target",
+            playbook.id,
+            playbook.seed.kind
+        )
+    }
+
+    fn spawn_named_playbook(&mut self, spec: &str, automation: bool) -> Result<()> {
+        if self
+            .job_records
+            .values()
+            .any(|job| job.kind.starts_with("playbook:") && job.status.is_active())
+        {
+            bail!("a playbook is already running; nested playbooks are refused");
+        }
+        let playbook =
+            crate::playbook::load_playbook(spec).map_err(|error| eyre!(error.to_string()))?;
+        let seed = self.playbook_seed(&playbook, "")?;
+        self.spawn_playbook_job(playbook, seed, automation)
+    }
+
+    fn spawn_playbook_job(
+        &mut self,
+        playbook: crate::model::Playbook,
+        seed: Target,
+        automation: bool,
+    ) -> Result<()> {
+        if self
+            .job_records
+            .values()
+            .any(|job| job.kind.starts_with("playbook:") && job.status.is_active())
+        {
+            bail!("a playbook is already running; nested playbooks are refused");
+        }
+        let investigation_id = self.workspace.as_ref().map(Workspace::id);
+        let page_id = self.page_id;
+        let job_id = Uuid::new_v4();
+        let mut record = JobRecord {
+            id: job_id,
+            investigation_id,
+            seq: 0,
+            kind: format!("playbook:{}", playbook.id),
+            label: playbook.name.clone(),
+            description: format!("{} {}", playbook.id, seed.value()),
+            status: JobStatus::Queued,
+            program: None,
+            args: Vec::new(),
+            created_at: now(),
+            started_at: None,
+            finished_at: None,
+            progress: None,
+            log: String::new(),
+            stderr: String::new(),
+            result: None,
+            error: None,
+            page_id,
+        };
+        self.store.insert_job(&mut record)?;
+        self.job_records.insert(job_id, record);
+        let net_error = self.net.as_ref().err().cloned();
+        if net_error.is_some() {
+            return Err(eyre!(net_error.unwrap_or_default()));
+        }
+        let tools = Arc::clone(&self.tools);
+        let files = self.files().ok_or_else(|| eyre!("no investigation"))?;
+        let cache_dir = self.paths.cache_dir();
+        let settings = CollectorSettings::from_config(&self.config);
+        let net = self.net.as_ref().ok().cloned();
+        let collectors = self.collectors.clone();
+        let previous_digest = investigation_id.and_then(|id| {
+            self.store
+                .find_automation(id, &playbook.id, &seed.value())
+                .ok()
+                .flatten()
+                .and_then(|row| row.last_digest)
+        });
+        let options = crate::playbook::ExecuteOptions {
+            dry_run: false,
+            automation,
+            previous_digest,
+            interval_seconds: None,
+        };
+        let playbook_id = playbook.id.clone();
+        self.jobs.spawn(job_id, move |job| async move {
+            let net = net.ok_or_else(|| "network is not available".to_string())?;
+            let context = CollectorContext {
+                net,
+                files,
+                tools: Arc::clone(&tools),
+                cache_dir,
+                settings,
+                job,
+            };
+            crate::playbook::gather(&playbook, &seed, &collectors, &context, options)
+                .await
+                .map(|output| JobOutput::Playbook(Box::new(output)))
+                .map_err(|error| error.message)
+        });
+        self.status = format!("Queued playbook {playbook_id}");
+        self.view = View::Jobs;
+        self.mark_dirty();
+        Ok(())
+    }
+
+    fn apply_playbook_output(&mut self, output: crate::model::PlaybookOutput) -> Result<()> {
+        let Some(investigation_id) = self.workspace.as_ref().map(Workspace::id) else {
+            return Ok(());
+        };
+        let page_id = self.page_id;
+        if output.dry_run {
+            self.overlay = Overlay::Text {
+                title: "Playbook dry-run".into(),
+                body: output.plan.describe(),
+                scroll: 0,
+            };
+            self.status = "Dry-run: nothing was applied.".into();
+            return Ok(());
+        }
+        let playbook = output.playbook.clone();
+        let seed =
+            Target::parse(playbook.seed.kind, &output.seed_value).map_err(|error| eyre!(error))?;
+        let committed = crate::playbook::commit(
+            &mut self.store,
+            &playbook,
+            &seed,
+            ApplyContext {
+                investigation_id,
+                page_id,
+                job_id: None,
+            },
+            output.clone(),
+            crate::playbook::ExecuteOptions {
+                dry_run: false,
+                automation: output.automation,
+                previous_digest: output.previous_digest.clone(),
+                interval_seconds: None,
+            },
+        )
+        .map_err(|error| eyre!(error.to_string()))?;
+        if let Some(job) = self
+            .job_records
+            .values_mut()
+            .find(|job| job.kind == format!("playbook:{}", playbook.id) && job.status.is_active())
+        {
+            job.result = Some(format!("{} pending proposal(s)", committed.proposals.len()));
+        }
+        self.status = format!(
+            "Playbook {} finished. {} pending proposal(s).",
+            playbook.id,
+            committed.proposals.len()
+        );
+        if !committed.proposals.is_empty()
+            && let Some(run_id) = self
+                .store
+                .load_investigation(investigation_id)
+                .ok()
+                .and_then(|data| {
+                    data.agent_runs
+                        .iter()
+                        .rev()
+                        .find(|run| run.agent_name == crate::storage::PLAYBOOK_AGENT_NAME)
+                        .map(|run| run.id)
+                })
+        {
+            self.overlay = Overlay::Proposals {
+                run_id,
+                selected: 0,
+            };
+        }
+        Ok(())
     }
 
     fn apply_ingest(&mut self, values: &[String]) -> Result<()> {
@@ -2502,6 +2860,57 @@ fn ingest_form() -> FormState {
             field("Mapping", "", "optional kind=col,value=col"),
         ],
     )
+}
+
+fn playbook_form(kind: FormKind, target: &str) -> FormState {
+    let id = crate::playbook::bundled_ids()
+        .first()
+        .copied()
+        .unwrap_or("domain-infra");
+    let mode = match kind {
+        FormKind::Watch => "dry-run",
+        FormKind::PlaybookPrompt => "send",
+        _ => "run",
+    };
+    let mode_hint = match kind {
+        FormKind::Watch => "Left/Right: dry-run once",
+        FormKind::PlaybookPrompt => "Enter seeds the agent question",
+        _ => "Left/Right: run dry-run",
+    };
+    FormState::new(
+        kind,
+        vec![
+            field(
+                "Playbook",
+                id,
+                "Left/Right: bundled ids, or type a YAML path",
+            ),
+            field("Target", target, "seed value (example.com)"),
+            field("Mode", mode, mode_hint),
+        ],
+    )
+}
+
+fn cycle_playbook_form(form: &mut FormState, delta: i32) {
+    let ids = crate::playbook::bundled_ids();
+    if form.index == 0 && !ids.is_empty() {
+        let current = form.fields[0].value.value.trim();
+        let index = ids.iter().position(|id| *id == current).unwrap_or(0);
+        let next = ids[(index as i32 + delta).rem_euclid(ids.len() as i32) as usize];
+        form.fields[0].value.set(next);
+        return;
+    }
+    if form.index == 2 && form.kind != FormKind::PlaybookPrompt {
+        let modes: &[&str] = if form.kind == FormKind::Watch {
+            &["dry-run", "once"]
+        } else {
+            &["run", "dry-run"]
+        };
+        let current = form.fields[2].value.value.trim();
+        let index = modes.iter().position(|mode| *mode == current).unwrap_or(0);
+        let next = modes[(index as i32 + delta).rem_euclid(modes.len() as i32) as usize];
+        form.fields[2].value.set(next);
+    }
 }
 
 fn resolve_entity(workspace: &Workspace, raw: &str) -> Option<Uuid> {
@@ -3343,7 +3752,7 @@ mod tests {
     }
 
     #[test]
-    fn reserved_action_is_refused_and_records_the_local_actor() {
+    fn run_playbook_file_path_is_refused_and_records_the_local_actor() {
         let (_directory, mut app) = test_app();
         create_named_investigation(&mut app, "Example Corp");
         let investigation_id = app.workspace.as_ref().expect("workspace").id();
@@ -3361,7 +3770,7 @@ mod tests {
                 run.id,
                 vec![(
                     AgentAction::RunPlaybook {
-                        playbook: "domain-infra".into(),
+                        playbook: "../evil.yaml".into(),
                     },
                     ProposalStatus::Pending,
                     None,
@@ -3386,12 +3795,10 @@ mod tests {
         assert_eq!(proposal.status, ProposalStatus::Invalid);
         assert!(proposal.decided_at.is_some());
         assert!(proposal.decided_by.is_some());
+        let error = proposal.error.as_deref().unwrap_or_default();
         assert!(
-            proposal
-                .error
-                .as_deref()
-                .unwrap_or_default()
-                .contains("reserved")
+            error.contains("bundled") || error.contains("path"),
+            "{error}"
         );
     }
 
@@ -3840,5 +4247,139 @@ mod tests {
             "a missing ingest file must leave the form open"
         );
         assert!(!app.status.is_empty());
+    }
+
+    #[test]
+    fn playbook_form_esc_and_enter_restore_entity_selection() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let paths = AppPaths::new(
+            directory.path().join("config.toml"),
+            directory.path().join("data"),
+        );
+        paths.ensure_dirs().expect("dirs");
+        let store = Store::open(&paths.database()).expect("store");
+        let mut app = App::new(Config::default(), paths, store);
+        create_named_investigation(&mut app, "Playbook Sel");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        app.store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Domain,
+                "alpha.example",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("a");
+        app.store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Ip,
+                "192.0.2.55",
+                crate::model::Provenance::Collected,
+                None,
+            )
+            .expect("b");
+        app.reload().expect("reload");
+        app.view = View::Entities;
+        app.pane = Pane::Main;
+        app.selected = 1;
+        let listed = app.workspace.as_ref().expect("ws").visible_entities();
+        let focused = listed.get(1).map(|entity| entity.id);
+        app.entity_id = focused;
+        app.dispatch(Action::Command("run_playbook")).expect("b");
+        assert!(matches!(
+            app.overlay,
+            Overlay::Form(ref form) if form.kind == FormKind::Playbook
+        ));
+        app.dispatch(Action::Cancel).expect("esc");
+        assert_eq!(app.overlay, Overlay::None);
+        assert_eq!(app.view, View::Entities);
+        assert_eq!(app.selected, 1);
+        assert_eq!(app.entity_id, focused);
+        app.dispatch(Action::Command("run_playbook"))
+            .expect("b again");
+        if let Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set("domain-infra");
+            form.fields[1].value.set("example.com");
+            form.fields[2].value.set("dry-run");
+        }
+        app.dispatch(Action::Submit).expect("enter");
+        assert!(matches!(app.overlay, Overlay::Text { .. }));
+        assert_eq!(app.view, View::Entities);
+        assert_eq!(app.selected, 1);
+        if let Some(id) = focused {
+            let workspace = app.workspace.as_ref().expect("workspace");
+            assert_eq!(app.entity_id, Some(workspace.canonical_id(id)));
+        }
+        let workspace = app.workspace.as_ref().expect("workspace");
+        assert!(workspace.data.proposals.is_empty());
+        assert!(
+            workspace
+                .data
+                .entities
+                .iter()
+                .all(|entity| { entity.value == "alpha.example" || entity.value == "192.0.2.55" })
+        );
+        app.dispatch(Action::Cancel).expect("close dry-run");
+        assert_eq!(app.overlay, Overlay::None);
+        assert_eq!(app.selected, 1);
+    }
+
+    #[test]
+    fn playbook_prompt_seeds_agent_question() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let paths = AppPaths::new(
+            directory.path().join("config.toml"),
+            directory.path().join("data"),
+        );
+        paths.ensure_dirs().expect("dirs");
+        let store = Store::open(&paths.database()).expect("store");
+        let mut app = App::new(Config::default(), paths, store);
+        create_named_investigation(&mut app, "Prompt");
+        app.dispatch(Action::Command("playbook_prompt"))
+            .expect("cmd");
+        if let Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set("domain-infra");
+            form.fields[1].value.set("example.com");
+        }
+        app.dispatch(Action::Submit).expect("enter");
+        assert!(matches!(app.overlay, Overlay::AgentPrompt { .. }));
+        if let Overlay::AgentPrompt { input } = &app.overlay {
+            assert!(input.value.contains("domain-infra"));
+            assert!(input.value.contains("RUN_COLLECTOR"));
+            assert!(input.value.contains("ASSERT_FINDING_TEMPLATE"));
+        }
+    }
+
+    #[test]
+    fn watch_dry_run_does_not_apply() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let paths = AppPaths::new(
+            directory.path().join("config.toml"),
+            directory.path().join("data"),
+        );
+        paths.ensure_dirs().expect("dirs");
+        let store = Store::open(&paths.database()).expect("store");
+        let mut app = App::new(Config::default(), paths, store);
+        create_named_investigation(&mut app, "Watch");
+        app.dispatch(Action::Command("watch_playbook"))
+            .expect("cmd");
+        if let Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set("domain-infra");
+            form.fields[1].value.set("example.com");
+            form.fields[2].value.set("dry-run");
+        }
+        app.dispatch(Action::Submit).expect("enter");
+        assert!(matches!(app.overlay, Overlay::Text { .. }));
+        if let Overlay::Text { body, .. } = &app.overlay {
+            assert!(body.contains("automation dry-run") || body.contains("Nothing was applied"));
+            assert!(
+                !body.contains("Observation changed"),
+                "watch dry-run must not always list a watch finding"
+            );
+        }
+        let workspace = app.workspace.as_ref().expect("workspace");
+        assert!(workspace.data.sources.is_empty());
+        assert!(workspace.data.proposals.is_empty());
     }
 }

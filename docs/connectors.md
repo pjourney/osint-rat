@@ -132,6 +132,7 @@ Ingest upserts entities on `(kind, canonical value)`. A merge bag is not rewritt
 ## See also
 
 - [Ontology Exchange Format](ontology-exchange.md)
+- [Playbooks](playbooks.md)
 - [User guide — collectors](guide.md#collectors)
 - [User guide — ingest](guide.md#ingest)
 - [Architecture](ARCHITECTURE.md)

@@ -1,0 +1,31 @@
+format: os-int-playbook
+format_version: 1
+id: cert-estate
+name: Certificate estate
+description: >
+  Collect certificate-transparency and TLS observations for a seed domain,
+  Search Around certificate links, and propose a review finding.
+seed:
+  type: domain
+steps:
+  - collect: ct
+  - collect: tls
+  - collect: dns
+  - search_around:
+      hops: 2
+      link_types:
+        - presents_certificate
+        - covers
+        - issued_by
+      kinds:
+        - domain
+        - hostname
+        - certificate
+        - organization
+  - assert_finding_template:
+      title: Review certificate estate
+      details: >
+        Confirm presented certificates, SANs, and issuers are cited. Accept
+        this finding only after reviewing the graph.
+  - propose_resolve:
+      reason: Shared certificate SAN cluster

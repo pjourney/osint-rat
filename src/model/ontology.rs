@@ -996,14 +996,14 @@ pub const ACTION_TYPES: &[ActionType] = &[
     ActionType {
         kind: "RUN_PLAYBOOK",
         label: "Run playbook",
-        description: "Reserved. Run a reviewable playbook. Automations propose; they do not silently write.",
-        implemented: false,
+        description: "Run a bundled playbook. Accept is required. Nested playbooks and active tools are refused. Automations propose; they do not silently write.",
+        implemented: true,
     },
     ActionType {
         kind: "ASSERT_FINDING_TEMPLATE",
         label: "Assert finding template",
-        description: "Reserved. Propose a templated finding from a playbook step.",
-        implemented: false,
+        description: "Propose a templated finding from a playbook. Accept writes the finding; playbooks never write it silently.",
+        implemented: true,
     },
 ];
 
@@ -1479,7 +1479,12 @@ mod tests {
     fn action_catalog_covers_implemented_and_reserved_kinds() {
         assert!(action_type("ADD_FINDING").expect("finding").implemented);
         assert!(action_type("PROPOSE_RESOLVE").expect("resolve").implemented);
-        assert!(!action_type("RUN_PLAYBOOK").expect("playbook").implemented);
+        assert!(action_type("RUN_PLAYBOOK").expect("playbook").implemented);
+        assert!(
+            action_type("ASSERT_FINDING_TEMPLATE")
+                .expect("template")
+                .implemented
+        );
         assert_eq!(
             action_type_for(&AgentAction::AddNote { body: "x".into() }).kind,
             "ADD_NOTE"
@@ -1492,7 +1497,7 @@ mod tests {
             .is_reserved()
         );
         assert!(
-            AgentAction::RunPlaybook {
+            !AgentAction::RunPlaybook {
                 playbook: "domain-infra".into(),
             }
             .is_reserved()

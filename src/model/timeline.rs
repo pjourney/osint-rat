@@ -28,6 +28,7 @@ open_enum! {
         Investigation => ("investigation", "Investigation activity"),
         EntitiesResolved => ("entities_resolved", "Entities resolved"),
         EntitiesUnresolved => ("entities_unresolved", "Entities unresolved"),
+        PlaybookRun => ("playbook_run", "Playbook run"),
     }
 }
 

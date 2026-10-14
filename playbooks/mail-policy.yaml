@@ -1,0 +1,24 @@
+format: os-int-playbook
+format_version: 1
+id: mail-policy
+name: Mail policy
+description: >
+  Collect published mail-related DNS records for a seed domain (MX, SPF, DKIM,
+  DMARC via the DNS collector) and propose a review finding. Nothing is written
+  as an analyst conclusion until accept.
+seed:
+  type: domain
+steps:
+  - collect: dns
+  - collect: rdap
+  - search_around:
+      hops: 1
+      link_types:
+        - mail_handled_by
+        - spf_includes
+        - hosted_on
+  - assert_finding_template:
+      title: Review mail policy
+      details: >
+        Check MX, SPF, DKIM, and DMARC readings against cited sources before
+        accepting this finding.

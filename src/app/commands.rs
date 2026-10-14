@@ -79,6 +79,21 @@ pub const COMMANDS: &[Command] = &[
         hint: "i",
     },
     Command {
+        id: "run_playbook",
+        title: "Run playbook",
+        hint: "b",
+    },
+    Command {
+        id: "playbook_prompt",
+        title: "Playbook prompt",
+        hint: "",
+    },
+    Command {
+        id: "watch_playbook",
+        title: "Watch playbook",
+        hint: "",
+    },
+    Command {
         id: "ask_agent",
         title: "Ask Agent",
         hint: "a",

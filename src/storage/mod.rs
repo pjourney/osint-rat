@@ -11,6 +11,7 @@ mod graph;
 mod load;
 pub mod migrations;
 mod pages;
+mod playbook;
 mod resolution;
 mod rows;
 
@@ -23,6 +24,7 @@ use uuid::Uuid;
 pub use apply::{ApplyContext, ApplySummary};
 pub use evidence::{NewFinding, NewSourceRecord};
 pub use pages::NewPage;
+pub use playbook::{PLAYBOOK_AGENT_NAME, PlaybookApplyMeta};
 use rows::{RowExt, id, json, ts};
 
 use crate::model::{CataloguedLink, Investigation, InvestigationSummary, now};
@@ -46,6 +48,8 @@ pub(crate) enum SeqTable {
     AgentRuns,
     Proposals,
     Resolutions,
+    PlaybookRuns,
+    Automations,
 }
 
 impl SeqTable {
@@ -62,6 +66,8 @@ impl SeqTable {
             SeqTable::AgentRuns => "agent_runs",
             SeqTable::Proposals => "proposals",
             SeqTable::Resolutions => "resolutions",
+            SeqTable::PlaybookRuns => "playbook_runs",
+            SeqTable::Automations => "automations",
         }
     }
 }

@@ -19,7 +19,7 @@ pub fn init(paths: &AppPaths, debug: bool) -> Result<WorkerGuard, io::Error> {
         "os_int=info,warn"
     };
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default));
-    tracing_subscriber::registry()
+    let _ = tracing_subscriber::registry()
         .with(filter)
         .with(
             tracing_subscriber::fmt::layer()
@@ -27,6 +27,6 @@ pub fn init(paths: &AppPaths, debug: bool) -> Result<WorkerGuard, io::Error> {
                 .with_target(true)
                 .with_writer(writer),
         )
-        .init();
+        .try_init();
     Ok(guard)
 }
