@@ -2,7 +2,7 @@ use super::*;
 use crate::model::{
     AgentAction, ArtifactKind, AuditKind, Confidence, EntityKey, EntityKind, EvidenceBatch,
     Identity, JobRecord, JobStatus, Marking, NewArtifact, NewSource, PageKind, ProposalStatus,
-    Provenance, Role, SearchAroundQuery, SourceKind, TimelineKind, Workspace,
+    Provenance, Role, SearchAroundQuery, SourceKind, Target, TargetKind, TimelineKind, Workspace,
 };
 use rusqlite::params;
 use uuid::Uuid;
@@ -1841,4 +1841,222 @@ fn update_investigation_does_not_change_marking() {
         .expect("present");
     assert_eq!(loaded.name, "Renamed");
     assert_eq!(loaded.marking, Marking::TlpAmber);
+}
+
+fn reader_on_shared_case() -> (tempfile::TempDir, Uuid, Uuid, Store) {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("os-int.sqlite3");
+    let mut owner = Store::open(&path).expect("owner");
+    owner.set_identity(Identity {
+        user_id: "alice".into(),
+        machine_name: "desk-a".into(),
+    });
+    let investigation = owner.create_investigation("Shared", "").expect("created");
+    owner
+        .add_member(investigation.id, "carol", Role::Reader)
+        .expect("carol");
+    let page = owner
+        .create_page(NewPage::new(
+            investigation.id,
+            "example.com",
+            PageKind::Domain,
+            Some("example.com"),
+        ))
+        .expect("page");
+    drop(owner);
+    let mut reader = Store::open(&path).expect("reader");
+    reader.set_identity(Identity {
+        user_id: "carol".into(),
+        machine_name: "desk-c".into(),
+    });
+    (directory, investigation.id, page.id, reader)
+}
+
+#[test]
+fn reader_mutations_are_refused_and_leave_rows_unchanged() {
+    let (_directory, investigation_id, page_id, mut reader) = reader_on_shared_case();
+    let before = reader.load_investigation(investigation_id).expect("load");
+    assert!(
+        reader
+            .create_finding(NewFinding {
+                investigation_id,
+                page_id: Some(page_id),
+                title: "reader finding".into(),
+                details: String::new(),
+                confidence: Confidence::Low,
+                provenance: Provenance::Analyst,
+                source_ids: Vec::new(),
+            })
+            .is_err()
+    );
+    assert!(
+        reader
+            .create_note(
+                investigation_id,
+                Some(page_id),
+                "reader note",
+                Provenance::Analyst,
+            )
+            .is_err()
+    );
+    assert!(reader.update_page_notes(page_id, "reader notes").is_err());
+    let mut job = JobRecord {
+        id: Uuid::new_v4(),
+        investigation_id: Some(investigation_id),
+        seq: 0,
+        kind: "collector:dns".into(),
+        label: "DNS".into(),
+        description: "DNS".into(),
+        status: JobStatus::Queued,
+        program: None,
+        args: Vec::new(),
+        created_at: crate::model::now(),
+        started_at: None,
+        finished_at: None,
+        progress: None,
+        log: String::new(),
+        stderr: String::new(),
+        result: None,
+        error: None,
+        page_id: Some(page_id),
+    };
+    assert!(reader.insert_job(&mut job).is_err());
+    assert!(
+        reader
+            .add_artifact(
+                investigation_id,
+                Some(page_id),
+                &NewArtifact {
+                    kind: ArtifactKind::File,
+                    name: "note.txt".into(),
+                    path: "files/note.txt".into(),
+                    mime: None,
+                    size_bytes: 0,
+                    sha256: None,
+                    fields: crate::model::Fields::new(),
+                    source: None,
+                },
+            )
+            .is_err()
+    );
+    assert!(reader.delete_investigation(investigation_id).is_err());
+    let after = reader.load_investigation(investigation_id).expect("still");
+    assert_eq!(after.findings.len(), before.findings.len());
+    assert_eq!(after.notes.len(), before.notes.len());
+    assert_eq!(after.pages[0].notes, before.pages[0].notes);
+    assert_eq!(after.jobs.len(), before.jobs.len());
+    assert_eq!(after.artifacts.len(), before.artifacts.len());
+    assert_eq!(after.investigation.name, "Shared");
+}
+
+#[test]
+fn analyst_cannot_add_member() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("os-int.sqlite3");
+    let mut owner = Store::open(&path).expect("owner");
+    owner.set_identity(Identity {
+        user_id: "alice".into(),
+        machine_name: "desk-a".into(),
+    });
+    let investigation = owner.create_investigation("Team", "").expect("created");
+    owner
+        .add_member(investigation.id, "bob", Role::Analyst)
+        .expect("bob");
+    drop(owner);
+    let mut analyst = Store::open(&path).expect("analyst");
+    analyst.set_identity(Identity {
+        user_id: "bob".into(),
+        machine_name: "desk-b".into(),
+    });
+    let error = analyst
+        .add_member(investigation.id, "dana", Role::Reader)
+        .expect_err("analyst team");
+    assert!(error.to_string().contains("owner"));
+    assert_eq!(
+        analyst
+            .list_members(investigation.id)
+            .expect("members")
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn playbook_apply_writes_playbook_run_audit() {
+    let (mut store, investigation) = store_with_investigation();
+    let playbook = crate::playbook::bundled("domain-infra").expect("bundled");
+    let seed = Target::parse(TargetKind::Domain, "example.com").expect("seed");
+    store
+        .apply_playbook_outcome(
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            &[],
+            PlaybookApplyMeta {
+                playbook: &playbook,
+                seed: &seed,
+                automation: false,
+                digest: "digest",
+                previous_digest: None,
+            },
+        )
+        .expect("apply");
+    let kinds: Vec<_> = store
+        .list_audit(investigation.id)
+        .expect("audit")
+        .into_iter()
+        .map(|entry| entry.kind)
+        .collect();
+    assert!(kinds.contains(&AuditKind::PlaybookRun));
+}
+
+#[test]
+fn importer_of_a_reader_archive_becomes_owner() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("os-int.sqlite3");
+    let mut owner = Store::open(&path).expect("owner");
+    owner.set_identity(Identity {
+        user_id: "alice".into(),
+        machine_name: "desk-a".into(),
+    });
+    let investigation = owner.create_investigation("Handoff", "").expect("created");
+    owner
+        .add_member(investigation.id, "carol", Role::Reader)
+        .expect("carol");
+    let export_dir = directory.path().join("archive");
+    crate::exchange::export_investigation(
+        &mut owner,
+        investigation.id,
+        directory.path(),
+        &export_dir,
+    )
+    .expect("export");
+    drop(owner);
+    let mut imported = Store::open_in_memory().expect("new store");
+    imported.set_identity(Identity {
+        user_id: "carol".into(),
+        machine_name: "desk-c".into(),
+    });
+    let paths =
+        crate::paths::AppPaths::new(directory.path().join("cfg"), directory.path().join("data"));
+    paths.ensure_dirs().expect("dirs");
+    let data = crate::exchange::import_investigation(&mut imported, &export_dir, &paths, false)
+        .expect("import");
+    assert_eq!(
+        imported.role_for(data.investigation.id).expect("role"),
+        Role::Owner
+    );
+    imported
+        .create_finding(NewFinding {
+            investigation_id: data.investigation.id,
+            page_id: None,
+            title: "importer note".into(),
+            details: String::new(),
+            confidence: Confidence::Low,
+            provenance: Provenance::Analyst,
+            source_ids: Vec::new(),
+        })
+        .expect("owner can write");
 }

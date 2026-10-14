@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::{Result, WrapErr, bail};
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
@@ -388,6 +388,7 @@ impl Store {
     }
 
     pub fn update_entity(&self, entity_id: Uuid, label: &str, notes: &str) -> Result<()> {
+        self.assert_can_mutate_record("entities", entity_id)?;
         self.connection().execute(
             "UPDATE entities SET label = ?2, notes = ?3, updated_at = ?4 WHERE id = ?1",
             params![id(&entity_id), label.trim(), notes, ts(&now())],
@@ -396,6 +397,7 @@ impl Store {
     }
 
     pub fn delete_entity(&self, entity_id: Uuid) -> Result<()> {
+        self.assert_can_mutate_record("entities", entity_id)?;
         self.connection().execute(
             "DELETE FROM entities WHERE id = ?1",
             params![id(&entity_id)],
@@ -444,7 +446,8 @@ impl Store {
             |row| Ok((row.uuid(0)?, row.get(1)?)),
         )?;
         self.assert_can_mutate(investigation_id)?;
-        let mut fields: Fields = serde_json::from_str(&previous).unwrap_or_default();
+        let mut fields: Fields =
+            serde_json::from_str(&previous).wrap_err("entity fields JSON is invalid")?;
         let from = fields
             .get(OBJECT_MARKING_FIELD)
             .and_then(|value| Marking::parse(value).ok())
@@ -480,6 +483,7 @@ impl Store {
     }
 
     pub fn delete_relationship(&self, relationship_id: Uuid) -> Result<()> {
+        self.assert_can_mutate_record("relationships", relationship_id)?;
         self.connection().execute(
             "DELETE FROM relationships WHERE id = ?1",
             params![id(&relationship_id)],

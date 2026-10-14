@@ -8,6 +8,11 @@ use super::common::Timestamp;
 /// How concurrent writers are reconciled. Documented in `docs/collaboration.md`.
 pub const CONFLICT_POLICY: &str = "last-write-wins-with-audit";
 
+/// ASCII case-insensitive `user_id` match (`Pat` and `pat` are the same person).
+pub fn same_user(left: &str, right: &str) -> bool {
+    left.eq_ignore_ascii_case(right)
+}
+
 /// Role on one investigation. Empty membership means single-user owner.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -80,5 +85,11 @@ mod tests {
         assert_eq!(Role::parse("Analyst").expect("role"), Role::Analyst);
         assert_eq!(Role::parse("read-only").expect("role"), Role::Reader);
         assert!(Role::parse("admin").is_err());
+    }
+
+    #[test]
+    fn user_ids_match_case_insensitively() {
+        assert!(same_user("Pat", "pat"));
+        assert!(!same_user("pat", "patricia"));
     }
 }

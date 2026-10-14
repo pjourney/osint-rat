@@ -41,7 +41,7 @@ Every investigation-scoped table has:
 | `ui_state` | Small key/value pairs: the last investigation, and per-investigation view, page, entity, and agent thread. `scope` is `global` or an investigation id. |
 | `playbook_runs` | One playbook execution. Local workbench chrome, like `ui_state`. Not exported. |
 | `automations` | Watch-set rows: playbook id, seed, last digest, optional interval. Local; not exported. |
-| `audit_log` | Append-only governance events (merge, accept, playbook, export, marking, membership). Short ref `L-n`. `UPDATE` is refused by a trigger. Deleted only with the investigation. |
+| `audit_log` | Append-only governance events (merge, accept, playbook, export, marking, membership). Short ref `L-n`. `UPDATE` is refused by a trigger. Rows are deleted only when the owner deletes the investigation (`ON DELETE CASCADE`); there is no other delete path. |
 | `investigation_members` | `user_id` + `role` (`owner` / `analyst` / `reader`). Empty means single-user owner. |
 
 ## How a collection lands

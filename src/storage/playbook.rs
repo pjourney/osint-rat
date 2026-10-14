@@ -177,6 +177,7 @@ impl Store {
         interval_seconds: Option<i64>,
         digest: Option<&str>,
     ) -> Result<Automation> {
+        self.assert_can_mutate(investigation_id)?;
         let existing = self.find_automation(investigation_id, playbook_id, &seed.value())?;
         let timestamp = now();
         if let Some(mut row) = existing {

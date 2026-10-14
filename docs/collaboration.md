@@ -8,7 +8,7 @@ Threat model: the trust boundary is the people who can read the data directory (
 
 Each investigation has a Traffic Light Protocol marking: `unmarked`, `TLP:CLEAR`, `TLP:GREEN`, `TLP:AMBER`, `TLP:AMBER+STRICT`, or `TLP:RED`. It is shown on Overview, in the title bar, in `os-int list`, and on `investigation` inside `investigation.osint.json`.
 
-Objects may carry an optional marking in `entities.fields.marking` (`os-int marking set … --entity E-1`). Missing means unmarked.
+Objects may carry an optional marking in `entities.fields.marking` (`os-int marking set … --entity E-1`). Missing means unmarked. Palette **Set marking** changes the investigation label only; object markings are CLI-only on purpose.
 
 Only the **owner** can change the investigation marking. Analysts may set object markings.
 
@@ -22,14 +22,14 @@ The palette command **Set marking** cycles the same labels.
 
 ## Audit log
 
-`audit_log` is append-only (SQLite trigger refuses `UPDATE`). Rows record:
+`audit_log` is append-only (SQLite trigger refuses `UPDATE`). Rows are deleted only when the **owner** deletes the investigation (`ON DELETE CASCADE`). There is no other delete path. Rows record:
 
 | Kind | When |
 | --- | --- |
 | `entities_merged` / `entities_unresolved` | Manual or accepted merge / split |
 | `action_accepted` | An analyst accepts an Action proposal |
 | `playbook_run` | A playbook apply (not dry-run) |
-| `export` | `os-int export` of an archive (writers only; readers may still export the existing slice) |
+| `export` | Recorded after a successful archive write (writers only; readers may still export the existing slice) |
 | `marking_changed` | Investigation or object marking |
 | `member_added` / `member_role_changed` / `member_removed` | Team changes |
 
@@ -48,7 +48,7 @@ user_id = "analyst"
 machine_name = "workstation"
 ```
 
-Empty values fall back to `$USER` / `$USERNAME` and the hostname (`local` / `unknown` if those are missing). Configure this before sharing a data directory so audit rows are distinguishable.
+Empty values fall back to `$USER` / `$USERNAME` and the hostname (`local` / `unknown` if those are missing). Configure this before sharing a data directory so audit rows are distinguishable. Role lookup matches `user_id` case-insensitively (`Pat` and `pat` are the same person).
 
 ## Shared data directory
 
@@ -58,7 +58,7 @@ There is no sync server. Copying `os-int.sqlite3` plus `investigations/` is the 
 
 ### Roles
 
-| Role | Read / export | Collect, merge, accept, playbook | Change TLP / team |
+| Role | Read / export | Collect, merge, accept, playbook, notes, findings | Change TLP / team / delete case |
 | --- | --- | --- | --- |
 | `owner` | yes | yes | yes |
 | `analyst` | yes | yes | no |
@@ -73,7 +73,9 @@ os-int team set-role "Example Corp" bob --role reader
 os-int team remove "Example Corp" bob
 ```
 
-Unlisted users on a case that already has members are **readers**.
+Unlisted users on a case that already has members are **readers**. Importing a case that already lists members always makes the current identity an **owner** of that copy (insert or promote), so a reader who exports and imports into another data directory can work the copy.
+
+Deleting a case is owner-only because it cascades to `audit_log`.
 
 ## What this is not
 

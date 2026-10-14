@@ -43,7 +43,7 @@ pub use batch::{
     EntityKey, EvidenceBatch, NewArtifact, NewCollectedFinding, NewEntity, NewRelationship,
     NewSource, NewTimelineEvent, SourceKey,
 };
-pub use collaboration::{CONFLICT_POLICY, Member, Role};
+pub use collaboration::{CONFLICT_POLICY, Member, Role, same_user};
 pub use common::{Confidence, Fields, Provenance, Timestamp, now};
 pub use cooccur::{
     CoOccurrence, CoOccurrenceKind, CoOccurrenceQuery, DEFAULT_WINDOW, co_occur, event_involves,

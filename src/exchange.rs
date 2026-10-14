@@ -50,9 +50,10 @@ pub fn export_investigation(
     files_root: &Path,
     destination: &Path,
 ) -> Result<PathBuf> {
-    store.record_export(investigation_id, &destination.display().to_string())?;
     let data = store.load_investigation(investigation_id)?;
-    export_data(&data, files_root, destination)
+    let path = export_data(&data, files_root, destination)?;
+    store.record_export(investigation_id, &destination.display().to_string())?;
+    Ok(path)
 }
 
 pub fn export_data(
@@ -782,12 +783,37 @@ mod tests {
                 .iter()
                 .any(|entry| entry.kind == crate::model::AuditKind::EntitiesMerged)
         );
+        let export_rows = store
+            .list_audit(investigation.id)
+            .expect("audit")
+            .into_iter()
+            .filter(|entry| entry.kind == crate::model::AuditKind::Export)
+            .count();
+        assert_eq!(export_rows, 1);
+        let original_merge_targets = store
+            .list_audit(investigation.id)
+            .expect("audit")
+            .into_iter()
+            .find(|entry| entry.kind == crate::model::AuditKind::EntitiesMerged)
+            .expect("merge")
+            .target_ids;
+        let second_dir = directory.path().join("archive-2");
+        crate::exchange::export_investigation(
+            &mut store,
+            investigation.id,
+            directory.path(),
+            &second_dir,
+        )
+        .expect("second export");
+        let second_text = fs::read_to_string(second_dir.join(MANIFEST_NAME)).expect("manifest");
+        let second: ArchiveManifest = serde_json::from_str(&second_text).expect("parse");
         assert!(
-            manifest
+            second
                 .data
                 .audit
                 .iter()
-                .any(|entry| entry.kind == crate::model::AuditKind::Export)
+                .any(|entry| entry.kind == crate::model::AuditKind::Export),
+            "a later export includes the prior export audit row"
         );
         let mut target = Store::open_in_memory().expect("target");
         let paths = crate::paths::AppPaths::new(
@@ -814,5 +840,17 @@ mod tests {
                 .iter()
                 .all(|entry| entry.investigation_id == renamed.investigation.id)
         );
+        let renamed_merge = renamed
+            .audit
+            .iter()
+            .find(|entry| entry.kind == crate::model::AuditKind::EntitiesMerged)
+            .expect("renamed merge");
+        assert_ne!(renamed_merge.target_ids, original_merge_targets);
+        for target in &renamed_merge.target_ids {
+            assert!(
+                renamed.entities.iter().any(|entity| entity.id == *target),
+                "remapped target {target} must be an imported entity"
+            );
+        }
     }
 }

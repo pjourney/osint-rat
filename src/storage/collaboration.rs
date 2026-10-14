@@ -7,7 +7,7 @@ use uuid::Uuid;
 use super::audit::append_audit_on;
 use super::rows::{RowExt, id, ts};
 use super::{Store, touch_investigation};
-use crate::model::{AuditKind, Fields, Member, Role, now};
+use crate::model::{AuditKind, Fields, Member, Role, now, same_user};
 
 pub(crate) fn list_members(
     connection: &Connection,
@@ -63,9 +63,16 @@ fn role_from_members(members: &[Member], user_id: &str) -> Role {
     }
     members
         .iter()
-        .find(|member| member.user_id == user_id)
+        .find(|member| same_user(&member.user_id, user_id))
         .map(|member| member.role)
         .unwrap_or(Role::Reader)
+}
+
+fn stored_user_id<'a>(members: &'a [Member], user_id: &str) -> Option<&'a str> {
+    members
+        .iter()
+        .find(|member| same_user(&member.user_id, user_id))
+        .map(|member| member.user_id.as_str())
 }
 
 impl Store {
@@ -87,6 +94,16 @@ impl Store {
             bail!("role {} cannot modify this investigation", role.as_str());
         }
         Ok(())
+    }
+
+    pub fn assert_can_mutate_record(&self, table: &'static str, row_id: Uuid) -> Result<()> {
+        match super::investigation_id_of(self.connection(), table, row_id) {
+            Ok(investigation_id) => self.assert_can_mutate(investigation_id),
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                bail!("unknown {table} record {row_id}")
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub fn assert_can_manage_team(&self, investigation_id: Uuid) -> Result<()> {
@@ -120,10 +137,7 @@ impl Store {
         let identity = self.identity.clone();
         let transaction = self.connection_mut().transaction()?;
         seed_owner_if_empty(&transaction, investigation_id, &identity.user_id)?;
-        if list_members(&transaction, investigation_id)?
-            .iter()
-            .any(|member| member.user_id == user_id)
-        {
+        if stored_user_id(&list_members(&transaction, investigation_id)?, user_id).is_some() {
             bail!("{user_id} is already a member of this investigation");
         }
         let member = Member {
@@ -162,9 +176,13 @@ impl Store {
         let identity = self.identity.clone();
         let transaction = self.connection_mut().transaction()?;
         let mut members = list_members(&transaction, investigation_id)?;
-        let Some(existing) = members.iter().find(|member| member.user_id == user_id) else {
+        let Some(existing) = members
+            .iter()
+            .find(|member| same_user(&member.user_id, user_id))
+        else {
             return Err(eyre!("{user_id} is not a member of this investigation"));
         };
+        let stored_id = existing.user_id.clone();
         if existing.role == Role::Owner
             && role != Role::Owner
             && members
@@ -177,7 +195,7 @@ impl Store {
         }
         transaction.execute(
             "UPDATE investigation_members SET role = ?3 WHERE investigation_id = ?1 AND user_id = ?2",
-            params![id(&investigation_id), user_id, role.as_str()],
+            params![id(&investigation_id), stored_id, role.as_str()],
         )?;
         let mut details = Fields::new();
         details.push("user_id", user_id);
@@ -196,7 +214,7 @@ impl Store {
         members = list_members(self.connection(), investigation_id)?;
         members
             .into_iter()
-            .find(|member| member.user_id == user_id)
+            .find(|member| same_user(&member.user_id, user_id))
             .ok_or_else(|| eyre!("member vanished after role change"))
     }
 
@@ -206,9 +224,13 @@ impl Store {
         let identity = self.identity.clone();
         let transaction = self.connection_mut().transaction()?;
         let members = list_members(&transaction, investigation_id)?;
-        let Some(existing) = members.iter().find(|member| member.user_id == user_id) else {
+        let Some(existing) = members
+            .iter()
+            .find(|member| same_user(&member.user_id, user_id))
+        else {
             return Err(eyre!("{user_id} is not a member of this investigation"));
         };
+        let stored_id = existing.user_id.clone();
         if existing.role == Role::Owner
             && members
                 .iter()
@@ -220,7 +242,7 @@ impl Store {
         }
         transaction.execute(
             "DELETE FROM investigation_members WHERE investigation_id = ?1 AND user_id = ?2",
-            params![id(&investigation_id), user_id],
+            params![id(&investigation_id), stored_id],
         )?;
         let mut details = Fields::new();
         details.push("user_id", user_id);
@@ -245,7 +267,20 @@ pub(crate) fn ensure_importer_owner(
     user_id: &str,
 ) -> rusqlite::Result<()> {
     let members = list_members(connection, investigation_id)?;
-    if members.is_empty() || members.iter().any(|member| member.user_id == user_id) {
+    if members.is_empty() {
+        return Ok(());
+    }
+    if let Some(existing) = members
+        .iter()
+        .find(|member| same_user(&member.user_id, user_id))
+    {
+        if existing.role == Role::Owner {
+            return Ok(());
+        }
+        connection.execute(
+            "UPDATE investigation_members SET role = 'owner' WHERE investigation_id = ?1 AND user_id = ?2",
+            params![id(&investigation_id), existing.user_id],
+        )?;
         return Ok(());
     }
     insert_member_record(

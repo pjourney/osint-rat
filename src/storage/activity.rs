@@ -202,6 +202,9 @@ pub(crate) fn list_proposals(
 impl Store {
     /// Persists a new job, assigning its sequence number.
     pub fn insert_job(&self, job: &mut JobRecord) -> Result<()> {
+        if let Some(investigation_id) = job.investigation_id {
+            self.assert_can_mutate(investigation_id)?;
+        }
         job.seq = next_job_seq(self.connection(), job.investigation_id)?;
         insert_job_record(self.connection(), job)?;
         Ok(())
@@ -218,6 +221,9 @@ impl Store {
     }
 
     pub fn update_job(&self, job: &JobRecord) -> Result<()> {
+        if let Some(investigation_id) = job.investigation_id {
+            self.assert_can_mutate(investigation_id)?;
+        }
         self.connection().execute(
             "UPDATE jobs SET status = ?2, program = ?3, args = ?4, started_at = ?5, finished_at = ?6,
                 progress = ?7, log = ?8, stderr = ?9, result = ?10, error = ?11
@@ -254,12 +260,14 @@ impl Store {
     }
 
     pub fn insert_agent_run(&self, run: &mut AgentRun) -> Result<()> {
+        self.assert_can_mutate(run.investigation_id)?;
         run.seq = next_seq(self.connection(), SeqTable::AgentRuns, run.investigation_id)?;
         insert_agent_run_record(self.connection(), run)?;
         Ok(())
     }
 
     pub fn update_agent_run(&self, run: &AgentRun) -> Result<()> {
+        self.assert_can_mutate(run.investigation_id)?;
         self.connection().execute(
             "UPDATE agent_runs SET response = ?2, status = ?3, error = ?4, context_artifact_id = ?5, job_id = ?6,
                 model = ?7, cost_usd = ?8, finished_at = ?9, args = ?10
@@ -281,6 +289,7 @@ impl Store {
     }
 
     pub fn delete_agent_run(&self, run_id: Uuid) -> Result<()> {
+        self.assert_can_mutate_record("agent_runs", run_id)?;
         self.connection()
             .execute("DELETE FROM agent_runs WHERE id = ?1", params![id(&run_id)])?;
         Ok(())
@@ -293,6 +302,7 @@ impl Store {
         agent_run_id: Uuid,
         actions: Vec<(AgentAction, ProposalStatus, Option<String>)>,
     ) -> Result<Vec<Proposal>> {
+        self.assert_can_mutate(investigation_id)?;
         let transaction = self.connection_mut().transaction()?;
         let mut proposals = Vec::with_capacity(actions.len());
         for (action, status, error) in actions {
@@ -363,6 +373,7 @@ impl Store {
     }
 
     pub fn update_proposal_action(&self, proposal_id: Uuid, action: &AgentAction) -> Result<()> {
+        self.assert_can_mutate_record("proposals", proposal_id)?;
         self.connection().execute(
             "UPDATE proposals SET action = ?2 WHERE id = ?1",
             params![id(&proposal_id), json(action)],

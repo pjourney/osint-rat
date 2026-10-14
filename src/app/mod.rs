@@ -1300,7 +1300,68 @@ impl App {
         Ok(())
     }
 
+    fn command_requires_write(id: &str) -> bool {
+        matches!(
+            id,
+            "new_page"
+                | "run_collectors"
+                | "run_dns"
+                | "run_rdap"
+                | "run_http"
+                | "run_tls"
+                | "run_ct"
+                | "run_ip"
+                | "run_email"
+                | "run_username"
+                | "run_subdomain"
+                | "ingest"
+                | "run_playbook"
+                | "playbook_prompt"
+                | "watch_playbook"
+                | "ask_agent"
+                | "generate_report"
+                | "add_finding"
+                | "add_note"
+                | "merge_entities"
+                | "unresolve_entity"
+                | "confirm_resolve"
+                | "confirm_unresolve"
+                | "cancel_job"
+        ) || id.starts_with("run_tool:")
+    }
+
+    fn require_open_write(&self) -> Result<()> {
+        let workspace = self
+            .workspace
+            .as_ref()
+            .ok_or_else(|| eyre!("Create or open an investigation first."))?;
+        self.store.assert_can_mutate(workspace.id())
+    }
+
+    fn require_open_marking(&self) -> Result<()> {
+        let workspace = self
+            .workspace
+            .as_ref()
+            .ok_or_else(|| eyre!("Create or open an investigation first."))?;
+        self.store.assert_can_set_marking(workspace.id())
+    }
+
+    fn require_open_team(&self) -> Result<()> {
+        let workspace = self
+            .workspace
+            .as_ref()
+            .ok_or_else(|| eyre!("Create or open an investigation first."))?;
+        self.store.assert_can_manage_team(workspace.id())
+    }
+
     fn run_command(&mut self, id: &str) -> Result<()> {
+        if id == "set_marking" {
+            self.require_open_marking()?;
+        } else if id == "add_member" {
+            self.require_open_team()?;
+        } else if Self::command_requires_write(id) {
+            self.require_open_write()?;
+        }
         match id {
             "new_investigation" => {
                 self.workspace = None;
@@ -1970,6 +2031,7 @@ impl App {
         if proposal.status != ProposalStatus::Pending {
             return Ok(());
         }
+        self.store.assert_can_mutate(proposal.investigation_id)?;
         if status == ProposalStatus::Accepted
             && let Err(error) = self.apply_proposal(&proposal)
         {
@@ -3425,6 +3487,96 @@ mod tests {
                 .iter()
                 .any(|note| note.body.contains("already saved"))
         );
+    }
+
+    #[test]
+    fn reader_accept_leaves_finding_and_proposal_unchanged() {
+        let (_directory, mut app) = test_app();
+        app.store.set_identity(crate::model::Identity {
+            user_id: "alice".into(),
+            machine_name: "desk-a".into(),
+        });
+        create_named_investigation(&mut app, "Shared Case");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        app.store
+            .add_member(investigation_id, "carol", crate::model::Role::Reader)
+            .expect("carol");
+        let mut run = sample_run(investigation_id, Uuid::new_v4(), Uuid::new_v4(), "Find?");
+        app.store.insert_agent_run(&mut run).expect("run");
+        let proposals = app
+            .store
+            .insert_proposals(
+                investigation_id,
+                run.id,
+                vec![(
+                    AgentAction::AddFinding {
+                        title: "reader must not persist this".into(),
+                        details: String::new(),
+                        confidence: None,
+                        sources: Vec::new(),
+                    },
+                    ProposalStatus::Pending,
+                    None,
+                )],
+            )
+            .expect("proposals");
+        app.reload().expect("reload");
+        app.store.set_identity(crate::model::Identity {
+            user_id: "carol".into(),
+            machine_name: "desk-c".into(),
+        });
+        app.reload().expect("reload as reader");
+        app.overlay = Overlay::Proposals {
+            run_id: run.id,
+            selected: 0,
+        };
+        let error = app.dispatch(Action::Accept).expect_err("reader accept");
+        assert!(
+            error.to_string().contains("reader"),
+            "unexpected error: {error}"
+        );
+        let data = app
+            .store
+            .load_investigation(investigation_id)
+            .expect("loads");
+        assert!(data.findings.is_empty());
+        let pending = data
+            .proposals
+            .iter()
+            .find(|proposal| proposal.id == proposals[0].id)
+            .expect("proposal");
+        assert_eq!(pending.status, ProposalStatus::Pending);
+    }
+
+    #[test]
+    fn reader_write_commands_fail_closed() {
+        let (_directory, mut app) = test_app();
+        app.store.set_identity(crate::model::Identity {
+            user_id: "alice".into(),
+            machine_name: "desk-a".into(),
+        });
+        create_named_investigation(&mut app, "Shared Case");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        app.store
+            .add_member(investigation_id, "carol", crate::model::Role::Reader)
+            .expect("carol");
+        app.store.set_identity(crate::model::Identity {
+            user_id: "carol".into(),
+            machine_name: "desk-c".into(),
+        });
+        app.reload().expect("reload");
+        let error = app
+            .dispatch(Action::Command("add_finding"))
+            .expect_err("finding");
+        assert!(error.to_string().contains("reader"), "{error}");
+        let error = app
+            .dispatch(Action::Command("set_marking"))
+            .expect_err("marking");
+        assert!(error.to_string().contains("owner"), "{error}");
+        let error = app
+            .dispatch(Action::Command("run_collectors"))
+            .expect_err("collect");
+        assert!(error.to_string().contains("reader"), "{error}");
     }
 
     #[test]

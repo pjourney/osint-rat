@@ -267,7 +267,7 @@ Merge records that are the same real-world thing without destroying history. Unr
 
 ## Markings, audit, and team
 
-Overview and the title bar show the investigation marking (`unmarked` or `TLP:CLEAR` / `GREEN` / `AMBER` / `AMBER+STRICT` / `RED`). The **Audit** screen lists append-only governance events (merges, accepted Actions, playbook runs, exports, marking and membership changes). That log is not the investigative Timeline.
+Overview and the title bar show the investigation marking (`unmarked` or `TLP:CLEAR` / `GREEN` / `AMBER` / `AMBER+STRICT` / `RED`). Palette **Set marking** cycles the investigation label. Object markings are CLI-only (`os-int marking set … --entity E-1`). The **Audit** screen lists append-only governance events (merges, accepted Actions, playbook runs, exports, marking and membership changes). That log is not the investigative Timeline. Deleting a case is owner-only (it removes the audit log with the investigation). `[identity] user_id` matching is case-insensitive.
 
 ```bash
 os-int marking set "Example Corp" TLP:AMBER

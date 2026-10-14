@@ -91,6 +91,18 @@ pub(crate) fn next_seq(
     connection.query_row(&sql, params![id(&investigation_id)], |row| row.get(0))
 }
 
+pub(crate) fn investigation_id_of(
+    connection: &Connection,
+    table: &'static str,
+    row_id: Uuid,
+) -> rusqlite::Result<Uuid> {
+    connection.query_row(
+        &format!("SELECT investigation_id FROM {table} WHERE id = ?1"),
+        params![id(&row_id)],
+        |row| row.uuid(0),
+    )
+}
+
 pub(crate) fn touch_investigation(
     connection: &Connection,
     investigation_id: Uuid,
@@ -376,6 +388,7 @@ impl Store {
     }
 
     pub fn delete_investigation(&self, investigation_id: Uuid) -> Result<()> {
+        self.assert_can_manage_team(investigation_id)?;
         self.connection.execute(
             "DELETE FROM investigations WHERE id = ?1",
             params![id(&investigation_id)],
