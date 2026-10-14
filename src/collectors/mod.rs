@@ -7,9 +7,12 @@
 //!
 //! To add a collector: implement `Collector`, then register it in `CollectorRegistry::builtin`.
 
+pub mod api;
 pub mod ct;
 pub mod diagnose;
 pub mod dns;
+pub mod email;
+pub mod external;
 pub mod file;
 pub mod html;
 pub mod http;
@@ -17,8 +20,11 @@ pub mod ip;
 pub mod net;
 pub mod rdap;
 pub mod repository;
+pub mod subdomain;
 pub mod tls;
 pub mod tool;
+pub mod username;
+pub mod whois;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -27,6 +33,7 @@ use futures::future::BoxFuture;
 
 pub use net::{NetContext, NetSettings};
 
+use crate::config::Config;
 use crate::files::InvestigationFiles;
 use crate::jobs::JobContext;
 use crate::model::{EvidenceBatch, Target, TargetKind};
@@ -56,17 +63,28 @@ pub struct CollectorSettings {
     pub check_www: bool,
     pub repository_history_depth: u32,
     pub max_file_import_bytes: u64,
+    pub max_subdomains: u32,
+    pub max_username_profiles: u32,
+    pub max_ingest_bytes: u64,
+}
+
+impl CollectorSettings {
+    pub fn from_config(config: &Config) -> Self {
+        Self {
+            fetch_robots: config.collectors.fetch_robots,
+            check_www: config.collectors.check_www,
+            repository_history_depth: config.collectors.repository_history_depth,
+            max_file_import_bytes: config.storage.max_file_import_bytes,
+            max_subdomains: config.collectors.max_subdomains,
+            max_username_profiles: config.collectors.max_username_profiles,
+            max_ingest_bytes: config.collectors.max_ingest_bytes,
+        }
+    }
 }
 
 impl Default for CollectorSettings {
     fn default() -> Self {
-        let defaults = crate::config::Config::default();
-        Self {
-            fetch_robots: defaults.collectors.fetch_robots,
-            check_www: defaults.collectors.check_www,
-            repository_history_depth: defaults.collectors.repository_history_depth,
-            max_file_import_bytes: defaults.storage.max_file_import_bytes,
-        }
+        Self::from_config(&crate::config::Config::default())
     }
 }
 
@@ -86,11 +104,11 @@ pub type CollectResult = Result<CollectionOutput, String>;
 
 pub trait Collector: Send + Sync {
     /// Stable identifier used in configuration, the CLI, and agent actions (`dns`).
-    fn id(&self) -> &'static str;
+    fn id(&self) -> &str;
     /// Short label for status displays (`DNS`).
-    fn label(&self) -> &'static str;
+    fn label(&self) -> &str;
     /// One line shown in the command palette and job description.
-    fn description(&self) -> &'static str;
+    fn description(&self) -> &str;
     /// Whether this collector can run against `kind`.
     ///
     /// The default set for a page is every accepting collector that also returns true from
@@ -103,6 +121,10 @@ pub trait Collector: Send + Sync {
     /// External programs required; the collector is unavailable when any is missing.
     fn requires(&self) -> &'static [&'static str] {
         &[]
+    }
+    /// Whether this collector needs a working HTTP/DNS client.
+    fn needs_network(&self) -> bool {
+        true
     }
     /// Whether "run all collectors" includes this collector by default.
     fn runs_by_default(&self) -> bool {
@@ -151,8 +173,30 @@ impl CollectorRegistry {
                 Arc::new(ip::IpCollector),
                 Arc::new(repository::RepositoryCollector),
                 Arc::new(file::FileCollector),
+                Arc::new(email::EmailCollector),
+                Arc::new(username::UsernameCollector),
+                Arc::new(subdomain::SubdomainCollector),
             ],
         }
+    }
+
+    /// Built-ins plus `[[collectors.external]]` and enabled `[[collectors.api]]`.
+    pub fn from_config(config: &Config) -> Self {
+        let mut registry = Self::builtin();
+        for entry in &config.collectors.external {
+            match external::ExternalCollector::from_config(entry) {
+                Ok(collector) => registry.collectors.push(Arc::new(collector)),
+                Err(error) => tracing::warn!("skipping external collector: {error}"),
+            }
+        }
+        for entry in &config.collectors.api {
+            match api::ApiConnector::from_config(entry) {
+                Ok(collector) => registry.collectors.push(Arc::new(collector)),
+                Err(error) if error == "disabled" => {}
+                Err(error) => tracing::warn!("skipping API connector: {error}"),
+            }
+        }
+        registry
     }
 
     pub fn all(&self) -> &[Arc<dyn Collector>] {
@@ -202,21 +246,38 @@ mod tests {
     fn domain_targets_get_the_core_collectors() {
         let registry = CollectorRegistry::builtin();
         let tools = ToolRegistry::detect(&ToolsConfig::default());
-        let actual: Vec<&str> = registry
-            .defaults_for(TargetKind::Domain, &tools)
+        let collectors = registry.defaults_for(TargetKind::Domain, &tools);
+        let actual: Vec<&str> = collectors.iter().map(|collector| collector.id()).collect();
+        assert_eq!(
+            actual,
+            vec!["dns", "rdap", "http", "tls", "ct", "subdomain"]
+        );
+    }
+
+    #[test]
+    fn email_and_username_have_default_collectors() {
+        let registry = CollectorRegistry::builtin();
+        let tools = ToolRegistry::detect(&ToolsConfig::default());
+        let email_collectors = registry.defaults_for(TargetKind::Email, &tools);
+        let email: Vec<&str> = email_collectors
             .iter()
             .map(|collector| collector.id())
             .collect();
-        assert_eq!(actual, vec!["dns", "rdap", "http", "tls", "ct"]);
+        assert!(email.contains(&"dns"));
+        assert!(email.contains(&"email"));
+        let username_collectors = registry.defaults_for(TargetKind::Username, &tools);
+        let username: Vec<&str> = username_collectors
+            .iter()
+            .map(|collector| collector.id())
+            .collect();
+        assert_eq!(username, vec!["username"]);
     }
 
     #[test]
     fn collectors_are_found_by_id_or_label() {
         let registry = CollectorRegistry::builtin();
-        assert_eq!(
-            registry.find("RDAP").map(|collector| collector.id()),
-            Some("rdap")
-        );
+        let found = registry.find("RDAP").expect("rdap");
+        assert_eq!(found.id(), "rdap");
         assert!(registry.find("nope").is_none());
     }
 

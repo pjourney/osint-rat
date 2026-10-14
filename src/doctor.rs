@@ -46,7 +46,17 @@ pub fn run(
     }
     checks.push(ok("Config", paths.config_file.display().to_string()));
     for program in [
-        "claude", "codex", "dig", "whois", "git", "gh", "exiftool", "curl", "openssl",
+        "claude",
+        "codex",
+        "dig",
+        "whois",
+        "git",
+        "gh",
+        "exiftool",
+        "curl",
+        "openssl",
+        "subfinder",
+        "amass",
     ] {
         let installed = tools.is_installed(program);
         let label = match program {

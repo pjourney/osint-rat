@@ -4,7 +4,7 @@
 
 os-int is where you keep a case together. You create an investigation, add the domains, addresses, URLs, and files you care about, collect public records, and keep every observation tied to its source. You can take notes, ask a local AI agent CLI, and write a report — without leaving the terminal.
 
-It orchestrates information, tools, sources, and agents. Built-in collectors cover the passive basics. Everything else plugs in as an external program you already have, or as the agent CLI you already use.
+It orchestrates information, tools, sources, and agents. Built-in collectors cover the passive basics. Everything else plugs in as an external program you already have, an Evidence Batch sidecar, or the agent CLI you already use.
 
 ```text
 ┌ os-int · Example Corp ───────────────────────────────────────── Claude ● ┐
@@ -31,7 +31,7 @@ It orchestrates information, tools, sources, and agents. Built-in collectors cov
 | --- | --- |
 | **New here** | [Install](#install), then [your first investigation](#your-first-investigation) |
 | **Day to day** | [How a case is organized](#how-a-case-is-organized), [keyboard](#keyboard), [command line](#command-line) |
-| **Going further** | [Vision](VISION.md) · [Phased roadmap](PHASED_ROADMAP.md) · [User guide](docs/guide.md) · [Examples](docs/examples.md) · [FAQ](docs/faq.md) · [Ontology exchange](docs/ontology-exchange.md) |
+| **Going further** | [Vision](VISION.md) · [Phased roadmap](PHASED_ROADMAP.md) · [User guide](docs/guide.md) · [Examples](docs/examples.md) · [FAQ](docs/faq.md) · [Connectors](docs/connectors.md) · [Ontology exchange](docs/ontology-exchange.md) |
 | **Contributing** | [Architecture](docs/ARCHITECTURE.md) · [Ontology](docs/ontology.md) · [Database tables](docs/schema.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) |
 
 ---
@@ -40,7 +40,7 @@ It orchestrates information, tools, sources, and agents. Built-in collectors cov
 
 **This is** a local-first investigation ontology for OSINT and cyber cases. You fuse public sources into objects and links, keep provenance on every record, and stay in control of every Action—including those a local AI agent proposes. Collectors are plugins. The graph and the resolution engine are the product. Delivery is gated by phase: [vision](VISION.md), [roadmap](PHASED_ROADMAP.md).
 
-**This is not** a recon CLI, a collector-count contest, or an active-probing toolkit. Built-in collectors stay passive. There is no silent AI writeback, no automatic identity merge, and no cloud requirement. The bar is an enterprise-class investigative loop (ontology, fusion, resolution, Search Around, playbooks, governed Actions)—not module-count parity. Graph and Search Around ship now. Entity resolution, playbooks, and the remaining phases land only when their criteria pass.
+**This is not** a recon CLI, a collector-count contest, or an active-probing toolkit. Built-in collectors stay passive. There is no silent AI writeback, no automatic identity merge, and no cloud requirement. The bar is an enterprise-class investigative loop (ontology, fusion, resolution, Search Around, playbooks, governed Actions)—not module-count parity. Graph, Search Around, and entity resolution ship now. Playbooks and the remaining phases land only when their criteria pass.
 
 The [Boundaries](#boundaries) section is the operational rule for what built-in collectors may do. It is not relaxed by the vision.
 
@@ -49,7 +49,8 @@ The [Boundaries](#boundaries) section is the operational rule for what built-in 
 ## What you use it for
 
 - Keep one investigation per case, with pages for each subject (a domain, an IP, a URL, a repository, a file, a person, an organization).
-- Collect public DNS, RDAP, HTTP, TLS, certificate-transparency, IP, repository, and file metadata, and store the raw response.
+- Collect public DNS, RDAP, HTTP, TLS, certificate-transparency, IP, repository, file, email-identity, username-profile, and subdomain metadata, and store the raw response.
+- Ingest STIX 2.1, MISP, CSV/JSON observables, or an Evidence Batch from a file or a sidecar connector.
 - Read diagnostics of published records: mail policy, response headers, certificate validity, DNSSEC, and `security.txt`.
 - Attach provenance to every record so collected data, original material, your notes, and AI inference stay distinct.
 - Cite anything with a short id (`P-1`, `S-12`, `E-4`, `F-1`) that the interface, the agent, and reports all share.
@@ -64,9 +65,9 @@ The [Boundaries](#boundaries) section is the operational rule for what built-in 
 
 os-int is an observation, monitoring, and diagnostic notebook for public information.
 
-Built-in collectors perform ordinary DNS queries, RDAP lookups, a single HTTP(S) fetch of a URL you specify, a TLS handshake, a query to the public [crt.sh](https://crt.sh) certificate transparency search, inspection of public git metadata, and inspection of a local file you point at. Diagnostics describe what a name publishes. A gap is stored as a collected finding and cleared when a later collection shows the record is in place.
+Built-in collectors perform ordinary DNS queries, RDAP lookups, a single HTTP(S) fetch of a URL you specify, a TLS handshake, a query to the public [crt.sh](https://crt.sh) certificate transparency search, inspection of public git metadata, inspection of a local file you point at, public profile URL checks, and passive subdomain expansion. Diagnostics describe what a name publishes. A gap is stored as a collected finding and cleared when a later collection shows the record is in place.
 
-Custom tools marked `active` are refused. You are responsible for complying with applicable law, terms of service, and your organization's rules.
+Custom tools and sidecars marked `active` are refused. You are responsible for complying with applicable law, terms of service, and your organization's rules.
 
 ## Install
 
@@ -94,7 +95,7 @@ os-int doctor
 os-int config
 ```
 
-`doctor` reports the database, the config file, and whether common programs (`claude`, `codex`, `dig`, `whois`, `git`, `gh`, `exiftool`, `curl`, `openssl`) are on `PATH`. Missing programs are optional. A database warning makes `doctor` exit non-zero, which is useful in bug reports.
+`doctor` reports the database, the config file, and whether common programs (`claude`, `codex`, `dig`, `whois`, `git`, `gh`, `exiftool`, `curl`, `openssl`, `subfinder`, `amass`) are on `PATH`. Missing programs are optional. A database warning makes `doctor` exit non-zero, which is useful in bug reports.
 
 ### Where your files live
 
@@ -175,6 +176,7 @@ The screen has a navigation column, a main pane, and (on a wide terminal) a deta
 | `n` | New investigation, page, or finding, depending on the screen |
 | `e` | Edit the current page notes in `$EDITOR`, or open agent and theme settings |
 | `r` | Run the default collectors for the current page |
+| `i` | Ingest a STIX / MISP / CSV / JSON / Evidence Batch file |
 | `v` | Object View: highlighted entity, or the current page |
 | `g` | Graph: entities as nodes, relationships as edges |
 | `s` | Search Around from the current selection |
@@ -203,6 +205,8 @@ os-int list
 os-int collect domain example.com --investigation "Example Corp"
 os-int collect example.com --collector dns  # kind is guessed from the value
 os-int collect ip 192.0.2.15
+os-int collect email alice@example.com --collector email
+os-int ingest ./bundle.json --format stix --investigation "Example Corp"
 os-int report "Example Corp" --format markdown -o ./example.md
 os-int export "Example Corp" -o ./export
 os-int import ./export --rename             # --rename only if the id already exists
@@ -212,7 +216,7 @@ os-int config
 
 `report --format json` writes JSON. Any other format value writes Markdown. Without `-o`, the file is saved inside the investigation directory and the path is printed.
 
-Collector ids: `dns`, `rdap`, `http`, `tls`, `ct`, `ip`, `repository`, `file`. Omit `--collector` to run the defaults for that target. A domain runs DNS, RDAP, HTTP, TLS, and certificate transparency. An IP runs RDAP and IP intelligence. See the [collector matrix](docs/guide.md#collectors) for every target kind.
+Collector ids: `dns`, `rdap`, `http`, `tls`, `ct`, `ip`, `repository`, `file`, `email`, `username`, `subdomain`. Omit `--collector` to run the defaults for that target. A domain runs DNS, RDAP, HTTP, TLS, certificate transparency, and subdomain expansion. An IP runs RDAP and IP intelligence. An email runs DNS, CT, and the email identity pack. A username runs the username pack. See the [collector matrix](docs/guide.md#collectors) and [connectors](docs/connectors.md).
 
 ## Configuration
 

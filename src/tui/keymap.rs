@@ -106,6 +106,7 @@ fn map_normal_key(key: KeyEvent, view: View, ctrl: bool) -> Option<Action> {
         KeyCode::Char('n') => Some(Action::NewItem),
         KeyCode::Char('e') => Some(Action::Edit),
         KeyCode::Char('r') => Some(Action::Refresh),
+        KeyCode::Char('i') => Some(Action::Command("ingest")),
         KeyCode::Char('v') => Some(Action::OpenObjectView),
         KeyCode::Char('g') => Some(Action::OpenGraph),
         KeyCode::Char('s') => Some(Action::SearchAround),
@@ -151,6 +152,7 @@ os-int keyboard shortcuts
   a            Ask agent          n          new investigation, page, or finding
   e            Edit notes in $EDITOR (Overview) or open Settings
   r            Run default collectors for this page
+  i            Ingest STIX / MISP / CSV / JSON / Evidence Batch
   v            Object View for the selected entity or page
   g            Graph (entities as nodes, relationships as edges)
   s            Search Around from the selection (default 2 hops)
@@ -188,9 +190,12 @@ Agent proposals: Enter accepts, R rejects, Esc dismisses the list.
 Badges: [COL] collected  [EXT] original material
         [ANL] you wrote  [AI]  agent inference
 
-A domain page collects DNS, RDAP, HTTP, TLS, and certificate
-transparency. An IP page collects RDAP and IP intelligence.
-Press p and type dns, rdap, http, tls, ct, or ip for one collector.
+A domain page collects DNS, RDAP, HTTP, TLS, certificate
+transparency, and subdomain expansion. An IP page collects RDAP
+and IP intelligence. An email page collects DNS, CT, and the
+email identity pack. A username page collects public profiles.
+Press p and type dns, rdap, http, tls, ct, ip, email, username,
+or subdomain for one collector. i ingests a STIX/MISP/CSV file.
 
 Collected material is untrusted evidence. Accepting an AI finding
 keeps the AI badge. os-int observes public information.
@@ -199,7 +204,7 @@ keeps the AI badge. os-int observes public information.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::Overlay;
+    use crate::app::{Action, Overlay};
 
     fn press(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -224,6 +229,11 @@ mod tests {
             map_key(press(KeyCode::Char('r')), &overlay, View::Overview, false),
             Some(Action::Refresh)
         ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('i')), &overlay, View::Entities, false),
+            Some(Action::Command("ingest"))
+        ));
+        assert!(map_key(press(KeyCode::Char('i')), &overlay, View::Graph, false).is_some());
         assert!(matches!(
             map_key(press(KeyCode::Char('v')), &overlay, View::Entities, false),
             Some(Action::OpenObjectView)
@@ -300,6 +310,32 @@ mod tests {
             map_key(press(KeyCode::Enter), &overlay, View::Agent, true),
             Some(Action::Submit)
         ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('i')), &overlay, View::Entities, true),
+            Some(Action::InsertChar('i'))
+        ));
+    }
+
+    #[test]
+    fn ingest_key_is_unique_in_normal_mode() {
+        let overlay = Overlay::None;
+        let ingest = map_key(press(KeyCode::Char('i')), &overlay, View::Entities, false);
+        assert!(matches!(ingest, Some(Action::Command("ingest"))));
+        let occupied: &[char] = &[
+            'q', 'a', 'p', 'n', 'e', 'r', 'v', 'g', 's', 'm', 'u', 'j', 'k', '/', '?',
+        ];
+        assert!(!occupied.contains(&'i'));
+        for ch in occupied {
+            let action = map_key(press(KeyCode::Char(*ch)), &overlay, View::Entities, false);
+            assert!(
+                action.is_some(),
+                "expected {ch} to stay bound so ingest cannot collide silently"
+            );
+            assert!(
+                !matches!(action, Some(Action::Command("ingest"))),
+                "{ch} must not also map to ingest"
+            );
+        }
     }
 
     #[test]

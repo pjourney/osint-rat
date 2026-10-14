@@ -13,7 +13,7 @@ Drop the alias when you want the platform data directory again. `os-int-learn co
 
 ## Collect a domain, then read it
 
-`collect` creates the investigation and the page, runs the default collectors, and returns to the shell. For a domain those collectors are DNS, RDAP, HTTP, TLS, and certificate transparency.
+`collect` creates the investigation and the page, runs the default collectors, and returns to the shell. For a domain those collectors are DNS, RDAP, HTTP, TLS, certificate transparency, and subdomain expansion.
 
 ```bash
 os-int-learn collect domain example.com --investigation "Example Corp"
@@ -39,7 +39,7 @@ Press `q` to leave the workbench. The case is already saved.
 
 ## Run one collector
 
-Use `--collector` when you want a narrower pass. Ids are `dns`, `rdap`, `http`, `tls`, `ct`, `ip`, `repository`, and `file`.
+Use `--collector` when you want a narrower pass. Ids are `dns`, `rdap`, `http`, `tls`, `ct`, `ip`, `repository`, `file`, `email`, `username`, and `subdomain`.
 
 ```bash
 os-int-learn collect example.com --investigation "Example Corp" --collector dns
@@ -48,7 +48,7 @@ os-int-learn collect url https://example.com/ --investigation "Example Corp" --c
 
 The first command guesses the kind from `example.com`. The second names the kind as `url` because a bare URL is unambiguous only when you pass it as the value.
 
-In the workbench, press `p` and type `dns`, `rdap`, `http`, `tls`, `ct`, or `ip` to run that one collector against the current page.
+In the workbench, press `p` and type `dns`, `rdap`, `http`, `tls`, `ct`, `ip`, `email`, `username`, or `subdomain` to run that one collector against the current page. `i` ingests a STIX, MISP, CSV, JSON, or Evidence Batch file.
 
 ## Follow an address the domain just revealed
 
@@ -61,6 +61,24 @@ os-int-learn collect ip 192.0.2.15 --investigation "Example Corp"
 Or, in the workbench, add a page (`n`, type **IP address**, enter the address) and press `r`.
 
 The new page shares the investigation with the domain, so relationships such as `resolves_to` and `announced_by` show up on both.
+
+## Collect an email or a username
+
+The email pack is local (hosted domain + local-part username, `hosted_on` / `associated_with`). The username pack GETs well-known public profile URLs; 2xx responses become `associated_with` links (3xx is not a hit).
+
+```bash
+os-int-learn collect email alice@example.com --investigation "Example Corp"
+os-int-learn collect username octocat --investigation "Example Corp"
+```
+
+## Ingest a STIX or MISP file
+
+```bash
+os-int-learn ingest tests/fixtures/ingest/stix-bundle.json --format stix --investigation "Example Corp"
+os-int-learn ingest tests/fixtures/ingest/misp-event.json --format misp --investigation "Example Corp"
+```
+
+An in-repo sidecar that prints Evidence Batch JSON (no Rust fork): [`examples/connectors/hello-batch/`](../examples/connectors/hello-batch/). Protocol: [connectors.md](connectors.md).
 
 ## Inspect a local file
 

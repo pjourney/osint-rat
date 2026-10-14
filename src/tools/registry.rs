@@ -108,7 +108,7 @@ pub struct DetectedProgram {
 const DEFAULT_TIMEOUT_SECONDS: u64 = 60;
 
 /// Programs shown in the Tools screen and `os-int doctor` even when no tool definition uses them.
-const UTILITIES: [(&str, &str); 13] = [
+const UTILITIES: [(&str, &str); 15] = [
     ("whois", "registration lookups"),
     ("dig", "DNS queries"),
     ("host", "DNS lookups"),
@@ -122,10 +122,26 @@ const UTILITIES: [(&str, &str); 13] = [
     ("gh", "GitHub metadata for repositories"),
     ("exiftool", "file metadata"),
     ("openssl", "TLS inspection"),
+    ("subfinder", "passive subdomain discovery"),
+    ("amass", "passive subdomain enumeration"),
 ];
 
 fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| value.to_string()).collect()
+}
+
+fn builtin_with_parser(
+    name: &str,
+    program: &str,
+    args: &[&str],
+    accepts: &[TargetKind],
+    description: &str,
+    activity: Activity,
+    parser: OutputParser,
+) -> ToolDefinition {
+    let mut tool = builtin(name, program, args, accepts, description, activity);
+    tool.parser = parser;
+    tool
 }
 
 fn builtin(
@@ -251,6 +267,24 @@ pub fn builtin_tools() -> Vec<ToolDefinition> {
             &[Repository],
             "GitHub repository summary via gh",
             Activity::Passive,
+        ),
+        builtin_with_parser(
+            "subfinder",
+            "subfinder",
+            &["-silent", "-d", "{domain}"],
+            &[Domain],
+            "Passive subdomain discovery via subfinder",
+            Activity::Passive,
+            OutputParser::Hostnames,
+        ),
+        builtin_with_parser(
+            "amass",
+            "amass",
+            &["enum", "-passive", "-silent", "-d", "{domain}"],
+            &[Domain],
+            "Passive subdomain enumeration via amass",
+            Activity::Passive,
+            OutputParser::Hostnames,
         ),
     ];
     for tool in &mut tools {

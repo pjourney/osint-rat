@@ -1,0 +1,45 @@
+{
+  "type": "bundle",
+  "id": "bundle--00000000-0000-4000-8000-000000000001",
+  "spec_version": "2.1",
+  "objects": [
+    {
+      "type": "identity",
+      "id": "identity--org",
+      "spec_version": "2.1",
+      "name": "Example Org",
+      "identity_class": "organization"
+    },
+    {
+      "type": "malware",
+      "id": "malware--x",
+      "spec_version": "2.1",
+      "name": "example-malware",
+      "description": "toy fixture"
+    },
+    {
+      "type": "indicator",
+      "id": "indicator--1",
+      "spec_version": "2.1",
+      "name": "bad domain",
+      "pattern": "[domain-name:value = 'evil.example'] AND [ipv4-addr:value = '192.0.2.55']"
+    },
+    {
+      "type": "observed-data",
+      "id": "observed-data--1",
+      "spec_version": "2.1",
+      "objects": {
+        "0": { "type": "url", "value": "https://evil.example/path" },
+        "1": { "type": "email-addr", "value": "bad@evil.example" }
+      }
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--1",
+      "spec_version": "2.1",
+      "source_ref": "malware--x",
+      "target_ref": "identity--org",
+      "relationship_type": "attributed-to"
+    }
+  ]
+}

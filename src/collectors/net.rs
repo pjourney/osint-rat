@@ -142,6 +142,8 @@ impl FetchedResponse {
 pub struct FetchOptions {
     pub max_body_bytes: usize,
     pub accept: Option<&'static str>,
+    /// Extra request headers (API keys). Callers redact logs separately.
+    pub extra_headers: Vec<(String, String)>,
 }
 
 /// Fetches a URL, following redirects manually so the chain is recorded and redirects from public
@@ -237,6 +239,9 @@ async fn send(
     let mut request = net.http.get(url.clone());
     if let Some(accept) = options.accept {
         request = request.header(ACCEPT, accept);
+    }
+    for (name, value) in &options.extra_headers {
+        request = request.header(name.as_str(), value.as_str());
     }
     tokio::select! {
         _ = cancel.cancelled() => Err("cancelled".to_string()),

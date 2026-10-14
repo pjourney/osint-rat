@@ -9,8 +9,8 @@ use uuid::Uuid;
 use super::Store;
 use super::evidence::{
     FindingSync, NewSourceRecord, PriorObservation, TimelineInsert, clear_collected_finding,
-    find_duplicate_source, find_prior_observation, insert_artifact, insert_source,
-    insert_timeline_event, mark_source_seen, sync_collected_finding,
+    find_duplicate_source, find_prior_observation, insert_artifact, insert_ingested_finding,
+    insert_source, insert_timeline_event, mark_source_seen, sync_collected_finding,
 };
 use super::graph::{
     link_entity_source, link_page_entity, link_relationship_source, merge_entity_fields,
@@ -208,9 +208,11 @@ fn apply_diagnostic_findings(
     batch: &EvidenceBatch,
     summary: &mut ApplySummary,
 ) -> rusqlite::Result<()> {
-    for title in &batch.resolved_findings {
-        if clear_collected_finding(connection, context.investigation_id, title)? {
-            summary.resolved_findings += 1;
+    if honors_resolved_findings(batch) {
+        for title in &batch.resolved_findings {
+            if clear_collected_finding(connection, context.investigation_id, title)? {
+                summary.resolved_findings += 1;
+            }
         }
     }
     for finding in &batch.findings {
@@ -219,21 +221,42 @@ fn apply_diagnostic_findings(
             .and_then(|key| summary.source_ids.get(key).copied())
             .into_iter()
             .collect();
-        match sync_collected_finding(
-            connection,
-            context.investigation_id,
-            context.page_id,
-            &finding.title,
-            &finding.details,
-            finding.confidence,
-            &source_ids,
-        )? {
+        let sync = if finding.provenance == Provenance::Collected {
+            sync_collected_finding(
+                connection,
+                context.investigation_id,
+                context.page_id,
+                &finding.title,
+                &finding.details,
+                finding.confidence,
+                &source_ids,
+            )?
+        } else {
+            insert_ingested_finding(
+                connection,
+                context.investigation_id,
+                context.page_id,
+                finding,
+                &source_ids,
+            )?
+        };
+        match sync {
             FindingSync::Created => summary.new_findings += 1,
             FindingSync::Updated => summary.updated_findings += 1,
             FindingSync::LeftAlone => {}
         }
     }
     Ok(())
+}
+
+/// Built-in collectors emit `Collected` sources. File/sidecar ingest forces `External`,
+/// so an untrusted `resolved_findings` list cannot delete collected diagnostics.
+fn honors_resolved_findings(batch: &EvidenceBatch) -> bool {
+    !batch.sources.is_empty()
+        && batch
+            .sources
+            .iter()
+            .all(|source| source.provenance == Provenance::Collected)
 }
 
 fn apply_entities(

@@ -1,7 +1,8 @@
 use super::*;
 use crate::model::{
-    AgentAction, Confidence, EntityKey, EntityKind, EvidenceBatch, JobRecord, JobStatus, NewSource,
-    PageKind, ProposalStatus, Provenance, SearchAroundQuery, SourceKind, TimelineKind, Workspace,
+    AgentAction, ArtifactKind, Confidence, EntityKey, EntityKind, EvidenceBatch, JobRecord,
+    JobStatus, NewArtifact, NewSource, PageKind, ProposalStatus, Provenance, SearchAroundQuery,
+    SourceKind, TimelineKind, Workspace,
 };
 use rusqlite::params;
 
@@ -1280,4 +1281,201 @@ fn unresolve_last_bag_removes_shared_writes_and_keeps_originals() {
                 .id
         )
     );
+}
+
+#[test]
+fn ingest_after_merge_cites_constituents_and_unresolve_stays_clean() {
+    let (mut store, investigation) = store_with_investigation();
+    let domain = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Domain,
+            "evil.example",
+            Provenance::Analyst,
+            None,
+        )
+        .expect("domain");
+    let host = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Hostname,
+            "www.evil.example",
+            Provenance::Collected,
+            None,
+        )
+        .expect("host");
+    store
+        .resolve_entities(
+            investigation.id,
+            &[domain, host],
+            domain,
+            "same site",
+            "tester",
+        )
+        .expect("merge");
+    let report = crate::ingest::parse_stix(
+        r#"{
+          "type": "bundle",
+          "objects": [
+            {"type": "indicator", "name": "c2", "pattern": "[domain-name:value = 'evil.example']"},
+            {"type": "identity", "name": "Example Org", "identity_class": "organization"}
+          ]
+        }"#,
+        "stix.json",
+    )
+    .expect("stix");
+    store
+        .apply_batch(
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            &report.batch,
+        )
+        .expect("ingest");
+    let data = store.load_investigation(investigation.id).expect("load");
+    let workspace = Workspace::new(data.clone());
+    assert_eq!(workspace.canonical_id(host), domain);
+    assert!(workspace.data.is_absorbed(host));
+    let view = crate::model::ObjectView::for_entity(
+        &workspace,
+        workspace.entity(domain).expect("canonical"),
+    );
+    assert!(!view.sources.is_empty());
+    store
+        .apply_batch(
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            &report.batch,
+        )
+        .expect("reingest");
+    let again = store.load_investigation(investigation.id).expect("again");
+    let stix_sources = again
+        .sources
+        .iter()
+        .filter(|source| source.collector.as_deref() == Some("ingest:stix"))
+        .count();
+    assert_eq!(
+        stix_sources, 1,
+        "identical re-ingest must not duplicate sources"
+    );
+    let resolution_id = again.resolutions[0].id;
+    store
+        .unresolve_entities(resolution_id, "tester")
+        .expect("unresolve");
+    assert_eq!(store.integrity_check().expect("integrity"), "ok");
+    assert!(store.foreign_key_violations().expect("fk").is_empty());
+}
+
+#[test]
+fn untrusted_resolved_findings_do_not_delete_collected_diagnostics() {
+    let (mut store, investigation) = store_with_investigation();
+    let context = ApplyContext {
+        investigation_id: investigation.id,
+        page_id: None,
+        job_id: None,
+    };
+    let mut open = EvidenceBatch::new();
+    let mut source = NewSource::collected(SourceKind::Dns, "dns", "DNS records for example.com");
+    source.content_hash = Some("diag-lock".into());
+    let key = open.add_source(source);
+    open.add_finding(
+        "example.com spf",
+        "No SPF record published",
+        Confidence::High,
+        Some(key),
+    );
+    store.apply_batch(context, &open).expect("creates");
+
+    let mut hostile = EvidenceBatch::new();
+    let mut source = NewSource::external(SourceKind::Document, "ingest:batch", "hostile");
+    source.content_hash = Some("hostile".into());
+    hostile.add_source(source);
+    hostile.resolved_findings.push("example.com spf".into());
+    let applied = store.apply_batch(context, &hostile).expect("hostile");
+    assert_eq!(applied.resolved_findings, 0);
+    let data = store.load_investigation(investigation.id).expect("load");
+    assert_eq!(data.findings.len(), 1);
+    assert_eq!(data.findings[0].provenance, Provenance::Collected);
+}
+
+#[test]
+fn ingest_findings_are_external_and_do_not_upsert_collected() {
+    let (mut store, investigation) = store_with_investigation();
+    let context = ApplyContext {
+        investigation_id: investigation.id,
+        page_id: None,
+        job_id: None,
+    };
+    let mut collected = EvidenceBatch::new();
+    let mut source = NewSource::collected(SourceKind::Dns, "dns", "DNS records");
+    source.content_hash = Some("col".into());
+    let key = collected.add_source(source);
+    collected.add_finding(
+        "same title",
+        "collected details",
+        Confidence::High,
+        Some(key),
+    );
+    store.apply_batch(context, &collected).expect("collected");
+
+    let mut ingested = EvidenceBatch::new();
+    let mut source = NewSource::external(SourceKind::Stix, "ingest:stix", "STIX");
+    source.content_hash = Some("stix".into());
+    let key = ingested.add_source(source);
+    ingested.add_external_finding("same title", "stix details", Confidence::Medium, Some(key));
+    store.apply_batch(context, &ingested).expect("ingest");
+    let data = store.load_investigation(investigation.id).expect("load");
+    assert_eq!(data.findings.len(), 2);
+    let collected = data
+        .findings
+        .iter()
+        .find(|finding| finding.provenance == Provenance::Collected)
+        .expect("collected");
+    assert_eq!(collected.details, "collected details");
+    let external = data
+        .findings
+        .iter()
+        .find(|finding| finding.provenance == Provenance::External)
+        .expect("external");
+    assert_eq!(external.details, "stix details");
+}
+
+#[test]
+fn apply_rejects_unsafe_snapshot_and_artifact_paths() {
+    let (mut store, investigation) = store_with_investigation();
+    let context = ApplyContext {
+        investigation_id: investigation.id,
+        page_id: None,
+        job_id: None,
+    };
+    let mut batch = EvidenceBatch::new();
+    let mut source = NewSource::collected(SourceKind::Document, "file", "hostile path");
+    source.content_hash = Some("path-safety".into());
+    source.snapshot_path = Some("../../etc/passwd".into());
+    batch.add_source(source);
+    batch.artifacts.push(NewArtifact {
+        kind: ArtifactKind::File,
+        name: "passwd".into(),
+        path: "../../etc/passwd".into(),
+        mime: None,
+        size_bytes: 0,
+        sha256: None,
+        fields: crate::model::Fields::new(),
+        source: Some(0),
+    });
+    store.apply_batch(context, &batch).expect("apply");
+    let data = store.load_investigation(investigation.id).expect("load");
+    assert!(
+        data.sources[0]
+            .snapshot_path
+            .as_deref()
+            .is_none_or(|path| path != "../../etc/passwd")
+    );
+    assert!(data.sources[0].snapshot_path.is_none());
+    assert!(data.artifacts.is_empty());
 }

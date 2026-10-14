@@ -205,6 +205,7 @@ fn form_modal(frame: &mut Frame, area: Rect, form: &crate::app::FormState, theme
         crate::app::FormKind::NewFinding => "New finding",
         crate::app::FormKind::NewNote => "Note",
         crate::app::FormKind::SettingsAgent => "Agent settings",
+        crate::app::FormKind::Ingest => "Ingest file",
     };
     frame.render_widget(
         Paragraph::new(lines).block(pane_block(title, true, theme)),

@@ -89,6 +89,7 @@ async fn fetch_target(
     let options = FetchOptions {
         max_body_bytes: context.net.settings.max_body_bytes,
         accept: Some(HTML_ACCEPT),
+        extra_headers: Vec::new(),
     };
     let primary = match target {
         Target::Domain(domain) => {
@@ -639,6 +640,7 @@ async fn collect_robots(
     let options = FetchOptions {
         max_body_bytes: ROBOTS_MAX_BYTES,
         accept: Some("text/plain,*/*;q=0.5"),
+        extra_headers: Vec::new(),
     };
     let mut sitemap_candidates = Vec::new();
     match fetch(&context.net, &robots_url, &options, &context.job.cancel).await {
@@ -738,6 +740,7 @@ async fn collect_security_txt(
     let options = FetchOptions {
         max_body_bytes: SECURITY_TXT_MAX_BYTES,
         accept: Some("text/plain,*/*;q=0.5"),
+        extra_headers: Vec::new(),
     };
     let mut saw_absent = false;
     for url in &candidates {
@@ -893,6 +896,7 @@ async fn collect_sitemap(
     let options = FetchOptions {
         max_body_bytes: SITEMAP_MAX_BYTES,
         accept: Some("application/xml,text/xml;q=0.9,*/*;q=0.5"),
+        extra_headers: Vec::new(),
     };
     let response = match fetch(&context.net, url, &options, &context.job.cancel).await {
         Ok(response) if response.is_success() && !response.is_html() => response,

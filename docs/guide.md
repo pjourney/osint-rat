@@ -11,6 +11,7 @@ This is the complete guide to using os-int: the workbench, the collectors, the a
 - [Graph and Search Around](#graph-and-search-around)
 - [Entity resolution](#entity-resolution)
 - [Collectors](#collectors)
+- [Ingest](#ingest)
 - [Diagnostics](#diagnostics)
 - [External tools](#external-tools)
 - [Asking an agent](#asking-an-agent)
@@ -38,7 +39,7 @@ A **page** is one subject inside the case. Page types:
 | ASN | `AS13335` | yes |
 | Repository | `https://github.com/owner/project` | yes, when `git` is installed |
 | File | `/path/to/evidence.pdf` | yes |
-| Username | `octocat` | only via a custom tool |
+| Username | `octocat` | yes |
 | Person, Organization, Event, Generic | a name or a note | no |
 
 Identifiers are normalized on the way in, so `Example.COM.` and `example.com` are the same entity.
@@ -164,6 +165,8 @@ Press `p` or `Ctrl+P`, then type to filter.
 | New Page | Add a subject |
 | Run Collectors | Default collectors for the current page |
 | Run DNS / RDAP / HTTP / TLS / Certificate Transparency / IP Intelligence | One collector |
+| Run Email Identity Pack / Username Pack / Subdomain Expansion | One collector |
+| Ingest file | STIX, MISP, CSV/JSON, or Evidence Batch (`i`) |
 | Ask Agent | Question the active agent |
 | Generate Report | Markdown or JSON |
 | Add Finding / Add Note | Analyst-authored records |
@@ -265,19 +268,24 @@ Press `r` or run `os-int collect` without `--collector` to run the **default** s
 | `ip` | ip | yes | Reverse DNS, origin ASN, prefix, and registry country, using Team Cymru's public DNS interface. |
 | `repository` | repository | yes, if `git` is on `PATH` | Remotes, commits, contributors, and referenced hosts. `gh` is used for GitHub metadata when it is installed. Clones are shallow and stored inside the investigation. |
 | `file` | file | yes | SHA-256, MIME type, and timestamps. ExifTool metadata when `exiftool` is installed. |
+| `email` | email | yes | Hosted domain, local-part username, `hosted_on` / `associated_with`. No invented website URL. No network. |
+| `username` | username | yes | Public profile URL checks (GitHub, GitLab, Codeberg, Reddit, Hacker News, Keybase). 2xx responses become `associated_with`; 3xx is not a hit. |
+| `subdomain` | domain | yes | Passive expansion (common prefixes plus optional `subfinder` / `amass -passive`) with `subdomain_of` / `resolves_to` under `max_subdomains`. |
+
+When RDAP is missing or thin, the RDAP collector merges a structured WHOIS parse if `whois` is installed.
 
 So:
 
 | Target | Default collectors |
 | --- | --- |
-| Domain | `dns`, `rdap`, `http`, `tls`, `ct` |
-| Email | `dns`, `ct` |
+| Domain | `dns`, `rdap`, `http`, `tls`, `ct`, `subdomain` |
+| Email | `dns`, `ct`, `email` |
 | IP address | `rdap`, `ip` |
 | URL | `http`, `tls` |
 | ASN | `rdap` |
 | Repository | `repository` |
 | File | `file` |
-| Username | none built in |
+| Username | `username` |
 
 ```bash
 os-int collect example.com                         # guesses "domain"
@@ -286,6 +294,8 @@ os-int collect url https://example.com/about --collector http
 os-int collect ip 192.0.2.15
 os-int collect repository https://github.com/owner/project
 os-int collect file ./evidence.pdf
+os-int collect email alice@example.com --collector email
+os-int collect username octocat
 ```
 
 When `--investigation` names a case that does not exist, `collect` creates it. When the name is a UUID that does not exist, `collect` stops and tells you to run `os-int list`. With no `--investigation`, `collect` writes into the most recently updated case, or creates one named after the target when you have none.
@@ -295,6 +305,22 @@ HTTP follows redirects itself so the chain is recorded. A redirect from a public
 The repository collector runs `git` with an empty credential helper. It does not try to reach private repositories by borrowing your credentials.
 
 Warnings (a single DNS query timed out, `robots.txt` returned an error) are attached to the job and printed by `collect`. They do not discard the rest of the batch.
+
+Sidecars that print Evidence Batch JSON are `[[collectors.external]]`. Optional URLScan / OTX wrappers are `[[collectors.api]]`; they stay off until enabled and are never in the default collector set. See [connectors.md](connectors.md).
+
+## Ingest
+
+`os-int ingest` (workbench: `i`) parses a STIX 2.1 bundle, a MISP event, a CSV/JSON observable list, or an Evidence Batch file and applies it through the same transaction as a collector. Every imported source and finding is provenance `external`. A batch cannot claim `agent` provenance or clear collected diagnostics with `resolved_findings`. Identical re-ingest is idempotent.
+
+```bash
+os-int ingest tests/fixtures/ingest/stix-bundle.json --format stix --investigation "Example Corp"
+os-int ingest tests/fixtures/ingest/misp-event.json --format misp
+os-int ingest tests/fixtures/ingest/observables.csv --format csv
+```
+
+`--format` is guessed from the file name when omitted. `--map kind=type,value=indicator` and `--kind domain` cover bulk CSV/JSON. Esc on the ingest form restores the entity selection; Enter applies and keeps that selection (canonical id after a merge). An empty path or a parse error leaves the form open. Caps, encoding, and the sidecar protocol: [connectors.md](connectors.md).
+
+The in-repo sidecar example is [`examples/connectors/hello-batch/`](../examples/connectors/hello-batch/).
 
 ## Diagnostics
 
@@ -330,8 +356,10 @@ Built-in programs are offered only when they are on `PATH`. Open the Tools scree
 | `exiftool` | exiftool | file |
 | `git-ls-remote` | git | repository |
 | `gh-repo` | gh | repository |
+| `subfinder` | subfinder | domain |
+| `amass` | amass | domain (`enum -passive`) |
 
-The repository and file collectors call `git`, `gh`, and `exiftool` directly when they need them. The Tools screen also lists utilities that are useful to know about (`jq`, `rg`, `fd`, `wget`, `curl`, `openssl`).
+The repository and file collectors call `git`, `gh`, and `exiftool` directly when they need them. Subdomain expansion calls `subfinder` and `amass` when they are installed. The Tools screen also lists utilities that are useful to know about (`jq`, `rg`, `fd`, `wget`, `curl`, `openssl`).
 
 Hide a built-in tool with `tools.disabled`. Add your own under `[[tools.custom]]`. Arguments are an argv template, never a shell command. Placeholders are substituted inside a single argument:
 
@@ -471,6 +499,7 @@ os-int [OPTIONS] [COMMAND]
 | `collect <kind> [target]` | Run collectors. `<kind>` may be a target value to guess from |
 | `collect --investigation <name>` | Case to write into. Created when the name is new |
 | `collect --collector <id>` | Run one collector instead of the defaults |
+| `ingest <path> [--format stix\|misp\|csv\|json\|batch]` | Import a file into a case |
 | `report <name> [--format markdown\|json] [-o <file>]` | Write a report |
 | `export <name> [-o <dir>]` | Write a portable directory |
 | `import <path> [--rename]` | Import an export directory |
@@ -523,6 +552,9 @@ fetch_robots = true
 check_www = true
 max_concurrent_jobs = 4
 repository_history_depth = 200
+max_subdomains = 80
+max_username_profiles = 8
+max_ingest_bytes = 20971520
 
 [tools]
 # disabled = ["dig"]
@@ -551,6 +583,11 @@ repository_history_depth = 200
 | `collectors.check_www` | `true` | Also resolve `www.<domain>` during DNS collection |
 | `collectors.max_concurrent_jobs` | `4` | How many background jobs run at once |
 | `collectors.repository_history_depth` | `200` | Commits inspected for a repository |
+| `collectors.max_subdomains` | `80` | Hostnames promoted during subdomain expansion |
+| `collectors.max_username_profiles` | `8` | Public profile URL checks in the username pack |
+| `collectors.max_ingest_bytes` | `20971520` | Largest STIX / MISP / CSV / batch file `os-int ingest` will read (20 MiB) |
+| `collectors.external` | empty | Sidecars that print Evidence Batch JSON. See [connectors.md](connectors.md) |
+| `collectors.api` | empty | Optional URLScan / OTX wrappers. Off until enabled |
 | `tools.disabled` | empty | Built-in tool names to hide |
 | `tools.custom` | empty | Extra passive programs. See [External tools](#external-tools) |
 
@@ -587,6 +624,7 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `n` | normal | New investigation, page, or finding |
 | `e` | normal | Edit notes, or open settings |
 | `r` | normal | Run collectors for this page |
+| `i` | normal | Ingest a STIX / MISP / CSV / JSON / Evidence Batch file |
 | `v` | normal | Object View: highlighted entity, or the current page |
 | `g` | normal | Graph for the current entity (1 hop) |
 | `s` | normal | Search Around (default 2 hops; merges on Graph) |
@@ -622,7 +660,7 @@ Inside a text field, letters insert text. They are not treated as commands until
 | You cannot find the database or logs | `os-int config` prints every resolved path. |
 | A collector fails for one target and the others succeed | Open Jobs, or re-run with `--collector`. The log file has the underlying error. Pass `--debug` and try again. |
 | HTTP collection stops on a redirect to a private address | That refusal is intentional. Set `network.allow_private_redirects = true` only when you mean to follow that redirect. |
-| `unknown collector` | Use `dns`, `rdap`, `http`, `tls`, `ct`, `ip`, `repository`, or `file`. |
+| `unknown collector` | Use `dns`, `rdap`, `http`, `tls`, `ct`, `ip`, `repository`, `file`, `email`, `username`, `subdomain`, or a configured external id. |
 | Repository collection is unavailable | Install `git`. `gh` is optional and only adds GitHub metadata. |
 | The agent runs but proposes nothing | You can still use the answer as reading. Proposals appear only when the reply contains an `os-int-actions` block. Accepting is a separate step. |
 | A custom tool never runs | On the Tools screen, read the problem line. Typical causes: the program is not on `PATH`, `accepts` lists no known target kind, the argument template is invalid, or `activity` is `active`. |
@@ -645,6 +683,7 @@ To report a vulnerability in os-int itself, follow [SECURITY.md](../SECURITY.md)
 - [FAQ](faq.md) — pages versus entities, badges, paths, and the cases that look like failures
 - [Ontology](ontology.md) — object types, link verbs, Actions, Object View
 - [Database tables](schema.md) — what each SQLite table stores
+- [Connectors](connectors.md) — Evidence Batch sidecars, STIX/MISP/CSV ingest, API keys
 - [Ontology Exchange Format](ontology-exchange.md) — export JSON, EvidenceBatch, and version bumps
 - [ARCHITECTURE.md](ARCHITECTURE.md) — module map and design decisions
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — development setup and pull requests

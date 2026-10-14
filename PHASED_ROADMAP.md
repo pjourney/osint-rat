@@ -18,8 +18,8 @@
 | 0 | Foundation & vision freeze | Done ([#4](https://github.com/pjourney/osint-rat/pull/4)) |
 | 1 | Ontology runtime v1 | Done ([#5](https://github.com/pjourney/osint-rat/pull/5)) |
 | 2 | Graph & Search Around | Done ([#6](https://github.com/pjourney/osint-rat/pull/6)) |
-| 3 | Entity resolution | In progress ([#7](https://github.com/pjourney/osint-rat/pull/7)) |
-| 4 | Ingest plane & connectors | Not started |
+| 3 | Entity resolution | Done ([#7](https://github.com/pjourney/osint-rat/pull/7)) |
+| 4 | Ingest plane & connectors | In progress ([#8](https://github.com/pjourney/osint-rat/pull/8)) |
 | 5 | Playbooks & automations | Not started |
 | 6 | Temporal & geospatial | Not started |
 | 7 | Team, markings & audit | Not started |
@@ -182,12 +182,12 @@ Multi-source fusion: anything an analyst has becomes ontology Objects/Links with
 
 ### Success criteria
 
-- [ ] External connector example (in-repo) produces entities/relationships via apply path without forking Rust.
-- [ ] STIX and MISP sample fixtures import into a new investigation with cited sources.
-- [ ] `os-int collect` on email and username yields useful graph edges without custom tools.
-- [ ] Subdomain expansion creates `subdomain_of` / `resolves_to` (not only `mentions`) under a configured cap.
-- [ ] Active tools remain refused; SECURITY/Boundaries unchanged in spirit.
-- [ ] Tests + CI green; docs updated.
+- [x] External connector example (in-repo) produces entities/relationships via apply path without forking Rust.
+- [x] STIX and MISP sample fixtures import into a new investigation with cited sources.
+- [x] `os-int collect` on email and username yields useful graph edges without custom tools.
+- [x] Subdomain expansion creates `subdomain_of` / `resolves_to` (not only `mentions`) under a configured cap.
+- [x] Active tools remain refused; SECURITY/Boundaries unchanged in spirit.
+- [x] Tests + CI green; docs updated.
 
 ### How to complete
 
@@ -195,7 +195,7 @@ Multi-source fusion: anything an analyst has becomes ontology Objects/Links with
 2. Add importers under `src/exchange/` or `src/ingest/`; CLI/palette commands.
 3. Implement username/email/subdomain collectors; wire tool parsers to proper link types.
 4. Ship `examples/connectors/hello-batch/` and sample STIX/MISP files.
-5. PR `phase-4: ingest plane`; merge on checklist.
+5. PR `phase-4: ingest plane & connectors`; merge on checklist.
 
 ---
 

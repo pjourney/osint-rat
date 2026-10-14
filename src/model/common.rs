@@ -96,10 +96,13 @@ pub(crate) use open_enum;
 
 /// Where a piece of information came from. Displayed everywhere so analysts can distinguish
 /// collected data, original material, their own notes, and AI inference.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Provenance {
     /// Automatically gathered by a collector or external tool.
+    #[default]
     Collected,
     /// Original source material supplied by the analyst (a document, a URL they found).
     External,

@@ -31,11 +31,11 @@ On **Entities**, mark each row with `Space`, press `m`, and confirm. The highlig
 
 ## Does os-int call an LLM API or need an API key?
 
-No. Built-in collectors use public DNS, RDAP, HTTP, TLS, and the public crt.sh search. They do not use API keys. An agent, when you want one, is a program already on your `PATH` (`claude`, `codex`, or a command you configure). os-int runs that program as a subprocess.
+Built-in collectors use public DNS, RDAP, HTTP, TLS, and the public crt.sh search. They do not use API keys. Optional URLScan / OTX wrappers stay off until you enable them with `api_key_env` (preferred) or `api_key`; keys are redacted in logs. An agent, when you want one, is a program already on your `PATH` (`claude`, `codex`, or a command you configure). os-int runs that program as a subprocess.
 
 ## The welcome screen says Claude Code is missing. Is collection broken?
 
-No. The welcome screen and `os-int doctor` report optional programs as `missing`. DNS, RDAP, HTTP, TLS, certificate transparency, and IP intelligence run without them. Repository collection needs `git`. File metadata from ExifTool needs `exiftool`.
+No. The welcome screen and `os-int doctor` report optional programs as `missing`. DNS, RDAP, HTTP, TLS, certificate transparency, IP intelligence, and the email pack run without them. Username checks and subdomain DNS need the network. Repository collection needs `git`. File metadata from ExifTool needs `exiftool`. `subfinder` / `amass` / `whois` are optional extras.
 
 `doctor` exits non-zero when a check is `warn` (usually the database integrity check), not when an optional program is absent.
 
@@ -63,7 +63,7 @@ Deleting the platform data directory deletes every investigation stored there. E
 
 ## Why did `r` not run IP intelligence?
 
-`r` runs the default collectors for the **current page's** kind. A domain runs `dns`, `rdap`, `http`, `tls`, and `ct`. IP intelligence runs on an IP page, or with `os-int collect ip 192.0.2.15`. The full matrix is in the [user guide](guide.md#collectors).
+`r` runs the default collectors for the **current page's** kind. A domain runs `dns`, `rdap`, `http`, `tls`, `ct`, and `subdomain`. An email page runs `dns`, `ct`, and `email`. A username page runs `username`. IP intelligence runs on an IP page, or with `os-int collect ip 192.0.2.15`. The full matrix is in the [user guide](guide.md#collectors).
 
 ## Why was my custom tool refused?
 
@@ -78,7 +78,7 @@ A tool whose program is not on `PATH` is listed and skipped. It is not a configu
 
 ## Can I collect without a network?
 
-DNS, RDAP, HTTP, TLS, certificate transparency, and IP intelligence need the network. The file collector and anything already stored in the case do not. The workbench opens and searches local data with no network.
+DNS, RDAP, HTTP, TLS, certificate transparency, IP intelligence, username profile checks, and subdomain expansion need the network. The file collector, the email identity pack, and anything already stored in the case do not. The workbench opens and searches local data with no network. File ingest (`os-int ingest`) is local.
 
 HTTP(S) can use `network.proxy` (for example `socks5h://127.0.0.1:9050`). DNS and TLS collectors connect directly and do not use that proxy.
 

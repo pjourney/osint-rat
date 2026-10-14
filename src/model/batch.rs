@@ -59,6 +59,13 @@ impl NewSource {
             provenance: Provenance::Collected,
         }
     }
+
+    /// Original material supplied by the analyst (import, connector file, archive sidecars).
+    pub fn external(kind: SourceKind, collector: &str, title: impl Into<String>) -> Self {
+        let mut source = Self::collected(kind, collector, title);
+        source.provenance = Provenance::External;
+        source
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -106,29 +113,41 @@ pub struct NewArtifact {
 /// Everything a single collection produced.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EvidenceBatch {
+    #[serde(default)]
     pub sources: Vec<NewSource>,
+    #[serde(default)]
     pub entities: Vec<NewEntity>,
+    #[serde(default)]
     pub relationships: Vec<NewRelationship>,
+    #[serde(default)]
     pub timeline: Vec<NewTimelineEvent>,
+    #[serde(default)]
     pub artifacts: Vec<NewArtifact>,
-    /// Diagnostic gaps to store as collected findings. Present checks are listed in
-    /// `resolved_findings` so an earlier gap can be cleared.
+    /// Findings to store. Built-in diagnostics use `Collected` and the upsert/clear path.
+    /// File and sidecar ingest uses `External` and never clears collected diagnostics.
     #[serde(default)]
     pub findings: Vec<NewCollectedFinding>,
-    /// Titles of collected findings that no longer apply.
+    /// Titles of collected findings that no longer apply. Honored only when every source
+    /// in the batch is `Collected` (built-in collectors). File/sidecar ingest ignores this.
     #[serde(default)]
     pub resolved_findings: Vec<String>,
     /// One-line human summary for the job result.
+    #[serde(default)]
     pub summary: String,
 }
 
-/// A collected diagnostic finding. Provenance is always `Collected`.
+/// A finding produced by a collector or ingest.
+///
+/// Built-in diagnostics use [`Provenance::Collected`] (upsert / clear). File and sidecar
+/// ingest uses [`Provenance::External`] and never writes through the collected-diagnostic path.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NewCollectedFinding {
     pub title: String,
     pub details: String,
     pub confidence: Confidence,
     pub source: Option<SourceKey>,
+    #[serde(default)]
+    pub provenance: Provenance,
 }
 
 impl EvidenceBatch {
@@ -219,6 +238,28 @@ impl EvidenceBatch {
         confidence: Confidence,
         source: Option<SourceKey>,
     ) {
+        self.push_finding(title, details, confidence, source, Provenance::Collected);
+    }
+
+    /// An ingested finding. Stored as `External`; never upserts or clears collected diagnostics.
+    pub fn add_external_finding(
+        &mut self,
+        title: impl Into<String>,
+        details: impl Into<String>,
+        confidence: Confidence,
+        source: Option<SourceKey>,
+    ) {
+        self.push_finding(title, details, confidence, source, Provenance::External);
+    }
+
+    fn push_finding(
+        &mut self,
+        title: impl Into<String>,
+        details: impl Into<String>,
+        confidence: Confidence,
+        source: Option<SourceKey>,
+        provenance: Provenance,
+    ) {
         let title = title.into();
         if title.trim().is_empty() || self.findings.iter().any(|finding| finding.title == title) {
             return;
@@ -229,6 +270,7 @@ impl EvidenceBatch {
             details: details.into(),
             confidence,
             source,
+            provenance,
         });
     }
 
@@ -305,11 +347,12 @@ impl EvidenceBatch {
         }
         for mut finding in other.findings {
             finding.source = finding.source.map(|key| key + offset);
-            self.add_finding(
+            self.push_finding(
                 finding.title,
                 finding.details,
                 finding.confidence,
                 finding.source,
+                finding.provenance,
             );
         }
         for title in other.resolved_findings {
