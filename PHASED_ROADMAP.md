@@ -22,7 +22,7 @@
 | 4 | Ingest plane & connectors | Done ([#8](https://github.com/pjourney/osint-rat/pull/8)) |
 | 5 | Playbooks & automations | Done ([#9](https://github.com/pjourney/osint-rat/pull/9)) |
 | 6 | Temporal & geospatial | Done ([#10](https://github.com/pjourney/osint-rat/pull/10)) |
-| 7 | Team, markings & audit | In progress |
+| 7 | Team, markings & audit | In progress ([#11](https://github.com/pjourney/osint-rat/pull/11)) |
 | 8 | Scale, API & STIX | Not started |
 | 9 | Distribution, demos & open platform | Not started |
 
