@@ -344,7 +344,7 @@ os-int watch --playbook domain-infra --investigation "Example Corp" --target exa
 os-int watch --playbook domain-infra --investigation "Example Corp" --interval 3600
 ```
 
-`--dry-run` prints planned Actions and applies nothing. `--once` runs one watch pass. `--interval` loops until Ctrl+C. Collect batches apply in **one SQLite transaction** after the steps finish; a cancelled or failed collect applies nothing.
+`--dry-run` prints planned Actions and applies nothing. It does not create an investigation or investigation directories; the case must already exist. `--once` runs one watch pass. `--interval` loops until Ctrl+C (cancellation is observed during a pass). Collect batches apply in **one SQLite transaction** after the steps finish; a cancelled or failed collect applies nothing.
 
 Built-in collectors stay **passive-only**. Tools marked `active` are refused. Nested playbooks are refused. Untrusted YAML cannot set provenance or clear collected findings. Caps, the YAML schema, and the bundled files: [playbooks.md](playbooks.md).
 

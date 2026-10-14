@@ -54,9 +54,10 @@ pub use ontology::{
 };
 pub use page::{Page, PageKind};
 pub use playbook::{
-    Automation, MAX_COLLECT_STEPS, MAX_PLAYBOOK_BYTES, MAX_PLAYBOOK_PROPOSALS, MAX_PLAYBOOK_STEPS,
-    MAX_TOOL_STEPS, PLAYBOOK_FORMAT, PLAYBOOK_FORMAT_VERSION, PlannedAction, Playbook,
-    PlaybookOrigin, PlaybookOutput, PlaybookPlan, PlaybookRun, PlaybookSeed, PlaybookStep,
+    Automation, MAX_COLLECT_STEPS, MAX_CONCURRENT_PLAYBOOK_JOBS, MAX_PLAYBOOK_BYTES,
+    MAX_PLAYBOOK_PROPOSALS, MAX_PLAYBOOK_STEPS, MAX_TOOL_STEPS, PLAYBOOK_FORMAT,
+    PLAYBOOK_FORMAT_VERSION, PlannedAction, Playbook, PlaybookOrigin, PlaybookOutput, PlaybookPlan,
+    PlaybookRun, PlaybookSeed, PlaybookStep,
 };
 pub use relationship::{Relationship, kinds as relation, normalize_relationship_kind};
 pub use resolution::{

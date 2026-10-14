@@ -207,6 +207,16 @@ impl Store {
         Ok(())
     }
 
+    /// Count of playbook jobs still queued or running (CLI concurrent cap).
+    pub fn active_playbook_job_count(&self) -> Result<usize> {
+        let count: i64 = self.connection().query_row(
+            "SELECT COUNT(*) FROM jobs WHERE kind LIKE 'playbook:%' AND status IN ('queued', 'running')",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count as usize)
+    }
+
     pub fn update_job(&self, job: &JobRecord) -> Result<()> {
         self.connection().execute(
             "UPDATE jobs SET status = ?2, program = ?3, args = ?4, started_at = ?5, finished_at = ?6,

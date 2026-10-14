@@ -2542,8 +2542,12 @@ impl App {
         let tools = Arc::clone(&self.tools);
         let job = crate::jobs::JobContext::detached(false);
         if dry_run {
-            let plan = crate::playbook::plan_playbook(&playbook, &seed, &tools, automation, &job)
-                .map_err(|error| eyre!(error.to_string()))?;
+            let mut plan =
+                crate::playbook::plan_playbook(&playbook, &seed, &tools, automation, &job)
+                    .map_err(|error| eyre!(error.to_string()))?;
+            if let Some(workspace) = &self.workspace {
+                crate::playbook::bind_resolve_plan(&mut plan, &workspace.data, &playbook);
+            }
             self.selected = selected;
             self.entity_id = entity_id;
             self.overlay = Overlay::Text {
@@ -2712,7 +2716,7 @@ impl App {
             crate::playbook::ExecuteOptions {
                 dry_run: false,
                 automation: output.automation,
-                previous_digest: None,
+                previous_digest: output.previous_digest.clone(),
                 interval_seconds: None,
             },
         )
@@ -4369,6 +4373,10 @@ mod tests {
         assert!(matches!(app.overlay, Overlay::Text { .. }));
         if let Overlay::Text { body, .. } = &app.overlay {
             assert!(body.contains("automation dry-run") || body.contains("Nothing was applied"));
+            assert!(
+                !body.contains("Observation changed"),
+                "watch dry-run must not always list a watch finding"
+            );
         }
         let workspace = app.workspace.as_ref().expect("workspace");
         assert!(workspace.data.sources.is_empty());

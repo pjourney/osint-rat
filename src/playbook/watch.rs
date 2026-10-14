@@ -35,18 +35,19 @@ pub fn change_proposals(
     batches: &[EvidenceBatch],
     digest_changed: bool,
 ) -> Vec<AgentAction> {
-    let mut actions = Vec::new();
-    if digest_changed || summary.changed_observations > 0 {
-        actions.push(AgentAction::AddFinding {
-            title: format!("Observation changed during watch of {}", playbook.id),
-            details: format!(
-                "{} changed observation(s). Accept to record this as an analyst finding.",
-                summary.changed_observations
-            ),
-            confidence: Some("medium".into()),
-            sources: Vec::new(),
-        });
+    if !digest_changed && summary.changed_observations == 0 {
+        return Vec::new();
     }
+    let mut actions = Vec::new();
+    actions.push(AgentAction::AddFinding {
+        title: format!("Observation changed during watch of {}", playbook.id),
+        details: format!(
+            "{} changed observation(s). Accept to record this as an analyst finding.",
+            summary.changed_observations
+        ),
+        confidence: Some("medium".into()),
+        sources: Vec::new(),
+    });
     for batch in batches {
         for finding in &batch.findings {
             actions.push(AgentAction::AssertFindingTemplate {
@@ -65,4 +66,18 @@ pub fn change_proposals(
     }
     actions.truncate(crate::model::MAX_PLAYBOOK_PROPOSALS);
     actions
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::playbook::bundled;
+    use crate::storage::ApplySummary;
+
+    #[test]
+    fn unchanged_digest_and_observations_propose_nothing() {
+        let playbook = bundled("domain-infra").expect("bundled");
+        let actual = change_proposals(&playbook, &ApplySummary::default(), &[], false);
+        assert!(actual.is_empty());
+    }
 }

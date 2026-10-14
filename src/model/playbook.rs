@@ -29,6 +29,8 @@ pub const MAX_COLLECT_STEPS: usize = 16;
 pub const MAX_TOOL_STEPS: usize = 8;
 /// Hard cap on pending proposals created by one run.
 pub const MAX_PLAYBOOK_PROPOSALS: usize = 16;
+/// Hard cap on concurrent playbook jobs (workbench and CLI).
+pub const MAX_CONCURRENT_PLAYBOOK_JOBS: usize = 1;
 
 /// Where a parsed playbook came from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -184,6 +186,8 @@ pub struct PlaybookOutput {
     pub search_summary: Option<String>,
     pub warnings: Vec<String>,
     pub digest: String,
+    /// Digest from the previous successful watch/playbook pass, if any.
+    pub previous_digest: Option<String>,
 }
 
 /// A persisted playbook run. Local workbench record; not part of the archive.

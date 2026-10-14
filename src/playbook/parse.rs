@@ -333,20 +333,11 @@ fn parse_step(value: &Value, index: usize) -> Result<PlaybookStep, PlaybookError
         )));
     }
     let primary = keys[0];
-    if keys.len() > 1
-        && !matches!(
-            primary,
-            "search_around"
-                | "assert_finding_template"
-                | "propose_resolve"
-                | "collect"
-                | "run_tool"
-        )
-    {
+    if keys.len() > 1 {
         return Err(PlaybookError::new(format!(
-            "step {}: unknown keys {}",
+            "step {}: extra keys {} (each step is a single mapping)",
             index + 1,
-            keys.join(", ")
+            keys[1..].join(", ")
         )));
     }
     match primary {
@@ -365,9 +356,12 @@ fn parse_step(value: &Value, index: usize) -> Result<PlaybookStep, PlaybookError
 fn parse_collect(value: Option<&Value>, index: usize) -> Result<PlaybookStep, PlaybookError> {
     let collector = match value {
         Some(Value::String(text)) => text.trim().to_string(),
-        Some(Value::Mapping(map)) => string_field(map, "collector")
-            .or_else(|| string_field(map, "id"))
-            .unwrap_or_default(),
+        Some(Value::Mapping(map)) => {
+            reject_unknown_keys(map, &["collector", "id"], index, "collect")?;
+            string_field(map, "collector")
+                .or_else(|| string_field(map, "id"))
+                .unwrap_or_default()
+        }
         _ => String::new(),
     };
     if collector.is_empty() {
@@ -388,10 +382,13 @@ fn parse_collect(value: Option<&Value>, index: usize) -> Result<PlaybookStep, Pl
 fn parse_run_tool(value: Option<&Value>, index: usize) -> Result<PlaybookStep, PlaybookError> {
     let tool = match value {
         Some(Value::String(text)) => text.trim().to_string(),
-        Some(Value::Mapping(map)) => string_field(map, "id")
-            .or_else(|| string_field(map, "tool"))
-            .or_else(|| string_field(map, "name"))
-            .unwrap_or_default(),
+        Some(Value::Mapping(map)) => {
+            reject_unknown_keys(map, &["id", "tool", "name"], index, "run_tool")?;
+            string_field(map, "id")
+                .or_else(|| string_field(map, "tool"))
+                .or_else(|| string_field(map, "name"))
+                .unwrap_or_default()
+        }
         _ => String::new(),
     };
     if tool.is_empty() {
@@ -413,6 +410,12 @@ fn parse_search_around(value: Option<&Value>, index: usize) -> Result<PlaybookSt
     let (hops, link_types, entity_kinds) = match value {
         None | Some(Value::Null) | Some(Value::Bool(true)) => (2, Vec::new(), Vec::new()),
         Some(Value::Mapping(map)) => {
+            reject_unknown_keys(
+                map,
+                &["hops", "link_types", "kinds", "entity_kinds"],
+                index,
+                "search_around",
+            )?;
             let hops = integer_field(map, "hops").unwrap_or(2);
             if hops == 0 || hops > u64::from(MAX_SEARCH_HOPS) {
                 return Err(PlaybookError::new(format!(
@@ -468,6 +471,7 @@ fn parse_assert(value: Option<&Value>, index: usize) -> Result<PlaybookStep, Pla
             index + 1
         )));
     };
+    reject_unknown_keys(map, &["title", "details"], index, "assert_finding_template")?;
     let title = string_field(map, "title").unwrap_or_default();
     if title.trim().is_empty() {
         return Err(PlaybookError::new(format!(
@@ -492,6 +496,7 @@ fn parse_propose_resolve(
     let reason = match value {
         None | Some(Value::Null) | Some(Value::Bool(true)) | Some(Value::Mapping(_)) => {
             if let Some(Value::Mapping(map)) = value {
+                reject_unknown_keys(map, &["reason"], index, "propose_resolve")?;
                 string_field(map, "reason").unwrap_or_default()
             } else {
                 String::new()
@@ -506,6 +511,30 @@ fn parse_propose_resolve(
         }
     };
     Ok(PlaybookStep::ProposeResolve { reason })
+}
+
+fn reject_unknown_keys(
+    map: &serde_yaml::Mapping,
+    allowed: &[&str],
+    index: usize,
+    step: &str,
+) -> Result<(), PlaybookError> {
+    for key in map.keys() {
+        let Some(name) = key.as_str() else {
+            return Err(PlaybookError::new(format!(
+                "step {}: keys must be strings",
+                index + 1
+            )));
+        };
+        if !allowed.contains(&name) {
+            return Err(PlaybookError::new(format!(
+                "step {}: unknown key {name:?} on {step} (allowed: {})",
+                index + 1,
+                allowed.join(", ")
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn field<'a>(map: &'a serde_yaml::Mapping, key: &str) -> Option<&'a Value> {
@@ -666,6 +695,43 @@ steps:
             actual.message.contains("alias")
                 || actual.message.contains("invalid playbook YAML")
                 || actual.message.contains("format")
+        );
+    }
+
+    #[test]
+    fn extra_keys_on_known_steps_are_refused() {
+        let sibling = br#"
+format: os-int-playbook
+format_version: 1
+id: extra-sibling
+seed:
+  type: domain
+steps:
+  - collect: dns
+    extra: true
+"#;
+        let actual = parse_playbook_yaml(sibling).expect_err("sibling");
+        assert!(
+            actual.message.contains("extra") || actual.message.contains("unknown key"),
+            "{}",
+            actual.message
+        );
+        let nested = br#"
+format: os-int-playbook
+format_version: 1
+id: extra-nested
+seed:
+  type: domain
+steps:
+  - collect:
+      collector: dns
+      unexpected: 1
+"#;
+        let actual = parse_playbook_yaml(nested).expect_err("nested");
+        assert!(
+            actual.message.contains("unknown key") || actual.message.contains("unexpected"),
+            "{}",
+            actual.message
         );
     }
 

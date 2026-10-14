@@ -2,8 +2,8 @@
 
 use crate::jobs::JobContext;
 use crate::model::{
-    AgentAction, MAX_PLAYBOOK_PROPOSALS, PlannedAction, Playbook, PlaybookPlan, PlaybookStep,
-    Target,
+    AgentAction, InvestigationData, MAX_PLAYBOOK_PROPOSALS, PlannedAction, Playbook, PlaybookPlan,
+    PlaybookStep, Target, suggest_resolutions,
 };
 use crate::tools::{Activity, ToolRegistry};
 
@@ -121,14 +121,8 @@ pub fn plan_playbook(
         }
     }
     if automation {
-        actions.push(PlannedAction::Propose {
-            action: AgentAction::AddFinding {
-                title: format!("Watch {} for observation changes", playbook.id),
-                details: "Opened only when collect steps see a new content hash. Not applied until accept.".into(),
-                confidence: Some("medium".into()),
-                sources: Vec::new(),
-            },
-        });
+        warnings
+            .push("watch proposes a finding only when collect steps see a new content hash".into());
     }
     Ok(PlaybookPlan {
         playbook_id: playbook.id.clone(),
@@ -139,4 +133,50 @@ pub fn plan_playbook(
         actions,
         warnings,
     })
+}
+
+/// Fill dry-run `propose_resolve` rows with live entity ids when the graph already has them.
+pub fn bind_resolve_plan(plan: &mut PlaybookPlan, data: &InvestigationData, playbook: &Playbook) {
+    let reason = playbook
+        .steps
+        .iter()
+        .find_map(|step| match step {
+            PlaybookStep::ProposeResolve { reason } => Some(reason.as_str()),
+            _ => None,
+        })
+        .unwrap_or("");
+    let suggestions = suggest_resolutions(data);
+    for planned in &mut plan.actions {
+        let PlannedAction::Propose {
+            action:
+                AgentAction::ProposeResolve {
+                    entities,
+                    reason: planned_reason,
+                },
+        } = planned
+        else {
+            continue;
+        };
+        if !entities.is_empty() {
+            continue;
+        }
+        if let Some(suggestion) = suggestions.first() {
+            let refs: Vec<String> = suggestion
+                .entity_ids
+                .iter()
+                .filter_map(|id| {
+                    data.entities
+                        .iter()
+                        .find(|entity| entity.id == *id)
+                        .map(|entity| entity.short_ref().to_string())
+                })
+                .collect();
+            if refs.len() >= 2 {
+                *entities = refs;
+                if planned_reason.is_empty() && !reason.is_empty() {
+                    *planned_reason = reason.to_string();
+                }
+            }
+        }
+    }
 }

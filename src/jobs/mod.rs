@@ -102,9 +102,14 @@ impl JobContext {
 
     /// A context for running work outside the TUI (CLI commands, tests).
     pub fn detached(echo_to_stderr: bool) -> Self {
+        Self::with_cancel(echo_to_stderr, CancellationToken::new())
+    }
+
+    /// CLI/watch context that shares a cancellation token (Ctrl+C cancels the current pass).
+    pub fn with_cancel(echo_to_stderr: bool, cancel: CancellationToken) -> Self {
         Self {
             job_id: Uuid::new_v4(),
-            cancel: CancellationToken::new(),
+            cancel,
             sender: None,
             echo_to_stderr,
         }

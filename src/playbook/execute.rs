@@ -4,16 +4,18 @@ use crate::collectors::tool::run_tool;
 use crate::collectors::{CollectionOutput, CollectorContext, CollectorRegistry};
 use crate::files::sha256_hex;
 use crate::jobs::JobContext;
+use std::collections::HashSet;
+
 use crate::model::{
     AgentAction, EntityKind, EvidenceBatch, MAX_PLAYBOOK_PROPOSALS, Playbook, PlaybookOutput,
-    PlaybookPlan, PlaybookStep, SearchAroundQuery, Target, Workspace, search_around,
-    suggest_resolutions,
+    PlaybookPlan, PlaybookStep, ProposalStatus, SearchAroundQuery, Target, Workspace,
+    search_around, suggest_resolutions,
 };
 use crate::storage::{ApplyContext, Store};
 use crate::tools::{Activity, ToolRegistry};
 
 use super::PlaybookError;
-use super::plan::plan_playbook;
+use super::plan::{bind_resolve_plan, plan_playbook};
 use super::watch::change_proposals;
 
 /// How a playbook should run.
@@ -132,6 +134,7 @@ pub async fn gather(
         search_summary: None,
         warnings,
         digest: String::new(),
+        previous_digest: options.previous_digest.clone(),
     })
 }
 
@@ -161,8 +164,11 @@ pub fn execute_prepared(
     options: ExecuteOptions,
 ) -> Result<PlaybookOutput, PlaybookError> {
     let job = JobContext::detached(false);
-    let plan = plan_playbook(playbook, seed, tools, options.automation, &job)?;
+    let mut plan = plan_playbook(playbook, seed, tools, options.automation, &job)?;
     if options.dry_run {
+        if let Ok(data) = store.load_investigation(apply.investigation_id) {
+            bind_resolve_plan(&mut plan, &data, playbook);
+        }
         return Ok(dry_run_output(playbook, seed, plan, options.automation));
     }
     let warnings = plan.warnings.clone();
@@ -180,6 +186,7 @@ pub fn execute_prepared(
         search_summary: None,
         warnings,
         digest: String::new(),
+        previous_digest: options.previous_digest.clone(),
     };
     finish(store, playbook, seed, apply, gathered, options)
 }
@@ -190,6 +197,15 @@ fn dry_run_output(
     plan: PlaybookPlan,
     automation: bool,
 ) -> PlaybookOutput {
+    let proposals = plan
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            crate::model::PlannedAction::Propose { action } => Some(action.clone()),
+            _ => None,
+        })
+        .collect();
+    let warnings = plan.warnings.clone();
     PlaybookOutput {
         playbook: playbook.clone(),
         playbook_id: playbook.id.clone(),
@@ -199,18 +215,12 @@ fn dry_run_output(
         dry_run: true,
         automation,
         batches: Vec::new(),
-        proposals: plan
-            .actions
-            .iter()
-            .filter_map(|action| match action {
-                crate::model::PlannedAction::Propose { action } => Some(action.clone()),
-                _ => None,
-            })
-            .collect(),
+        proposals,
         plan,
         search_summary: None,
-        warnings: Vec::new(),
+        warnings,
         digest: String::new(),
+        previous_digest: None,
     }
 }
 
@@ -273,8 +283,10 @@ fn finish(
         batches,
         mut warnings,
         plan,
+        previous_digest: gathered_previous,
         ..
     } = gathered;
+    let previous_digest = options.previous_digest.clone().or(gathered_previous);
     let digest = batch_digest(&batches);
     let apply_batches = if options.automation {
         batches
@@ -289,11 +301,6 @@ fn finish(
     } else {
         batches.clone()
     };
-    let mut proposals = if options.automation {
-        Vec::new()
-    } else {
-        template_proposals(playbook)
-    };
     let outcome = store
         .apply_playbook_outcome(
             apply,
@@ -303,24 +310,32 @@ fn finish(
                 seed,
                 automation: options.automation,
                 digest: &digest,
-                previous_digest: options.previous_digest.as_deref(),
+                previous_digest: previous_digest.as_deref(),
             },
         )
         .map_err(|error| PlaybookError::new(error.to_string()))?;
-    if options.automation {
-        let digest_changed = outcome.digest_changed;
-        proposals = change_proposals(playbook, &outcome.summary, &batches, digest_changed);
+    let should_propose = outcome.digest_changed || outcome.summary.changed_observations > 0;
+    let mut proposals = if should_propose {
+        if options.automation {
+            change_proposals(playbook, &outcome.summary, &batches, outcome.digest_changed)
+        } else {
+            let mut proposals = template_proposals(playbook);
+            run_search_and_resolve(
+                store,
+                apply.investigation_id,
+                playbook,
+                seed,
+                &mut warnings,
+                &mut proposals,
+            );
+            proposals
+        }
     } else {
-        run_search_and_resolve(
-            store,
-            apply.investigation_id,
-            playbook,
-            seed,
-            &mut warnings,
-            &mut proposals,
-        );
-    }
+        Vec::new()
+    };
     proposals.truncate(MAX_PLAYBOOK_PROPOSALS);
+    proposals = dedupe_pending_actions(store, apply.investigation_id, proposals)
+        .map_err(|error| PlaybookError::new(error.to_string()))?;
     store
         .insert_playbook_proposals(apply.investigation_id, playbook, seed, &proposals)
         .map_err(|error| PlaybookError::new(error.to_string()))?;
@@ -352,8 +367,33 @@ fn finish(
             .cloned(),
         warnings,
         digest,
+        previous_digest,
     };
     Ok(output)
+}
+
+fn dedupe_pending_actions(
+    store: &Store,
+    investigation_id: uuid::Uuid,
+    actions: Vec<AgentAction>,
+) -> color_eyre::Result<Vec<AgentAction>> {
+    let data = store.load_investigation(investigation_id)?;
+    let mut seen: HashSet<(String, String)> = data
+        .proposals
+        .iter()
+        .filter(|proposal| proposal.status == ProposalStatus::Pending)
+        .map(|proposal| proposal.action.identity_key())
+        .collect();
+    let mut unique = Vec::new();
+    for action in actions {
+        let key = action.identity_key();
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.insert(key);
+        unique.push(action);
+    }
+    Ok(unique)
 }
 
 fn template_proposals(playbook: &Playbook) -> Vec<AgentAction> {
@@ -648,16 +688,41 @@ mod tests {
     }
 
     #[test]
-    fn invalid_yaml_does_not_touch_the_database() {
-        let store = Store::open_in_memory().expect("store");
-        let investigation = store.create_investigation("Clean", "").expect("inv");
+    fn failed_playbook_apply_rolls_back_all_batches() {
+        let mut store = Store::open_in_memory().expect("store");
+        let investigation = store.create_investigation("Tx", "").expect("inv");
+        let playbook = bundled("domain-infra").expect("playbook");
+        let seed = Target::parse(crate::model::TargetKind::Domain, "example.com").expect("seed");
+        let tools = ToolRegistry::detect(&Config::default().tools);
+        store
+            .connection()
+            .execute_batch("DROP TABLE playbook_runs")
+            .expect("drop playbook_runs so the run insert fails after batches apply");
+        let mut second = fixture_batch();
+        second.sources[0].content_hash = Some("other-hash".into());
+        second.sources[0].title = "DNS other".into();
         let before = store.load_investigation(investigation.id).expect("before");
-        let actual = parse_playbook_yaml(b"not: [yaml: :").expect_err("parse");
-        assert!(actual.message.contains("invalid playbook YAML"));
+        let error = execute_prepared(
+            &mut store,
+            &playbook,
+            &seed,
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            vec![fixture_batch(), second],
+            &tools,
+            ExecuteOptions::default(),
+        )
+        .expect_err("insert into dropped playbook_runs must fail");
+        assert!(!error.message.is_empty());
         let after = store.load_investigation(investigation.id).expect("after");
         assert_eq!(before.entities.len(), after.entities.len());
-        assert_eq!(before.proposals.len(), after.proposals.len());
         assert_eq!(before.sources.len(), after.sources.len());
+        assert_eq!(before.proposals.len(), after.proposals.len());
+        assert!(after.entities.is_empty());
+        assert!(after.sources.is_empty());
     }
 
     #[test]
@@ -724,6 +789,11 @@ mod tests {
         assert!(described.contains("automation dry-run"));
         assert!(described.contains("collect dns"));
         assert!(described.contains("Nothing was applied"));
+        assert!(
+            !described.contains("Observation changed"),
+            "watch dry-run must not always list a watch finding"
+        );
+        assert!(!described.contains("+ Finding:"));
         let data = store.load_investigation(investigation.id).expect("load");
         assert!(data.entities.is_empty());
         assert!(data.proposals.is_empty());
@@ -788,6 +858,145 @@ mod tests {
             .expect("row");
         assert_eq!(automation.interval_seconds, Some(3600));
         assert!(automation.enabled);
+    }
+
+    #[test]
+    fn second_identical_watch_pass_is_idempotent() {
+        let mut store = Store::open_in_memory().expect("store");
+        let investigation = store.create_investigation("Watch twice", "").expect("inv");
+        let playbook = bundled("domain-infra").expect("playbook");
+        let seed = Target::parse(crate::model::TargetKind::Domain, "example.com").expect("seed");
+        let tools = ToolRegistry::detect(&Config::default().tools);
+        let apply = ApplyContext {
+            investigation_id: investigation.id,
+            page_id: None,
+            job_id: None,
+        };
+        let first = execute_prepared(
+            &mut store,
+            &playbook,
+            &seed,
+            apply,
+            vec![fixture_batch()],
+            &tools,
+            ExecuteOptions {
+                dry_run: false,
+                automation: true,
+                previous_digest: None,
+                interval_seconds: Some(60),
+            },
+        )
+        .expect("first pass");
+        assert!(!first.proposals.is_empty());
+        let after_first = store.load_investigation(investigation.id).expect("load");
+        let pending_first = after_first
+            .proposals
+            .iter()
+            .filter(|proposal| proposal.status == crate::model::ProposalStatus::Pending)
+            .count();
+        assert!(pending_first > 0);
+        let second = execute_prepared(
+            &mut store,
+            &playbook,
+            &seed,
+            apply,
+            vec![fixture_batch()],
+            &tools,
+            ExecuteOptions {
+                dry_run: false,
+                automation: true,
+                previous_digest: Some(first.digest.clone()),
+                interval_seconds: Some(60),
+            },
+        )
+        .expect("second pass");
+        assert!(
+            second.proposals.is_empty(),
+            "identical digest must not open new template or change proposals"
+        );
+        let after_second = store.load_investigation(investigation.id).expect("load");
+        let pending_second = after_second
+            .proposals
+            .iter()
+            .filter(|proposal| proposal.status == crate::model::ProposalStatus::Pending)
+            .count();
+        assert_eq!(pending_first, pending_second);
+    }
+
+    #[test]
+    fn dry_run_propose_resolve_is_pending_collect_or_bound() {
+        let mut store = Store::open_in_memory().expect("store");
+        let investigation = store.create_investigation("Resolve", "").expect("inv");
+        let playbook = bundled("domain-infra").expect("playbook");
+        let seed = Target::parse(crate::model::TargetKind::Domain, "example.com").expect("seed");
+        let tools = ToolRegistry::detect(&Config::default().tools);
+        let empty = execute_prepared(
+            &mut store,
+            &playbook,
+            &seed,
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            vec![fixture_batch()],
+            &tools,
+            ExecuteOptions {
+                dry_run: true,
+                automation: false,
+                previous_digest: None,
+                interval_seconds: None,
+            },
+        )
+        .expect("dry empty");
+        let described = empty.plan.describe();
+        assert!(
+            described.contains("pending collect"),
+            "empty graph dry-run must mark propose_resolve as pending collect, got {described}"
+        );
+        execute_prepared(
+            &mut store,
+            &playbook,
+            &seed,
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            vec![fixture_batch()],
+            &tools,
+            ExecuteOptions::default(),
+        )
+        .expect("apply");
+        let bound = execute_prepared(
+            &mut store,
+            &playbook,
+            &seed,
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            vec![fixture_batch()],
+            &tools,
+            ExecuteOptions {
+                dry_run: true,
+                automation: false,
+                previous_digest: None,
+                interval_seconds: None,
+            },
+        )
+        .expect("dry bound");
+        let described = bound.plan.describe();
+        assert!(described.contains("Propose resolve"), "{described}");
+        let bound_resolve = bound.proposals.iter().any(|action| {
+            matches!(action, AgentAction::ProposeResolve { entities, .. } if !entities.is_empty())
+        });
+        let pending_collect = described.contains("pending collect");
+        assert!(
+            bound_resolve || pending_collect,
+            "dry-run propose_resolve must bind live entities or stay pending collect: {described}"
+        );
     }
 
     #[test]

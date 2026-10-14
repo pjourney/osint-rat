@@ -118,19 +118,13 @@ fn domain_infra_fixture_is_cited_graph_with_pending_proposals_only() {
 }
 
 #[test]
-fn invalid_yaml_does_not_write() {
-    let store = Store::open_in_memory().expect("store");
-    let investigation = store.create_investigation("Clean", "").expect("inv");
-    let before = store.load_investigation(investigation.id).expect("before");
+fn invalid_yaml_never_reaches_apply() {
     let actual = parse_playbook_yaml(b"[unterminated: : :").expect_err("invalid");
     assert!(
         actual.message.to_ascii_lowercase().contains("yaml")
             || actual.message.contains("mapping")
             || actual.message.contains("format")
     );
-    let after = store.load_investigation(investigation.id).expect("after");
-    assert_eq!(before.sources.len(), after.sources.len());
-    assert_eq!(before.proposals.len(), after.proposals.len());
 }
 
 #[test]

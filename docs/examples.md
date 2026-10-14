@@ -92,7 +92,7 @@ The page target is the path you passed. The stored artifact lives under the inve
 
 ## Run a playbook
 
-Bundled playbooks live under [`playbooks/`](../playbooks/) and in the binary. Collect steps run; finding templates stay pending until you accept them. `--dry-run` prints the plan and writes nothing.
+Bundled playbooks live under [`playbooks/`](../playbooks/) and in the binary. Collect steps run; finding templates stay pending until you accept them. `--dry-run` prints the plan and writes nothing: it does not create an investigation or investigation directories, and it errors if the named case is missing.
 
 ```bash
 os-int-learn playbook list

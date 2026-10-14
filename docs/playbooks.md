@@ -63,7 +63,7 @@ os-int watch --playbook domain-infra --investigation "Example Corp" --target exa
 os-int watch --playbook domain-infra --investigation "Example Corp" --interval 3600
 ```
 
-`--dry-run` prints planned Actions and applies nothing. `--once` runs one watch pass. `--interval` loops until Ctrl+C (cancellation). Collect batches apply in **one SQLite transaction** after the steps finish; a cancelled or failed collect applies nothing.
+`--dry-run` prints planned Actions and applies nothing. It does not create an investigation or investigation directories; the case must already exist (missing names are an error). `--once` runs one watch pass. `--interval` loops until Ctrl+C (cancellation is observed during a pass, not only between intervals). Collect batches apply in **one SQLite transaction** after the steps finish; a cancelled or failed collect applies nothing.
 
 ## Workbench
 
@@ -82,7 +82,7 @@ os-int watch --playbook domain-infra --investigation "Example Corp" --interval 3
 | Search Around hops | 8 (same as Graph) |
 | Proposals per run | 16 |
 | Nested playbooks | refused |
-| Concurrent playbook jobs | one per workbench (further `RUN_PLAYBOOK` accepts fail) |
+| Concurrent playbook jobs | one (workbench and CLI; further runs are refused) |
 
 Untrusted playbooks cannot set provenance or delete collected findings (`resolved_findings` is refused at parse, and ingest-style honors rules still apply on collector batches). Resolution bags are unchanged: collect upserts by `(kind, value)` onto the canonical.
 

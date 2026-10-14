@@ -20,7 +20,7 @@ use crate::paths::is_safe_relative_path;
 pub use bundle::{BUNDLED, bundled, bundled_ids, bundled_prompt};
 pub use execute::{ExecuteOptions, commit, execute, execute_prepared, gather};
 pub use parse::parse_playbook_yaml;
-pub use plan::plan_playbook;
+pub use plan::{bind_resolve_plan, plan_playbook};
 pub use watch::{automation_plan, change_proposals};
 
 /// A parse or execute failure that should be shown to the analyst. Never a panic.
