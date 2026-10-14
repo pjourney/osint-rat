@@ -21,7 +21,7 @@
 | 3 | Entity resolution | Done ([#7](https://github.com/pjourney/osint-rat/pull/7)) |
 | 4 | Ingest plane & connectors | Done ([#8](https://github.com/pjourney/osint-rat/pull/8)) |
 | 5 | Playbooks & automations | Done ([#9](https://github.com/pjourney/osint-rat/pull/9)) |
-| 6 | Temporal & geospatial | In progress |
+| 6 | Temporal & geospatial | In progress ([#10](https://github.com/pjourney/osint-rat/pull/10)) |
 | 7 | Team, markings & audit | Not started |
 | 8 | Scale, API & STIX | Not started |
 | 9 | Distribution, demos & open platform | Not started |
