@@ -1,0 +1,19 @@
+format: os-int-playbook
+format_version: 1
+id: community-template
+name: Community playbook template
+description: >
+  Copy this file when opening a community plugin pull request. Keep every
+  step passive. Finding templates stay pending until an analyst accepts them.
+  Nested playbooks and silent finding writes are refused.
+seed:
+  type: domain
+steps:
+  - collect: dns
+  - search_around:
+      hops: 2
+  - assert_finding_template:
+      title: Review community-template output
+      details: >
+        Accept this finding only after checking that new objects cite a source
+        on Object View. Do not treat a pending template as collected fact.

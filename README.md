@@ -1,10 +1,16 @@
 # os-int
 
-**A terminal workbench for open-source intelligence investigations.**
+**A local-first investigation ontology workbench for OSINT and cyber cases.**
 
-os-int is where you keep a case together. You create an investigation, add the domains, addresses, URLs, and files you care about, collect public records, and keep every observation tied to its source. You can take notes, ask a local AI agent CLI, and write a report — without leaving the terminal.
+Fuse public sources into objects and links, resolve identities, Search Around the graph, run playbooks, and keep humans in control of every Action (including AI). Collectors are plugins. The graph and the resolution engine are the product.
 
-It orchestrates information, tools, sources, and agents. Built-in collectors cover the passive basics. Everything else plugs in as an external program you already have, an Evidence Batch sidecar, or the agent CLI you already use.
+**New here?** [Install](#install) (sixty-second one-liner on Linux and macOS), then [import the demo case](#import-the-demo-case-first). You should see Graph, a resolved entity, Search Around, and cited findings in a few minutes without reading the architecture notes.
+
+![Graph](docs/images/graph.svg)
+
+![Object View](docs/images/object-view.svg)
+
+![Search Around](docs/images/search-around.svg)
 
 ```text
 ┌ os-int · Example Corp ───────────────────────────────────────── Claude ● ┐
@@ -15,7 +21,7 @@ It orchestrates information, tools, sources, and agents. Built-in collectors cov
 │ Findings │                                          │  E-4  IP           │
 │ Entities │ Entities on this page                    │                    │
 │ Graph    │   E-1  Domain   example.com              │ Findings           │
-│ Timeline │   E-4  IP       93.184.216.34            │  F-1  [COL] HTTPS  │
+│ Timeline │   E-4  IP       192.0.2.1                │  F-1  [COL] HTTPS  │
 │ Notes    │                                          │                    │
 │ Agent    │ Findings                                 │                    │
 │ Jobs     │   F-1  [COL]  HTTPS redirects to apex    │                    │
@@ -29,18 +35,18 @@ It orchestrates information, tools, sources, and agents. Built-in collectors cov
 
 | | |
 | --- | --- |
-| **New here** | [Install](#install), then [your first investigation](#your-first-investigation) |
+| **New here** | [Install](#install), then [import the demo](#import-the-demo-case-first) |
 | **Day to day** | [How a case is organized](#how-a-case-is-organized), [keyboard](#keyboard), [command line](#command-line) |
-| **Going further** | [Vision](VISION.md) · [Phased roadmap](PHASED_ROADMAP.md) · [User guide](docs/guide.md) · [Examples](docs/examples.md) · [FAQ](docs/faq.md) · [Connectors](docs/connectors.md) · [Playbooks](docs/playbooks.md) · [Collaboration](docs/collaboration.md) · [HTTP API](docs/api.md) · [Scale](docs/scale.md) · [Ontology exchange](docs/ontology-exchange.md) |
+| **Going further** | [Vision](VISION.md) · [Roadmap](PHASED_ROADMAP.md) · [User guide](docs/guide.md) · [Install](docs/install.md) · [Examples](docs/examples.md) · [FAQ](docs/faq.md) · [Plugins](docs/plugins.md) · [Connectors](docs/connectors.md) · [Playbooks](docs/playbooks.md) · [Metrics](docs/metrics.md) · [Collaboration](docs/collaboration.md) · [HTTP API](docs/api.md) · [Scale](docs/scale.md) · [Ontology exchange](docs/ontology-exchange.md) |
 | **Contributing** | [Architecture](docs/ARCHITECTURE.md) · [Ontology](docs/ontology.md) · [Database tables](docs/schema.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) |
 
 ---
 
 ## What this is / is not
 
-**This is** a local-first investigation ontology for OSINT and cyber cases. You fuse public sources into objects and links, keep provenance on every record, and stay in control of every Action—including those a local AI agent proposes. Collectors are plugins. The graph and the resolution engine are the product. Delivery is gated by phase: [vision](VISION.md), [roadmap](PHASED_ROADMAP.md).
+**This is** a local-first investigation ontology for OSINT and cyber cases. You fuse public sources into objects and links, keep provenance on every record, and stay in control of every Action—including those a local AI agent proposes. Collectors are plugins. The graph and the resolution engine are the product. The [vision](VISION.md) and [phased roadmap](PHASED_ROADMAP.md) are complete.
 
-**This is not** a recon CLI, a collector-count contest, or an active-probing toolkit. Built-in collectors stay passive. There is no silent AI writeback, no automatic identity merge, and no cloud requirement. The bar is an enterprise-class investigative loop (ontology, fusion, resolution, Search Around, playbooks, governed Actions)—not module-count parity. Graph, Search Around, entity resolution, ingest, playbooks, timeline/geo, markings, audit, a localhost ontology API, and STIX export ship now. Remaining phases land only when their criteria pass.
+**This is not** a recon CLI, a collector-count contest, or an active-probing toolkit. Built-in collectors stay passive. There is no silent AI writeback, no automatic identity merge, and no cloud requirement. The bar is an enterprise-class investigative loop (ontology, fusion, resolution, Search Around, playbooks, governed Actions)—not module-count parity. Deferred follow-ups after v1 live in [docs/deferred.md](docs/deferred.md).
 
 The [Boundaries](#boundaries) section is the operational rule for what built-in collectors may do. It is not relaxed by the vision.
 
@@ -73,23 +79,27 @@ Custom tools and sidecars marked `active` are refused. You are responsible for c
 
 ## Install
 
-You need [Rust](https://rustup.rs) **1.88** or newer. The crate uses the 2024 edition. SQLite is bundled, so there is no separate database to install.
+Linux and macOS, from a **published** tagged GitHub Release (checksum-verified into `~/.local/bin`). Pin both the script URL and `OS_INT_VERSION` to the same tag, not `main`:
 
 ```bash
-git clone https://github.com/pjourney/osint-rat.git
-cd osint-rat
-cargo install --path .
+OS_INT_VERSION=v1.0.0 curl -fsSL https://raw.githubusercontent.com/pjourney/osint-rat/v1.0.0/scripts/install.sh | bash
 ```
 
-Or install straight from the repository:
+Until the crate is on crates.io:
+
+```bash
+cargo binstall --git https://github.com/pjourney/osint-rat
+```
+
+Windows: download the `os-int-x86_64-pc-windows-msvc.zip` asset from [Releases](https://github.com/pjourney/osint-rat/releases) and verify the `.sha256` file. Details, Homebrew tap notes, and source builds: [docs/install.md](docs/install.md).
+
+From source (Rust **1.88+**, edition 2024; SQLite is bundled):
 
 ```bash
 cargo install --git https://github.com/pjourney/osint-rat
 ```
 
-The binary is named `os-int`. Make sure `~/.cargo/bin` is on your `PATH`.
-
-Check the install:
+The binary is named `os-int`. Check the install:
 
 ```bash
 os-int --version
@@ -111,32 +121,46 @@ The first launch writes a commented `config.toml` and a SQLite database. Overrid
 
 The data directory holds `os-int.sqlite3`, daily log files, a small cache, and one folder per investigation. Details are in the [user guide](docs/guide.md#where-files-live).
 
-## Your first investigation
+## Import the demo case first
 
-Launch the workbench:
-
-```bash
-os-int
-```
-
-On the welcome screen:
-
-1. Press `n` and name the investigation, for example `Example Corp`.
-2. Press `n` again and add a page. Choose **Domain** and enter `example.com`.
-3. Press `r`. os-int runs DNS, RDAP, HTTP, TLS, and certificate transparency in the background. The interface stays responsive. Watch progress under **Jobs** (`8`).
-4. Press `3` for sources, `4` for findings, `5` for entities. Each row has a short id you can cite later.
-5. Press `a`, ask a question about a highlighted record, and review any proposed changes before accepting them.
-6. Press `p`, type `report`, and generate a Markdown report.
-
-The same case from the shell, if you prefer to collect before opening the interface:
+The archive at [`examples/demo-case/`](examples/demo-case/) is a documentation-range fixture (`example.com`, `192.0.2.0/24`). It already has a cited graph, a resolved hostname, playbook output, and findings that cite sources. You do not need the network.
 
 ```bash
-os-int collect domain example.com --investigation "Example Corp"
-os-int report "Example Corp"
-os-int open "Example Corp"
+git clone https://github.com/pjourney/osint-rat.git
+cd osint-rat
+mkdir -p /tmp/os-int-demo
+alias os-int-demo='os-int --data-dir /tmp/os-int-demo --config /tmp/os-int-demo/config.toml'
+os-int-demo import examples/demo-case
+os-int-demo open "Example Corp"
 ```
 
-`collect` creates the investigation and the page when they do not already exist. `os-int new "Example Corp"` also creates a case, then opens it in the workbench and stays there until you quit.
+Then, without reading ARCHITECTURE:
+
+1. Press `g` — Graph of `example.com` and connected infra.
+2. Press `s` — Search Around two hops (addresses, then ASN / organization).
+3. Press `Enter` — Object View: properties, catalogued links, constituent hostname, cited findings.
+4. Press `6` — Timeline, including **Playbook domain-infra**.
+5. Press `4` — Findings. Every row cites a source (`[COL]`).
+
+Shell equivalent: `os-int-demo search-around "Example Corp" E-1 --hops 2`.
+
+To collect a live case instead, press `n` on the welcome screen, add a domain page, and press `r` (or `os-int collect domain example.com --investigation "Example Corp"`). `collect` creates the investigation and the page when they do not already exist.
+
+## Success metrics
+
+Stars and collector counts are not success. Methodology and the demo-case numbers: [docs/metrics.md](docs/metrics.md).
+
+| Metric | Demo-case result |
+| --- | --- |
+| Time to a useful graph (≥20 linked entities) | Import the demo; Search Around 2 hops from `E-1` (20 visible objects) |
+| Findings with ≥1 cited source | 100% (3 / 3), provenance `collected` |
+| Search Around hops | Walkthrough uses 2; no session telemetry is uploaded |
+| Playbooks | One `domain-infra` run on the demo timeline |
+| External connectors | In-tree `hello-batch` plus the [community template](examples/community/) |
+
+## Open platform
+
+Anything an analyst already has can become cited objects without forking Rust. Sidecars print Evidence Batch JSON; playbooks are YAML. How to publish, and the review bar (passive-only, provenance, tests): [docs/plugins.md](docs/plugins.md). Copy [`examples/community/`](examples/community/) when you open a plugin pull request. The Phase 4 `hello-batch` sidecar still applies against a release binary.
 
 ## How a case is organized
 
@@ -144,7 +168,7 @@ os-int open "Example Corp"
 Investigation
   └── Pages          one subject each (domain, IP, URL, file, …)
         ├── Sources        raw observations, with provenance
-        ├── Entities       normalized identifiers (example.com, 93.184.216.34)
+        ├── Entities       normalized identifiers (example.com, 192.0.2.1)
         ├── Relationships  typed links from the link-type catalog (resolves_to, redirects_to, …)
         ├── Findings       claims, each citing the sources that support them
         ├── Notes          your writing, or a note accepted from an agent
@@ -218,6 +242,7 @@ os-int export "Example Corp" --format stix -o ./bundle.json
 os-int get "Example Corp" E-1
 os-int search-around "Example Corp" E-1 --hops 2
 os-int serve --token "$OS_INT_API_TOKEN"
+os-int import examples/demo-case            # first-run fixture (Graph + Search Around)
 os-int import ./export --rename             # --rename only if the id already exists
 os-int marking set "Example Corp" TLP:AMBER
 os-int team add "Example Corp" bob --role analyst

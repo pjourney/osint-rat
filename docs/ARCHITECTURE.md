@@ -65,6 +65,7 @@ A useful order:
 | `jobs/` | `JobManager`: spawns tasks with cancellation tokens, a concurrency limit, and a bounded event channel. |
 | `report/` | Markdown and JSON report generation. Renderers implement a small trait so HTML or PDF can be added later. |
 | `exchange/` | Versioned, path-independent import and export of investigations. |
+| `demo/` | Bundled Example Corp investigation snapshot (`examples/demo-case/`). |
 | `app/` | `App` owns config, store, workspace, job manager, and all UI state (including `GraphState` and `TimelineState`). Keys map to `Action`s; `App::dispatch` performs state transitions and side effects. Per-investigation `ui_state` restores the last view, page, and agent thread after restart. Long notes open `$EDITOR` / `$VISUAL` without a shell. |
 | `tui/` | Terminal setup and restore, the async event loop, theme, keymap, widgets, screens, and overlays. Rendering is a pure function of `App`. |
 | `cli/` | Clap definitions and non-TUI commands (`list`, `new`, `open`, `export`, `import`, `collect`, `ingest`, `playbook`, `watch`, `report`, `geojson`, `cooccur`, `marking`, `team`, `audit`, `get`, `objects`, `search-around`, `resolve`, `serve`, `bench`, `doctor`, `config`). |
@@ -93,6 +94,9 @@ A useful order:
 | Change the HTTP API or scriptable get/search-around/resolve | `src/api/`, `src/query.rs`, `os-int serve` / `os-int get`, [api.md](api.md) |
 | Change STIX export or the Object/Link mapping | `src/ingest/stix.rs`, `src/ingest/stix_export.rs`, [connectors.md](connectors.md#stix-21) |
 | Change incremental reload or scale benches | `model/workspace.rs` (`WorkspaceDelta`), `storage/delta.rs`, `storage/scale.rs`, [scale.md](scale.md) |
+| Change the bundled demo case | `src/demo.rs` and `examples/demo-case/`; rewrite the JSON with the ignored test in `src/demo.rs` |
+| Publish a community collector or playbook | [plugins.md](plugins.md), templates under `examples/community/` |
+| Change release artifacts or the install one-liner | `.github/workflows/release.yml`, `scripts/install.sh`, [install.md](install.md) |
 | Change geo fields or GeoJSON | `model/geo.rs`, `src/geo/`, IP/RDAP collectors, `os-int export --format geojson` |
 | Change merge, unresolve, or suggestion rules | `model/resolution.rs` (bags + scoring), `storage/resolution.rs`, then `app/resolution.rs` and Object View |
 | Add a palette command | `app/commands.rs`, then handle the id in `App::run_command` |
@@ -195,6 +199,10 @@ Database rows store **relative** paths inside the investigation directory, so an
 - [Collaboration](collaboration.md)
 - [HTTP API](api.md)
 - [Scale](scale.md)
+- [Install](install.md)
+- [Plugins](plugins.md)
+- [Success metrics](metrics.md)
+- [Deferred work](deferred.md)
 - [Vision](../VISION.md)
 - [Phased roadmap](../PHASED_ROADMAP.md)
 - [Contributing](../CONTRIBUTING.md)

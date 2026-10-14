@@ -277,8 +277,22 @@ fn finding_to_indicator(
             .map(ToString::to_string)
             .collect::<Vec<_>>(),
     });
-    attach_marking(&mut object, case, used);
+    attach_marking(&mut object, indicator_marking(finding, data, case), used);
     object
+}
+
+fn indicator_marking(finding: &Finding, data: &InvestigationData, case: Marking) -> Marking {
+    let mut marking = case;
+    for source_id in &finding.source_ids {
+        for entity in data
+            .entities
+            .iter()
+            .filter(|entity| entity.source_ids.contains(source_id))
+        {
+            marking = marking.restrict(entity.marking());
+        }
+    }
+    marking
 }
 
 fn indicator_pattern(finding: &Finding, data: &InvestigationData) -> String {
@@ -532,8 +546,8 @@ mod tests {
     use super::*;
     use crate::ingest::parse_stix;
     use crate::model::{
-        Entity, EntityKind, Investigation, InvestigationData, Marking, OBJECT_MARKING_FIELD,
-        Provenance, now,
+        Confidence, Entity, EntityKind, Finding, Investigation, InvestigationData, Marking,
+        OBJECT_MARKING_FIELD, Provenance, now,
     };
 
     fn empty_data() -> InvestigationData {
@@ -671,5 +685,52 @@ mod tests {
             entity.fields.get(OBJECT_MARKING_FIELD),
             Some(Marking::TlpAmberStrict.as_str())
         );
+    }
+
+    #[test]
+    fn indicator_tlp_restricts_case_with_cited_entity_markings() {
+        let timestamp = now();
+        let mut data = empty_data();
+        data.investigation.marking = Marking::TlpGreen;
+        let source_id = Uuid::new_v4();
+        let mut fields = crate::model::Fields::new();
+        fields.set(OBJECT_MARKING_FIELD, Marking::TlpRed.as_str());
+        data.entities.push(Entity {
+            id: Uuid::new_v4(),
+            investigation_id: data.investigation.id,
+            seq: 1,
+            kind: EntityKind::Domain,
+            value: "secret.example".into(),
+            label: String::new(),
+            notes: String::new(),
+            provenance: Provenance::Collected,
+            fields,
+            source_ids: vec![source_id],
+            created_at: timestamp,
+            updated_at: timestamp,
+        });
+        data.findings.push(Finding {
+            id: Uuid::new_v4(),
+            investigation_id: data.investigation.id,
+            seq: 1,
+            page_id: None,
+            title: "secret.example is cited".into(),
+            details: String::new(),
+            confidence: Confidence::High,
+            provenance: Provenance::Collected,
+            source_ids: vec![source_id],
+            created_at: timestamp,
+            updated_at: timestamp,
+        });
+        let bundle = export_stix_bundle(&data);
+        let objects = bundle["objects"].as_array().expect("objects");
+        let indicator = objects
+            .iter()
+            .find(|object| object["type"] == "indicator")
+            .expect("indicator");
+        assert_eq!(indicator["object_marking_refs"][0], TLP_RED_ID);
+        assert_eq!(indicator["x_osint_marking"], "tlp:red");
+        assert!(objects.iter().any(|object| object["id"] == TLP_RED_ID));
+        assert!(objects.iter().all(|object| object["id"] != TLP_GREEN_ID));
     }
 }

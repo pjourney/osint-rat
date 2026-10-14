@@ -2035,7 +2035,7 @@ fn playbook_apply_writes_playbook_run_audit() {
     let (mut store, investigation) = store_with_investigation();
     let playbook = crate::playbook::bundled("domain-infra").expect("bundled");
     let seed = Target::parse(TargetKind::Domain, "example.com").expect("seed");
-    store
+    let outcome = store
         .apply_playbook_outcome(
             ApplyContext {
                 investigation_id: investigation.id,
@@ -2052,6 +2052,11 @@ fn playbook_apply_writes_playbook_run_audit() {
             },
         )
         .expect("apply");
+    assert_eq!(outcome.summary.timeline_ids.len(), 1);
+    let data = store.load_investigation(investigation.id).expect("load");
+    assert_eq!(data.timeline.len(), 1);
+    assert_eq!(data.timeline[0].id, outcome.summary.timeline_ids[0]);
+    assert_eq!(data.timeline[0].kind, TimelineKind::PlaybookRun);
     let kinds: Vec<_> = store
         .list_audit(investigation.id)
         .expect("audit")
@@ -2120,33 +2125,33 @@ fn importer_of_a_reader_archive_becomes_owner() {
     );
 }
 
-fn sorted_ids<T>(items: &[T], get: fn(&T) -> Uuid) -> Vec<Uuid> {
-    let mut ids: Vec<Uuid> = items.iter().map(get).collect();
-    ids.sort();
-    ids
+fn sorted_by_id<T: Clone>(items: &[T], get: fn(&T) -> Uuid) -> Vec<T> {
+    let mut items = items.to_vec();
+    items.sort_by_key(get);
+    items
 }
 
 fn assert_patched_matches_reload(store: &Store, investigation_id: Uuid, workspace: &Workspace) {
     let full = store.load_investigation(investigation_id).expect("full");
     assert_eq!(
-        sorted_ids(&workspace.data.timeline, |event| event.id),
-        sorted_ids(&full.timeline, |event| event.id),
-        "timeline ids"
+        sorted_by_id(&workspace.data.timeline, |event| event.id),
+        sorted_by_id(&full.timeline, |event| event.id),
+        "timeline"
     );
     assert_eq!(
-        sorted_ids(&workspace.data.events, |event| event.id),
-        sorted_ids(&full.events, |event| event.id),
-        "event ids"
+        sorted_by_id(&workspace.data.events, |event| event.id),
+        sorted_by_id(&full.events, |event| event.id),
+        "events"
     );
     assert_eq!(
-        sorted_ids(&workspace.data.artifacts, |artifact| artifact.id),
-        sorted_ids(&full.artifacts, |artifact| artifact.id),
-        "artifact ids"
+        sorted_by_id(&workspace.data.artifacts, |artifact| artifact.id),
+        sorted_by_id(&full.artifacts, |artifact| artifact.id),
+        "artifacts"
     );
     assert_eq!(
-        sorted_ids(&workspace.data.findings, |finding| finding.id),
-        sorted_ids(&full.findings, |finding| finding.id),
-        "finding ids"
+        sorted_by_id(&workspace.data.findings, |finding| finding.id),
+        sorted_by_id(&full.findings, |finding| finding.id),
+        "findings"
     );
 }
 

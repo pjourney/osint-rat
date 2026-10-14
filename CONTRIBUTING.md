@@ -37,7 +37,9 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 ```
 
-These three commands stay required. Phase work is merge-gated: do not start phase *N+1* on `main` until phase *N* criteria in [PHASED_ROADMAP.md](PHASED_ROADMAP.md) pass. Any pull request that adds or changes a model or storage path must include tests for that path in the same PR.
+These three commands stay required. CI also runs `cargo audit`. The [phased roadmap](PHASED_ROADMAP.md) is complete; new work is ordinary pull requests against `main`, still bound by the [cross-phase rules](PHASED_ROADMAP.md#cross-phase-rules). Any pull request that adds or changes a model or storage path must include tests for that path in the same PR.
+
+To publish an external collector or playbook, copy [`examples/community/`](examples/community/) and follow [docs/plugins.md](docs/plugins.md). Title the pull request `community-plugin: <id> — <one-line description>`.
 
 `cargo fmt` (without `--check`) rewrites formatting. `cargo run -- doctor` is a useful smoke test after a change to startup, paths, or tool detection.
 
@@ -54,6 +56,9 @@ These three commands stay required. Phase work is merge-gated: do not start phas
 | Incremental UI store / scale benches | `src/model/workspace.rs`, `src/storage/delta.rs`, [docs/scale.md](docs/scale.md) |
 | A playbook or watch set | YAML under `playbooks/`, code in `src/playbook/`, [docs/playbooks.md](docs/playbooks.md) |
 | An external sidecar | `[[collectors.external]]` emitting Evidence Batch JSON; example under `examples/connectors/` |
+| A community plugin (collector or playbook) | Copy [`examples/community/`](examples/community/); follow [docs/plugins.md](docs/plugins.md) |
+| The bundled demo investigation | `src/demo.rs` and [`examples/demo-case/`](examples/demo-case/); rewrite JSON with the ignored `write_checked_in_demo_archive` test |
+| Release / install docs | `.github/workflows/release.yml`, `scripts/install.sh`, [docs/install.md](docs/install.md) |
 | A built-in external tool | `src/tools/registry.rs` |
 | Process spawning, timeouts, redaction | `src/exec/` |
 | Agent profiles, context fences, proposal parsing | `src/agent/` |
@@ -97,7 +102,7 @@ Live collectors can be exercised with `os-int collect`. CI must not depend on th
 - Describe the analyst-visible change in the pull request body.
 - Update [docs/guide.md](docs/guide.md) when commands, keys, collectors, or settings change.
 - Update [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) when you change a recorded decision.
-- Do not commit `target/`, databases, logs, or investigation snapshots.
+- Do not commit `target/`, databases, logs, or ad-hoc investigation snapshots. The bundled demo archive under `examples/demo-case/` is the exception and is generated from `src/demo.rs`.
 
 ### Checklist
 
@@ -108,8 +113,9 @@ Live collectors can be exercised with `os-int collect`. CI must not depend on th
 - [ ] Docs updated when behavior an analyst can observe has changed (`guide.md`, and [ontology-exchange.md](docs/ontology-exchange.md) when export or `EvidenceBatch` changes)
 - [ ] New collector or tool is passive, and untrusted output is sanitized
 - [ ] Phase PR: [PHASED_ROADMAP.md](PHASED_ROADMAP.md) status/checklist updated; no collector-count vanity metrics
+- [ ] Community plugin PR: [docs/plugins.md](docs/plugins.md) review bar (passive-only, provenance, tests)
 
-Recommended GitHub labels: `phase-0` … `phase-9` (one per roadmap phase). Apply the phase that the change belongs to.
+Recommended GitHub labels: `phase-0` … `phase-9` (historical; the roadmap is complete). For a new sidecar or playbook, use the [community plugin](.github/ISSUE_TEMPLATE/community_plugin.md) issue template.
 
 ## Security issues
 
@@ -126,6 +132,8 @@ Please follow [SECURITY.md](SECURITY.md). Use a private report rather than a pub
 - [Database tables](docs/schema.md)
 - [Ontology Exchange Format](docs/ontology-exchange.md)
 - [Playbooks](docs/playbooks.md)
+- [Plugins](docs/plugins.md)
+- [Install](docs/install.md)
 - [Collaboration](docs/collaboration.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Code of conduct](CODE_OF_CONDUCT.md)

@@ -37,6 +37,6 @@ These boundaries match [SECURITY.md](SECURITY.md). This document does not relax 
 
 ## How we get there
 
-Delivery is gated by phase. Do not start phase *N+1* on `main` until phase *N* merge criteria are met.
+Delivery was gated by phase. The plan, status table, and per-phase checklists live in **[PHASED_ROADMAP.md](PHASED_ROADMAP.md)** (complete). Follow-ups that were optional or later are listed in [docs/deferred.md](docs/deferred.md).
 
-The plan, status table, and per-phase checklists live in **[PHASED_ROADMAP.md](PHASED_ROADMAP.md)**.
+How the metrics in this file are measured: [docs/metrics.md](docs/metrics.md).

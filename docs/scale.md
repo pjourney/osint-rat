@@ -18,7 +18,7 @@ Hot paths now merge a `WorkspaceDelta`:
 | Collector `apply_batch` | Touched sources, entities, relationships, findings, page links |
 | Finished collection job | Job row (no second full reload) |
 
-`Workspace::apply_delta` upserts by UUID and updates short-ref indexes in place. Deleted findings (`resolved_findings`) are tombstoned so they do not linger. Member lists and page-entity links only append or upsert; removals still take a full reload. A correctness test (`apply_delta_matches_full_reload_after_batch`) compares patched timeline, event, artifact, and finding ids to a full reload.
+`Workspace::apply_delta` upserts by UUID and updates short-ref indexes in place. Deleted findings (`resolved_findings`) are tombstoned so they do not linger. Member lists and page-entity links only append or upsert; removals still take a full reload. A correctness test (`apply_delta_matches_full_reload_after_batch`) compares patched timeline, event, artifact, and finding **records** (sorted by id) to a full reload.
 
 ## Common-action budget
 
