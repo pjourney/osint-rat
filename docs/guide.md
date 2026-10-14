@@ -390,7 +390,7 @@ os-int import ./example-corp
 os-int import ./example-corp --rename
 ```
 
-The directory contains `investigation.osint.json` (format `os-int-investigation`, version 1) plus a `files/` tree of the investigation's snapshots, notes artifacts, and reports. Paths inside the manifest are relative. Import refuses an archive whose investigation id already exists, unless you pass `--rename`, which assigns a new id and copies the files under it.
+The directory contains `investigation.osint.json` (format `os-int-investigation`, version 1) plus a `files/` tree of the investigation's snapshots, notes artifacts, and reports. Paths inside the manifest are relative. Import refuses an archive whose investigation id already exists, unless you pass `--rename`, which assigns a new id and copies the files under it. The JSON fields, ingest batch, and version-bump rules are in [Ontology Exchange Format](ontology-exchange.md).
 
 Without `-o`, export uses `<sanitized-name>-<uuid>` in the current directory.
 
@@ -577,6 +577,7 @@ To report a vulnerability in os-int itself, follow [SECURITY.md](../SECURITY.md)
 - [Examples](examples.md) — copy-paste investigations, tools, agents, and export
 - [FAQ](faq.md) — pages versus entities, badges, paths, and the cases that look like failures
 - [Database tables](schema.md) — what each SQLite table stores
+- [Ontology Exchange Format](ontology-exchange.md) — export JSON, EvidenceBatch, and version bumps
 - [ARCHITECTURE.md](ARCHITECTURE.md) — module map and design decisions
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — development setup and pull requests
 - [SECURITY.md](../SECURITY.md) — vulnerability reports

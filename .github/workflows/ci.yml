@@ -1,3 +1,10 @@
+# Required on every pull request, including phase PRs:
+#   cargo fmt --all -- --check
+#   cargo clippy --all-targets -- -D warnings
+#   cargo test --all-targets
+# Phase PRs must also include tests for any new or changed model/storage path
+# (see CONTRIBUTING.md and PHASED_ROADMAP.md). Do not treat collector count
+# as a success signal.
 name: CI
 
 on:
