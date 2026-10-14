@@ -67,7 +67,7 @@ A **finding** is a claim. It should cite the sources that support it. Confidence
 | `F` | Finding | `T` | Timeline event |
 | `E` | Entity | `J` | Job |
 | `R` | Relationship | `Q` | Agent run |
-| | | `X` | Proposal |
+| `V` | Resolution | `X` | Proposal |
 
 `S-12` means "source number 12 in this investigation." The UUID remains the primary key.
 
@@ -445,7 +445,7 @@ os-int import ./example-corp
 os-int import ./example-corp --rename
 ```
 
-The directory contains `investigation.osint.json` (format `os-int-investigation`, version 1) plus a `files/` tree of the investigation's snapshots, notes artifacts, and reports. Paths inside the manifest are relative. Import refuses an archive whose investigation id already exists, unless you pass `--rename`, which assigns a new id and copies the files under it. The JSON fields, ingest batch, and version-bump rules are in [Ontology Exchange Format](ontology-exchange.md).
+The directory contains `investigation.osint.json` (format `os-int-investigation`, version 2) plus a `files/` tree of the investigation's snapshots, notes artifacts, and reports. Paths inside the manifest are relative. Version-1 archives still import (empty `data.resolutions`). Import refuses an archive whose investigation id already exists, unless you pass `--rename`, which assigns a new investigation id, remaps every record UUID (including resolution bags), and copies the files under the new id. The JSON fields, ingest batch, and version-bump rules are in [Ontology Exchange Format](ontology-exchange.md).
 
 Without `-o`, export uses `<sanitized-name>-<uuid>` in the current directory.
 

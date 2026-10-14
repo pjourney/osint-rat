@@ -108,7 +108,7 @@ Each bag:
 | `property_writes` | `{ key, previous, new_value }` applied to the canonical (`__label` / `__notes` for columns). |
 | `source_writes` | Source UUIDs copied onto the canonical. |
 
-Constituent entity rows remain. Unresolve undoes the writes in this bag. `--rename` still rewrites only the investigation UUID (including `resolutions.investigation_id`).
+Constituent entity rows remain. Unresolve undoes the writes in this bag. `--rename` remaps every record UUID, including `resolutions.id`, `canonical_id`, `constituent_ids`, and `source_writes`.
 
 ### Import behavior (v1 and v2)
 
@@ -116,7 +116,7 @@ From `exchange::import_investigation`:
 
 1. Parse the manifest. If `format_version` **>** `FORMAT_VERSION`, reject. Older or equal versions are accepted.
 2. Reject artifact `path` or source `snapshot_path` values that are not safe relative paths (`paths::is_safe_relative_path`).
-3. If an investigation with the same `id` exists: reject unless `--rename`. `--rename` assigns a new investigation UUID, suffixes the name with ` (imported)`, and rewrites `investigation_id` on child rows. **Record UUIDs are not rewritten.**
+3. If an investigation with the same `id` exists: reject unless `--rename`. `--rename` assigns a new investigation UUID, suffixes the name with ` (imported)`, remaps every record UUID (pages, sources, entities, relationships, resolutions, and all internal references), and rewrites `investigation_id` on child rows.
 4. If the name already exists (case-insensitive), append ` (2)`, ` (3)`, … or a UUID suffix.
 5. Insert `InvestigationData`, then copy `files/` into the new investigation directory.
 

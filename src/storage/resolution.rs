@@ -1,5 +1,7 @@
 //! Merge and unresolve. Constituent rows stay; the bag records reversible writes.
 
+use std::collections::HashSet;
+
 use color_eyre::eyre::{Result, bail, eyre};
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
@@ -148,6 +150,9 @@ fn revert_property_writes(
     let mut entity =
         load_entity(connection, entity_id)?.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
     for write in writes.iter().rev() {
+        if !cell_matches_write(&entity, write) {
+            continue;
+        }
         match write.key.as_str() {
             LABEL_WRITE_KEY => {
                 entity.label = write.previous.clone().unwrap_or_default();
@@ -173,6 +178,47 @@ fn revert_property_writes(
             ts(&now()),
         ],
     )?;
+    Ok(())
+}
+
+fn cell_matches_write(entity: &Entity, write: &PropertyWrite) -> bool {
+    match write.key.as_str() {
+        LABEL_WRITE_KEY => entity.label == write.new_value,
+        NOTES_WRITE_KEY => entity.notes == write.new_value,
+        key => entity.fields.get(key) == Some(write.new_value.as_str()),
+    }
+}
+
+fn revert_source_writes(connection: &Connection, resolution: &Resolution) -> rusqlite::Result<()> {
+    let remaining: HashSet<Uuid> = list_resolutions(connection, resolution.investigation_id)?
+        .into_iter()
+        .filter(|item| {
+            item.is_active()
+                && item.id != resolution.id
+                && item.canonical_id == resolution.canonical_id
+        })
+        .flat_map(|item| item.source_writes)
+        .collect();
+    for source_id in &resolution.source_writes {
+        if remaining.contains(source_id) {
+            continue;
+        }
+        let attached = connection
+            .query_row(
+                "SELECT 1 FROM entity_sources WHERE entity_id = ?1 AND source_id = ?2",
+                params![id(&resolution.canonical_id), id(source_id)],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if !attached {
+            continue;
+        }
+        connection.execute(
+            "DELETE FROM entity_sources WHERE entity_id = ?1 AND source_id = ?2",
+            params![id(&resolution.canonical_id), id(source_id)],
+        )?;
+    }
     Ok(())
 }
 
@@ -213,16 +259,20 @@ impl Store {
             if entity.id == canonical_id {
                 continue;
             }
-            if active.iter().any(|resolution| {
-                resolution.is_active()
-                    && resolution.contains(entity.id)
-                    && resolution.canonical_id != canonical_id
-            }) {
-                bail!(
-                    "{} is already resolved into another bag; unresolve it first",
-                    entity.short_ref()
-                );
+            let Some(existing) = active
+                .iter()
+                .find(|resolution| resolution.is_active() && resolution.contains(entity.id))
+            else {
+                continue;
+            };
+            if existing.canonical_id == entity.id || existing.canonical_id == canonical_id {
+                continue;
             }
+            bail!(
+                "{} is already absorbed into {}; unresolve that bag first",
+                entity.short_ref(),
+                existing.short_ref()
+            );
         }
         let canonical = loaded
             .iter()
@@ -314,12 +364,7 @@ impl Store {
             resolution.canonical_id,
             &resolution.property_writes,
         )?;
-        for source_id in &resolution.source_writes {
-            transaction.execute(
-                "DELETE FROM entity_sources WHERE entity_id = ?1 AND source_id = ?2",
-                params![id(&resolution.canonical_id), id(source_id)],
-            )?;
-        }
+        revert_source_writes(&transaction, &resolution)?;
         let timestamp = now();
         transaction.execute(
             "UPDATE resolutions SET status = ?2, unresolved_by = ?3, unresolved_at = ?4 WHERE id = ?1",

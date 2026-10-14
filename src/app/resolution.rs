@@ -86,21 +86,16 @@ impl App {
     }
 
     pub(crate) fn propose_merge(&mut self) {
-        let mut ids = self.merge_marks.clone();
-        if let Some(highlighted) = self
-            .listed_entities()
-            .get(self.selected)
-            .map(|entity| entity.id)
-            && !ids.contains(&highlighted)
-        {
-            ids.push(highlighted);
-        }
+        let ids = self.merge_marks.clone();
         if ids.len() < 2 {
             self.status = "Mark at least two entities (Space), then press m to merge.".into();
             return;
         }
-        let canonical_id = self
-            .entity_id
+        let highlighted = self
+            .listed_entities()
+            .get(self.selected)
+            .map(|entity| entity.id);
+        let canonical_id = highlighted
             .filter(|id| ids.contains(id))
             .or_else(|| ids.first().copied())
             .unwrap_or(ids[0]);

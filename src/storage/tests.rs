@@ -900,3 +900,177 @@ fn suggestions_appear_for_known_duplicates_without_merging() {
     assert!(data.resolutions.is_empty());
     assert_eq!(data.entities.len(), 2);
 }
+
+#[test]
+fn unresolve_keeps_post_merge_property_and_source_edits() {
+    let (mut store, investigation) = store_with_investigation();
+    let domain = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Domain,
+            "example.com",
+            Provenance::Analyst,
+            None,
+        )
+        .expect("domain");
+    let host = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Hostname,
+            "example.com",
+            Provenance::Collected,
+            None,
+        )
+        .expect("host");
+    store
+        .update_entity(host, "Host Label", "")
+        .expect("host label");
+    let mut host_batch = EvidenceBatch::new();
+    let host_key = host_batch.add_source(NewSource::collected(
+        SourceKind::Dns,
+        "dns",
+        "host observation",
+    ));
+    host_batch.entity(EntityKind::Hostname, "example.com", Some(host_key));
+    let host_applied = store
+        .apply_batch(
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            &host_batch,
+        )
+        .expect("host source");
+    let copied_source = host_applied.source_ids[0];
+    let resolution = store
+        .resolve_entities(
+            investigation.id,
+            &[domain, host],
+            domain,
+            "same host",
+            "tester",
+        )
+        .expect("merge");
+    assert!(
+        resolution
+            .property_writes
+            .iter()
+            .any(|write| write.key == crate::model::LABEL_WRITE_KEY
+                && write.previous.is_none()
+                && write.new_value == "Host Label")
+    );
+    assert!(resolution.source_writes.contains(&copied_source));
+    store
+        .update_entity(domain, "Analyst edit", "kept notes")
+        .expect("post-merge label");
+    let mut post_batch = EvidenceBatch::new();
+    let post_key = post_batch.add_source(NewSource::collected(
+        SourceKind::Manual,
+        "analyst",
+        "post-merge note",
+    ));
+    post_batch.entity(EntityKind::Domain, "example.com", Some(post_key));
+    let post_applied = store
+        .apply_batch(
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            &post_batch,
+        )
+        .expect("post-merge source");
+    let post_source = post_applied.source_ids[0];
+    store
+        .unresolve_entities(resolution.id, "tester")
+        .expect("split");
+    let restored = store
+        .load_investigation(investigation.id)
+        .expect("restored");
+    let canonical = restored
+        .entities
+        .iter()
+        .find(|entity| entity.id == domain)
+        .expect("canonical");
+    assert_eq!(canonical.label, "Analyst edit");
+    assert_eq!(canonical.notes, "kept notes");
+    assert!(canonical.source_ids.contains(&post_source));
+    assert!(!canonical.source_ids.contains(&copied_source));
+}
+
+#[test]
+fn resolve_can_stack_an_already_canonical_winner() {
+    let (mut store, investigation) = store_with_investigation();
+    let first = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Domain,
+            "example.com",
+            Provenance::Analyst,
+            None,
+        )
+        .expect("first");
+    let second = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Hostname,
+            "example.com",
+            Provenance::Collected,
+            None,
+        )
+        .expect("second");
+    let third = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Url,
+            "https://example.com",
+            Provenance::External,
+            None,
+        )
+        .expect("third");
+    store
+        .resolve_entities(
+            investigation.id,
+            &[first, second],
+            first,
+            "first bag",
+            "tester",
+        )
+        .expect("first merge");
+    store
+        .resolve_entities(
+            investigation.id,
+            &[first, third],
+            third,
+            "stack winner",
+            "tester",
+        )
+        .expect("stack existing winner");
+    let data = store.load_investigation(investigation.id).expect("load");
+    assert_eq!(data.canonical_id(second), third);
+    assert_eq!(data.canonical_id(first), third);
+    let absorbed = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Email,
+            "ops@example.com",
+            Provenance::Analyst,
+            None,
+        )
+        .expect("extra");
+    let err = store
+        .resolve_entities(
+            investigation.id,
+            &[second, absorbed],
+            absorbed,
+            "should fail",
+            "tester",
+        )
+        .expect_err("constituent of another bag");
+    let message = format!("{err:#}");
+    assert!(
+        message.contains("already absorbed") && message.contains("unresolve"),
+        "{message}"
+    );
+}

@@ -200,7 +200,6 @@ fn push_same_canonical_value(out: &mut Vec<ResolutionSuggestion>, data: &Investi
     let mut url_groups: HashMap<String, Vec<Uuid>> = HashMap::new();
     let mut ip_groups: HashMap<String, Vec<Uuid>> = HashMap::new();
     let mut email_groups: HashMap<String, Vec<Uuid>> = HashMap::new();
-    let mut repo_or_url: Vec<(&Entity, String)> = Vec::new();
     for entity in &data.entities {
         match entity.kind {
             EntityKind::Domain | EntityKind::Hostname => {
@@ -226,21 +225,13 @@ fn push_same_canonical_value(out: &mut Vec<ResolutionSuggestion>, data: &Investi
                     .entry(entity.value.clone())
                     .or_default()
                     .push(entity.id);
-                if let Some(host) = url_host(&entity.value) {
-                    repo_or_url.push((entity, host));
-                }
             }
             _ => {}
-        }
-        if let Some(email) = entity.fields.get("email") {
-            let normalized = EntityKind::Email.normalize_value(email);
-            if !normalized.is_empty() {
-                email_groups.entry(normalized).or_default().push(entity.id);
-            }
         }
     }
     emit_groups(
         out,
+        data,
         host_groups,
         95,
         SuggestionRule::SameCanonicalValue,
@@ -248,6 +239,7 @@ fn push_same_canonical_value(out: &mut Vec<ResolutionSuggestion>, data: &Investi
     );
     emit_groups(
         out,
+        data,
         url_groups,
         90,
         SuggestionRule::SameCanonicalValue,
@@ -255,6 +247,7 @@ fn push_same_canonical_value(out: &mut Vec<ResolutionSuggestion>, data: &Investi
     );
     emit_groups(
         out,
+        data,
         ip_groups,
         95,
         SuggestionRule::SameCanonicalValue,
@@ -262,42 +255,24 @@ fn push_same_canonical_value(out: &mut Vec<ResolutionSuggestion>, data: &Investi
     );
     emit_groups(
         out,
+        data,
         email_groups,
         85,
         SuggestionRule::SameCanonicalValue,
         "same canonical email",
     );
-    for entity in &data.entities {
-        if !matches!(entity.kind, EntityKind::Domain | EntityKind::Hostname) {
-            continue;
-        }
-        for (other, host) in &repo_or_url {
-            if host == &entity.value && other.id != entity.id {
-                out.push(ResolutionSuggestion {
-                    entity_ids: ordered_ids(&[entity.id, other.id]),
-                    score: 75,
-                    rule: SuggestionRule::SameCanonicalValue,
-                    reason: format!(
-                        "URL host {} matches {}",
-                        other.display_name(),
-                        entity.display_name()
-                    ),
-                });
-            }
-        }
-    }
 }
 
 fn emit_groups(
     out: &mut Vec<ResolutionSuggestion>,
+    data: &InvestigationData,
     groups: HashMap<String, Vec<Uuid>>,
     score: u32,
     rule: SuggestionRule,
     reason: &str,
 ) {
-    for (value, mut ids) in groups {
-        ids.sort();
-        ids.dedup();
+    for (value, ids) in groups {
+        let ids = order_suggestion_ids(data, &ids);
         if ids.len() < 2 {
             continue;
         }
@@ -331,7 +306,7 @@ fn push_username_profile_urls(out: &mut Vec<ResolutionSuggestion>, data: &Invest
                 && extracted == handle
             {
                 out.push(ResolutionSuggestion {
-                    entity_ids: ordered_ids(&[username.id, url.id]),
+                    entity_ids: order_suggestion_ids(data, &[username.id, url.id]),
                     score: 80,
                     rule: SuggestionRule::UsernameProfileUrl,
                     reason: format!(
@@ -368,7 +343,7 @@ fn push_cert_san_clusters(out: &mut Vec<ResolutionSuggestion>, data: &Investigat
                 matched.push(host.display_name().to_string());
             }
         }
-        ids = ordered_ids(&ids);
+        ids = order_suggestion_ids(data, &ids);
         if ids.len() < 2 {
             continue;
         }
@@ -404,12 +379,6 @@ fn certificate_sans(entity: &Entity) -> HashSet<String> {
         }
     }
     names
-}
-
-fn url_host(value: &str) -> Option<String> {
-    let url = normalize_url(value).ok()?;
-    let host = url.host_str()?.to_ascii_lowercase();
-    Some(host.trim_end_matches('.').to_string())
 }
 
 fn profile_username(value: &str) -> Option<String> {
@@ -474,11 +443,48 @@ fn is_profile_host(host: &str) -> bool {
     })
 }
 
-fn ordered_ids(ids: &[Uuid]) -> Vec<Uuid> {
-    let mut unique = ids.to_vec();
-    unique.sort();
-    unique.dedup();
+fn order_suggestion_ids(data: &InvestigationData, ids: &[Uuid]) -> Vec<Uuid> {
+    let mut unique = Vec::new();
+    for id in ids {
+        if !unique.contains(id) {
+            unique.push(*id);
+        }
+    }
+    unique.sort_by(|left, right| {
+        let left_entity = data.entities.iter().find(|entity| entity.id == *left);
+        let right_entity = data.entities.iter().find(|entity| entity.id == *right);
+        match (left_entity, right_entity) {
+            (Some(left_entity), Some(right_entity)) => {
+                compare_suggestion_winners(left_entity, right_entity)
+            }
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => left.cmp(right),
+        }
+    });
     unique
+}
+
+fn compare_suggestion_winners(left: &Entity, right: &Entity) -> std::cmp::Ordering {
+    right
+        .source_ids
+        .len()
+        .cmp(&left.source_ids.len())
+        .then_with(|| right.fields.0.len().cmp(&left.fields.0.len()))
+        .then_with(|| kind_specificity(&right.kind).cmp(&kind_specificity(&left.kind)))
+        .then_with(|| left.id.cmp(&right.id))
+}
+
+fn kind_specificity(kind: &EntityKind) -> u8 {
+    match kind {
+        EntityKind::Certificate => 6,
+        EntityKind::Hostname | EntityKind::Email => 5,
+        EntityKind::Ip => 4,
+        EntityKind::Domain | EntityKind::Username => 3,
+        EntityKind::Repository => 2,
+        EntityKind::Url => 1,
+        _ => 0,
+    }
 }
 
 fn dedupe_suggestions(suggestions: &mut Vec<ResolutionSuggestion>) {
@@ -497,7 +503,7 @@ pub fn plan_property_writes(canonical: &Entity, others: &[&Entity]) -> Vec<Prope
         {
             writes.push(PropertyWrite {
                 key: LABEL_WRITE_KEY.into(),
-                previous: None,
+                previous: previous_text(&canonical.label),
                 new_value: other.label.clone(),
             });
         }
@@ -507,7 +513,7 @@ pub fn plan_property_writes(canonical: &Entity, others: &[&Entity]) -> Vec<Prope
         {
             writes.push(PropertyWrite {
                 key: NOTES_WRITE_KEY.into(),
-                previous: None,
+                previous: previous_text(&canonical.notes),
                 new_value: other.notes.clone(),
             });
         }
@@ -517,7 +523,7 @@ pub fn plan_property_writes(canonical: &Entity, others: &[&Entity]) -> Vec<Prope
             }
             writes.push(PropertyWrite {
                 key: key.to_string(),
-                previous: None,
+                previous: canonical.fields.get(key).map(ToString::to_string),
                 new_value: value.to_string(),
             });
         }
@@ -536,6 +542,14 @@ pub fn plan_source_writes(canonical: &Entity, others: &[&Entity]) -> Vec<Uuid> {
         }
     }
     added
+}
+
+fn previous_text(value: &str) -> Option<String> {
+    if value.trim().is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -743,5 +757,63 @@ mod tests {
         assert!(writes.iter().any(|write| write.key == "asn"));
         assert!(writes.iter().all(|write| write.key != "registrar"));
         assert!(writes.iter().any(|write| write.key == LABEL_WRITE_KEY));
+        let label = writes
+            .iter()
+            .find(|write| write.key == LABEL_WRITE_KEY)
+            .expect("label write");
+        assert_eq!(label.previous, None);
+        assert_eq!(label.new_value, "Example");
+        let asn = writes
+            .iter()
+            .find(|write| write.key == "asn")
+            .expect("asn write");
+        assert_eq!(asn.previous, None);
+    }
+
+    #[test]
+    fn does_not_suggest_url_host_versus_domain_or_non_email_email_fields() {
+        let domain = entity(EntityKind::Domain, "example.com");
+        let url = entity(EntityKind::Url, "https://example.com/path");
+        let mut person = entity(EntityKind::Person, "Ada");
+        person.fields.push("email", "ada@example.com");
+        let mailbox = entity(EntityKind::Email, "ada@example.com");
+        let data = data_with(vec![
+            domain.clone(),
+            url.clone(),
+            person.clone(),
+            mailbox.clone(),
+        ]);
+        let actual = suggest_resolutions(&data);
+        assert!(
+            actual.iter().all(|item| {
+                !(item.entity_ids.contains(&domain.id) && item.entity_ids.contains(&url.id))
+            }),
+            "URL host must not pair with a domain: {actual:?}"
+        );
+        assert!(
+            actual.iter().all(|item| {
+                !(item.entity_ids.contains(&person.id) && item.entity_ids.contains(&mailbox.id))
+            }),
+            "email field on a non-Email entity must not group: {actual:?}"
+        );
+    }
+
+    #[test]
+    fn suggestion_winner_prefers_sources_then_fields_then_specific_kind() {
+        let mut sparse = entity(EntityKind::Domain, "example.com");
+        let mut cited = entity(EntityKind::Hostname, "example.com");
+        cited.source_ids.push(Uuid::new_v4());
+        cited.fields.push("asn", "AS1");
+        sparse.id = Uuid::from_u128(1);
+        cited.id = Uuid::from_u128(2);
+        let data = data_with(vec![sparse.clone(), cited.clone()]);
+        let actual = suggest_resolutions(&data);
+        let pair = actual
+            .iter()
+            .find(|item| {
+                item.entity_ids.contains(&sparse.id) && item.entity_ids.contains(&cited.id)
+            })
+            .expect("same-host pair");
+        assert_eq!(pair.entity_ids[0], cited.id);
     }
 }

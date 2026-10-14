@@ -89,7 +89,7 @@ Accept and reject record `decided_at` and `decided_by` (the local user name from
 
 ## Entity resolution
 
-A **resolution bag** is a canonical entity plus the constituents absorbed into it. Constituent rows stay in SQLite. The bag records property writes (`entities.fields`, plus label/notes) and source citations copied onto the canonical so unresolve can restore them. Nothing is deleted.
+A **resolution bag** is a canonical entity plus the constituents absorbed into it. Constituent rows stay in SQLite. The bag records property writes (`entities.fields`, plus label/notes) and source citations copied onto the canonical so unresolve can restore them. Nothing is deleted. `canonical_id` is a SQLite foreign key; `constituent_ids` is a JSON array, so `PRAGMA foreign_key_check` cannot validate those members.
 
 - Manual merge: on **Entities**, `Space` marks rows, `m` proposes, Enter confirms. Esc cancels. Winner is the highlighted marked row (else the first marked).
 - Unresolve: from Object View (or Entities) on the canonical, `u` then confirm.

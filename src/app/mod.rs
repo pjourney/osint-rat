@@ -674,6 +674,7 @@ impl App {
             self.status = "Create or open an investigation first.".into();
             return;
         }
+        self.merge_marks.clear();
         if view == View::Graph {
             self.open_graph();
             return;
@@ -3410,6 +3411,125 @@ mod tests {
                 .iter()
                 .any(|entity| Some(entity.id) == app.entity_id)
         );
+    }
+
+    #[test]
+    fn view_change_clears_marks_and_m_does_not_add_unmarked_highlight() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Mark Leak");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let first = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Domain,
+                "alpha.example",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("first");
+        let second = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Ip,
+                "192.0.2.10",
+                crate::model::Provenance::Collected,
+                None,
+            )
+            .expect("second");
+        let third = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Email,
+                "a@example.com",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("third");
+        app.reload().expect("reload");
+        app.view = View::Entities;
+        app.pane = Pane::Main;
+        app.selected = 1;
+        app.dispatch(Action::ToggleMergeMark).expect("mark second");
+        app.selected = 2;
+        app.dispatch(Action::ToggleMergeMark).expect("mark third");
+        assert_eq!(app.merge_marks, vec![second, third]);
+        app.dispatch(Action::OpenSources).expect("leave entities");
+        assert!(
+            app.merge_marks.is_empty(),
+            "marks must not survive a view change"
+        );
+        app.dispatch(Action::OpenEntities)
+            .expect("back to entities");
+        assert_eq!(app.view, View::Entities);
+        assert_eq!(app.selected, 0);
+        assert!(app.merge_marks.is_empty());
+        app.dispatch(Action::ProposeMerge).expect("m");
+        assert_eq!(app.overlay, Overlay::None);
+        assert!(app.pending_resolve.is_none());
+        assert!(app.status.contains("Mark at least two"));
+        let listed = app.listed_entities();
+        assert_eq!(listed[0].id, first);
+    }
+
+    #[test]
+    fn merge_canonical_is_highlighted_marked_row_not_leftover_entity_id() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Canonical Highlight");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let first = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Domain,
+                "alpha.example",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("first");
+        let second = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Ip,
+                "192.0.2.11",
+                crate::model::Provenance::Collected,
+                None,
+            )
+            .expect("second");
+        let leftover = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Email,
+                "left@example.com",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("leftover");
+        app.reload().expect("reload");
+        app.view = View::Entities;
+        app.pane = Pane::Main;
+        app.selected = 0;
+        app.dispatch(Action::ToggleMergeMark).expect("mark first");
+        app.selected = 1;
+        app.dispatch(Action::ToggleMergeMark).expect("mark second");
+        app.selected = 1;
+        app.entity_id = Some(leftover);
+        app.dispatch(Action::ProposeMerge).expect("m");
+        let pending = app.pending_resolve.as_ref().expect("pending");
+        assert_eq!(pending.canonical_id, second);
+        assert_eq!(pending.entity_ids, vec![first, second]);
+        app.dispatch(Action::Cancel).expect("esc");
+        app.selected = 2;
+        app.entity_id = Some(leftover);
+        app.dispatch(Action::ProposeMerge)
+            .expect("m unmarked highlight");
+        let pending = app.pending_resolve.as_ref().expect("pending first mark");
+        assert_eq!(pending.canonical_id, first);
+        assert!(!pending.entity_ids.contains(&leftover));
     }
 
     #[test]

@@ -35,7 +35,7 @@ Every investigation-scoped table has:
 | `agent_runs` | One question and the agent's response, including the thread id used for follow-ups. |
 | `proposals` | One structured action an agent suggested. `status` stays pending until you accept or reject it. `decided_at` / `decided_by` record who and when (local user for now). |
 | `link_types` | First-seen relationship verbs in an investigation. Built-in catalog metadata is copied; custom snake_case verbs are stored with an empty description. Rebuilt from `relationships` on import. Not part of the archive. |
-| `resolutions` | One merge bag: canonical entity, constituent UUIDs, status (`active` / `unresolved`), actor, reason, property writes, and source citations copied onto the canonical. Constituent entity rows are not deleted. |
+| `resolutions` | One merge bag: canonical entity, constituent UUIDs, status (`active` / `unresolved`), actor, reason, property writes, and source citations copied onto the canonical. Constituent entity rows are not deleted. `canonical_id` is a real foreign key. `constituent_ids` is a JSON array of UUIDs, so SQLite / `PRAGMA foreign_key_check` / `os-int doctor` cannot see orphans inside it. |
 | `ui_state` | Small key/value pairs: the last investigation, and per-investigation view, page, entity, and agent thread. `scope` is `global` or an investigation id. |
 
 ## How a collection lands
