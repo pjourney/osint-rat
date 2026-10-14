@@ -195,7 +195,12 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
     } else {
         format!("{} ○", app.agent.profile.name)
     };
-    let title = format!(" os-int ─ Investigation: {investigation} ");
+    let marking = app
+        .workspace
+        .as_ref()
+        .map(|workspace| workspace.investigation().marking.label())
+        .unwrap_or("unmarked");
+    let title = format!(" os-int ─ Investigation: {investigation}  [{marking}] ");
     let right = format!(" {agent} ");
     let spacer = " ".repeat(
         area.width

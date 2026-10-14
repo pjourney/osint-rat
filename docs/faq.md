@@ -132,6 +132,7 @@ Rust **1.88** or newer. The crate uses the 2024 edition. SQLite is bundled; you 
 
 - [Examples](examples.md)
 - [Playbooks](playbooks.md)
+- [Collaboration](collaboration.md)
 - [User guide](guide.md)
 - [Database tables](schema.md)
 - [Security policy](../SECURITY.md)

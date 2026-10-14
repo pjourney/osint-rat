@@ -310,6 +310,8 @@ impl Store {
         if unique.len() < 2 {
             bail!("merge needs at least two distinct entities");
         }
+        self.assert_can_mutate(investigation_id)?;
+        let identity = self.identity().clone();
         let transaction = self.connection_mut().transaction()?;
         let mut loaded = Vec::new();
         for entity_id in &unique {
@@ -360,7 +362,7 @@ impl Store {
             investigation_id,
             seq,
             canonical_id,
-            unique,
+            unique.clone(),
             reason,
             actor,
             property_writes,
@@ -401,6 +403,17 @@ impl Store {
                 page_id: None,
             },
         )?;
+        let mut details = crate::model::Fields::new();
+        details.push("reason", reason);
+        super::audit::append_audit_on(
+            &transaction,
+            investigation_id,
+            &identity,
+            crate::model::AuditKind::EntitiesMerged,
+            &title,
+            details,
+            unique.clone(),
+        )?;
         touch_investigation(&transaction, investigation_id)?;
         transaction.commit()?;
         Ok(resolution)
@@ -408,6 +421,17 @@ impl Store {
 
     /// Restores constituent visibility and undoes property/source writes for one bag.
     pub fn unresolve_entities(&mut self, resolution_id: Uuid, actor: &str) -> Result<Resolution> {
+        let investigation_id: Uuid = self
+            .connection()
+            .query_row(
+                "SELECT investigation_id FROM resolutions WHERE id = ?1",
+                params![id(&resolution_id)],
+                |row| row.uuid(0),
+            )
+            .optional()?
+            .ok_or_else(|| eyre!("resolution {resolution_id} does not exist"))?;
+        self.assert_can_mutate(investigation_id)?;
+        let identity = self.identity().clone();
         let transaction = self.connection_mut().transaction()?;
         let mut resolution = transaction
             .query_row(
@@ -480,6 +504,15 @@ impl Store {
                 entity_id: Some(resolution.canonical_id),
                 page_id: None,
             },
+        )?;
+        super::audit::append_audit_on(
+            &transaction,
+            resolution.investigation_id,
+            &identity,
+            crate::model::AuditKind::EntitiesUnresolved,
+            &title,
+            crate::model::Fields::new(),
+            resolution.constituent_ids.clone(),
         )?;
         touch_investigation(&transaction, resolution.investigation_id)?;
         transaction.commit()?;

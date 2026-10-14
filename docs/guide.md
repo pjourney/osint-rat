@@ -11,6 +11,7 @@ This is the complete guide to using os-int: the workbench, the collectors, the a
 - [Graph and Search Around](#graph-and-search-around)
 - [Timeline and geospatial](#timeline-and-geospatial)
 - [Entity resolution](#entity-resolution)
+- [Markings, audit, and team](#markings-audit-and-team)
 - [Collectors](#collectors)
 - [Ingest](#ingest)
 - [Playbooks](#playbooks)
@@ -71,7 +72,7 @@ A **finding** is a claim. It should cite the sources that support it. Confidence
 | `E` | Entity | `J` | Job |
 | `R` | Relationship | `Q` | Agent run |
 | `V` | Resolution | `X` | Proposal |
-| `C` | Event (instant or interval) | | |
+| `C` | Event (instant or interval) | `L` | Audit |
 
 `S-12` means "source number 12 in this investigation." The UUID remains the primary key.
 
@@ -176,7 +177,9 @@ Press `p` or `Ctrl+P`, then type to filter.
 | Ask Agent | Question the active agent |
 | Generate Report | Markdown or JSON |
 | Add Finding / Add Note | Analyst-authored records |
-| Open Entities, Sources, Findings, Timeline, Jobs, Tools, Artifacts, Agent History | Jump to that screen |
+| Open Entities, Sources, Findings, Timeline, Audit, Jobs, Tools, Artifacts, Agent History | Jump to that screen |
+| Set marking | Investigation TLP (`unmarked` or `TLP:*`) |
+| Add team member | `owner` / `analyst` / `reader` |
 | Nearby (country / prefix) | Timeline / Entities: list co-located entities (`l`) |
 | Object View | Typed properties, catalogued links, sources, and findings for the selected entity or page (`v`) |
 | Graph | Link-analysis canvas of entities and relationships (`g`) |
@@ -261,6 +264,18 @@ GeoJSON is a FeatureCollection of Points and envelope Polygons plus properties (
 ## Entity resolution
 
 Merge records that are the same real-world thing without destroying history. Unresolve is always available.
+
+## Markings, audit, and team
+
+Overview and the title bar show the investigation marking (`unmarked` or `TLP:CLEAR` / `GREEN` / `AMBER` / `AMBER+STRICT` / `RED`). Palette **Set marking** cycles the investigation label. Object markings are CLI-only (`os-int marking set … --entity E-1`). The **Audit** screen lists append-only governance events (merges, accepted Actions, playbook runs, exports, marking and membership changes). That log is not the investigative Timeline. Deleting a case is owner-only (it removes the audit log with the investigation). `[identity] user_id` matching is case-insensitive.
+
+```bash
+os-int marking set "Example Corp" TLP:AMBER
+os-int audit "Example Corp"
+os-int team add "Example Corp" bob --role analyst
+```
+
+A shared `--data-dir` plus roles is optional. Empty membership is single-user owner. Conflict policy is last-write-wins with audit. Threat model and handoff: [collaboration.md](collaboration.md). Configure `[identity]` so audit rows name the operator.
 
 ### Safe merge practices
 
@@ -526,7 +541,7 @@ os-int import ./example-corp
 os-int import ./example-corp --rename
 ```
 
-The directory contains `investigation.osint.json` (format `os-int-investigation`, version 3) plus a `files/` tree of the investigation's snapshots, notes artifacts, and reports. Paths inside the manifest are relative. Version-1 and version-2 archives still import (empty `data.resolutions` / `data.events`). Import refuses an archive whose investigation id already exists, unless you pass `--rename`, which assigns a new investigation id, remaps every record UUID (including resolution bags and Events), and copies the files under the new id. `--format geojson` writes a FeatureCollection instead of an archive. The JSON fields, ingest batch, and version-bump rules are in [Ontology Exchange Format](ontology-exchange.md).
+The directory contains `investigation.osint.json` (format `os-int-investigation`, version 4) plus a `files/` tree of the investigation's snapshots, notes artifacts, and reports. Paths inside the manifest are relative. Version-1–3 archives still import (empty `data.resolutions` / `data.events` / `data.audit`; unmarked). Import refuses an archive whose investigation id already exists, unless you pass `--rename`, which assigns a new investigation id, remaps every record UUID (including resolution bags, Events, and audit rows), and copies the files under the new id. `--format geojson` writes a FeatureCollection instead of an archive. The JSON fields, ingest batch, and version-bump rules are in [Ontology Exchange Format](ontology-exchange.md). Collaboration and the audit slice: [collaboration.md](collaboration.md).
 
 Without `-o`, export uses `<sanitized-name>-<uuid>` in the current directory.
 
@@ -562,6 +577,9 @@ os-int [OPTIONS] [COMMAND]
 | `geojson <name> [-o <file>]` | Write a GeoJSON FeatureCollection |
 | `cooccur <name> [--window <hours>]` | Print pairs that share an Event, source, or time window |
 | `import <path> [--rename]` | Import an export directory |
+| `marking get\|set <name> [TLP:…]` | Show or set the case (or `--entity`) marking |
+| `team list\|add\|set-role\|remove` | Case members (`owner` / `analyst` / `reader`) |
+| `audit <name> [--kind …]` | Print the append-only audit log |
 | `doctor` | Check the database, config, network, logs, and common programs |
 | `config` | Print the resolved config, data, database, and log paths |
 
@@ -618,6 +636,10 @@ max_ingest_bytes = 20971520
 
 [tools]
 # disabled = ["dig"]
+
+[identity]
+# user_id = "analyst"
+# machine_name = "workstation"
 ```
 
 | Key | Default | Meaning |
@@ -651,6 +673,8 @@ max_ingest_bytes = 20971520
 | `collectors.api` | empty | Optional URLScan / OTX wrappers. Off until enabled |
 | `tools.disabled` | empty | Built-in tool names to hide |
 | `tools.custom` | empty | Extra passive programs. See [External tools](#external-tools) |
+| `identity.user_id` | `$USER` / `$USERNAME` / `local` | Actor written on audit rows |
+| `identity.machine_name` | hostname / `unknown` | Machine written on audit rows |
 
 Agent profile keys under `[agents.<id>]` or the inline `[agent]` profile:
 
@@ -707,6 +731,7 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `?` | normal, overlays | Help |
 | `1` … `6` | normal | Overview, Pages, Sources, Findings, Entities, Timeline |
 | `7` `8` `9` `0` | normal | Agent, Jobs, Tools, Settings |
+| Palette | normal | **Open Audit**, **Set marking**, **Add team member** |
 | `o` | welcome | Open investigation |
 | `d` | welcome | Doctor |
 | `A` `y` `Enter` | proposals | Accept the selected proposal |
@@ -752,6 +777,7 @@ To report a vulnerability in os-int itself, follow [SECURITY.md](../SECURITY.md)
 - [Connectors](connectors.md) — Evidence Batch sidecars, STIX/MISP/CSV ingest, API keys
 - [Playbooks](playbooks.md) — YAML schema, bundled files, watch sets, caps
 - [Ontology Exchange Format](ontology-exchange.md) — export JSON, EvidenceBatch, and version bumps
+- [Collaboration](collaboration.md) — markings, audit, roles, shared data dir, threat model
 - [ARCHITECTURE.md](ARCHITECTURE.md) — module map and design decisions
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — development setup and pull requests
 - [SECURITY.md](../SECURITY.md) — vulnerability reports

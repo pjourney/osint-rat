@@ -519,6 +519,7 @@ mod tests {
             name: "geo".into(),
             description: String::new(),
             tags: Vec::new(),
+            marking: crate::model::Marking::Unmarked,
             created_at: now(),
             updated_at: now(),
         });
@@ -539,6 +540,7 @@ mod tests {
             name: "geo".into(),
             description: String::new(),
             tags: Vec::new(),
+            marking: crate::model::Marking::Unmarked,
             created_at: now(),
             updated_at: now(),
         });

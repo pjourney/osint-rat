@@ -31,7 +31,7 @@ It orchestrates information, tools, sources, and agents. Built-in collectors cov
 | --- | --- |
 | **New here** | [Install](#install), then [your first investigation](#your-first-investigation) |
 | **Day to day** | [How a case is organized](#how-a-case-is-organized), [keyboard](#keyboard), [command line](#command-line) |
-| **Going further** | [Vision](VISION.md) · [Phased roadmap](PHASED_ROADMAP.md) · [User guide](docs/guide.md) · [Examples](docs/examples.md) · [FAQ](docs/faq.md) · [Connectors](docs/connectors.md) · [Playbooks](docs/playbooks.md) · [Ontology exchange](docs/ontology-exchange.md) |
+| **Going further** | [Vision](VISION.md) · [Phased roadmap](PHASED_ROADMAP.md) · [User guide](docs/guide.md) · [Examples](docs/examples.md) · [FAQ](docs/faq.md) · [Connectors](docs/connectors.md) · [Playbooks](docs/playbooks.md) · [Collaboration](docs/collaboration.md) · [Ontology exchange](docs/ontology-exchange.md) |
 | **Contributing** | [Architecture](docs/ARCHITECTURE.md) · [Ontology](docs/ontology.md) · [Database tables](docs/schema.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) |
 
 ---
@@ -40,7 +40,7 @@ It orchestrates information, tools, sources, and agents. Built-in collectors cov
 
 **This is** a local-first investigation ontology for OSINT and cyber cases. You fuse public sources into objects and links, keep provenance on every record, and stay in control of every Action—including those a local AI agent proposes. Collectors are plugins. The graph and the resolution engine are the product. Delivery is gated by phase: [vision](VISION.md), [roadmap](PHASED_ROADMAP.md).
 
-**This is not** a recon CLI, a collector-count contest, or an active-probing toolkit. Built-in collectors stay passive. There is no silent AI writeback, no automatic identity merge, and no cloud requirement. The bar is an enterprise-class investigative loop (ontology, fusion, resolution, Search Around, playbooks, governed Actions)—not module-count parity. Graph, Search Around, entity resolution, ingest, and playbooks ship now. Remaining phases land only when their criteria pass.
+**This is not** a recon CLI, a collector-count contest, or an active-probing toolkit. Built-in collectors stay passive. There is no silent AI writeback, no automatic identity merge, and no cloud requirement. The bar is an enterprise-class investigative loop (ontology, fusion, resolution, Search Around, playbooks, governed Actions)—not module-count parity. Graph, Search Around, entity resolution, ingest, playbooks, timeline/geo, markings, and audit ship now. Remaining phases land only when their criteria pass.
 
 The [Boundaries](#boundaries) section is the operational rule for what built-in collectors may do. It is not relaxed by the vision.
 
@@ -58,6 +58,7 @@ The [Boundaries](#boundaries) section is the operational rule for what built-in 
 - Run a YAML playbook (`domain-infra`, `mail-policy`, `cert-estate`, `repo-surface`) or watch collect steps. Templates stay pending until you accept them.
 - Ask Claude Code, Codex, or another local agent CLI a question about the case. Proposed changes are previewed before anything is written.
 - Export a Markdown or JSON report, or a portable directory you can import on another machine.
+- Mark a case with TLP, keep an append-only audit log, and optionally share a data directory with `owner` / `analyst` / `reader` roles.
 
 > [!TIP]
 > Collection works with no AI agent installed. If `claude` or `codex` is on your `PATH`, press `a` from any investigation screen.
@@ -214,6 +215,9 @@ os-int watch --playbook domain-infra --investigation "Example Corp" --dry-run
 os-int report "Example Corp" --format markdown -o ./example.md
 os-int export "Example Corp" -o ./export
 os-int import ./export --rename             # --rename only if the id already exists
+os-int marking set "Example Corp" TLP:AMBER
+os-int team add "Example Corp" bob --role analyst
+os-int audit "Example Corp"
 os-int doctor
 os-int config
 ```
@@ -239,6 +243,10 @@ active = "claude"          # claude, codex, or a profile under [agents]
 
 [tools]
 # disabled = ["dig"]
+
+[identity]
+# user_id = "analyst"      # actor on audit rows; defaults to $USER
+# machine_name = "workstation"
 ```
 
 To point os-int at another agent:

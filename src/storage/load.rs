@@ -9,6 +9,8 @@ use super::activity::{
     insert_agent_run_record, insert_job_record, insert_proposal_record, list_agent_runs, list_jobs,
     list_proposals,
 };
+use super::audit::{insert_audit_record, list_audit};
+use super::collaboration::{ensure_importer_owner, insert_member_record, list_members};
 use super::events::{insert_event_record, list_events};
 use super::evidence::{
     insert_artifact_record, insert_finding_record, insert_source_record, insert_timeline_record,
@@ -43,21 +45,25 @@ impl Store {
             page_entities: list_page_entities(connection, investigation_id)?,
             resolutions: list_resolutions(connection, investigation_id)?,
             events: list_events(connection, investigation_id)?,
+            audit: list_audit(connection, investigation_id)?,
+            members: list_members(connection, investigation_id)?,
         })
     }
 
     /// Inserts a complete investigation with its existing IDs (used by import).
     pub fn insert_investigation_data(&mut self, data: &InvestigationData) -> Result<()> {
+        let importer = self.identity.user_id.clone();
         let transaction = self.connection_mut().transaction()?;
         let investigation = &data.investigation;
         transaction.execute(
-            "INSERT INTO investigations (id, name, description, tags, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO investigations (id, name, description, tags, marking, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 id(&investigation.id),
                 investigation.name,
                 investigation.description,
                 json(&investigation.tags),
+                investigation.marking.as_str(),
                 ts(&investigation.created_at),
                 ts(&investigation.updated_at),
             ],
@@ -157,6 +163,13 @@ impl Store {
         for event in &data.events {
             insert_event_record(&transaction, event)?;
         }
+        for entry in &data.audit {
+            insert_audit_record(&transaction, entry)?;
+        }
+        for member in &data.members {
+            insert_member_record(&transaction, member)?;
+        }
+        ensure_importer_owner(&transaction, investigation.id, &importer)?;
         transaction.commit()?;
         Ok(())
     }

@@ -152,6 +152,7 @@ impl Store {
         if input.title.trim().is_empty() {
             color_eyre::eyre::bail!("an event needs a title");
         }
+        self.assert_can_mutate(investigation_id)?;
         let inserted = insert_event(
             self.connection(),
             EventInsert {

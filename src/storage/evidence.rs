@@ -624,12 +624,14 @@ impl Store {
         if record.source.title.trim().is_empty() {
             bail!("a source needs a title");
         }
+        self.assert_can_mutate(record.investigation_id)?;
         let source = insert_source(self.connection(), &record)?;
         touch_investigation(self.connection(), record.investigation_id)?;
         Ok(source)
     }
 
     pub fn update_source_notes(&self, source_id: Uuid, notes: &str) -> Result<()> {
+        self.assert_can_mutate_record("sources", source_id)?;
         self.connection().execute(
             "UPDATE sources SET notes = ?2 WHERE id = ?1",
             params![id(&source_id), notes],
@@ -638,6 +640,7 @@ impl Store {
     }
 
     pub fn delete_source(&self, source_id: Uuid) -> Result<()> {
+        self.assert_can_mutate_record("sources", source_id)?;
         self.connection()
             .execute("DELETE FROM sources WHERE id = ?1", params![id(&source_id)])?;
         Ok(())
@@ -647,6 +650,7 @@ impl Store {
         if input.title.trim().is_empty() {
             bail!("a finding needs a statement");
         }
+        self.assert_can_mutate(input.investigation_id)?;
         let transaction = self.connection_mut().transaction()?;
         let timestamp = now();
         let finding = Finding {
@@ -673,6 +677,7 @@ impl Store {
         if finding.title.trim().is_empty() {
             bail!("a finding needs a statement");
         }
+        self.assert_can_mutate(finding.investigation_id)?;
         let transaction = self.connection_mut().transaction()?;
         transaction.execute(
             "UPDATE findings SET title = ?2, details = ?3, confidence = ?4, page_id = ?5, updated_at = ?6 WHERE id = ?1",
@@ -692,6 +697,7 @@ impl Store {
     }
 
     pub fn delete_finding(&self, finding_id: Uuid) -> Result<()> {
+        self.assert_can_mutate_record("findings", finding_id)?;
         self.connection().execute(
             "DELETE FROM findings WHERE id = ?1",
             params![id(&finding_id)],
@@ -706,6 +712,7 @@ impl Store {
         page_id: Option<Uuid>,
         input: &NewArtifact,
     ) -> Result<Uuid> {
+        self.assert_can_mutate(investigation_id)?;
         let (artifact_id, _) =
             insert_artifact(self.connection(), investigation_id, page_id, input, None)?;
         touch_investigation(self.connection(), investigation_id)?;
@@ -713,6 +720,7 @@ impl Store {
     }
 
     pub fn delete_artifact(&self, artifact_id: Uuid) -> Result<()> {
+        self.assert_can_mutate_record("artifacts", artifact_id)?;
         self.connection().execute(
             "DELETE FROM artifacts WHERE id = ?1",
             params![id(&artifact_id)],
@@ -732,6 +740,7 @@ impl Store {
         if title.trim().is_empty() {
             bail!("a timeline event needs a title");
         }
+        self.assert_can_mutate(investigation_id)?;
         let inserted = insert_timeline_event(
             self.connection(),
             TimelineInsert {
@@ -754,6 +763,7 @@ impl Store {
     }
 
     pub fn delete_timeline_event(&self, event_id: Uuid) -> Result<()> {
+        self.assert_can_mutate_record("timeline_events", event_id)?;
         self.connection().execute(
             "DELETE FROM timeline_events WHERE id = ?1",
             params![id(&event_id)],

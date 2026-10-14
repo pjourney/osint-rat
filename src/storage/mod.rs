@@ -6,6 +6,8 @@
 
 mod activity;
 mod apply;
+mod audit;
+mod collaboration;
 mod events;
 mod evidence;
 mod graph;
@@ -28,7 +30,7 @@ pub use pages::NewPage;
 pub use playbook::{PLAYBOOK_AGENT_NAME, PlaybookApplyMeta};
 use rows::{RowExt, id, json, ts};
 
-use crate::model::{CataloguedLink, Investigation, InvestigationSummary, now};
+use crate::model::{CataloguedLink, Identity, Investigation, InvestigationSummary, Marking, now};
 use graph::{backfill_link_catalog, list_link_types};
 
 const BUSY_TIMEOUT_MS: u64 = 5_000;
@@ -52,6 +54,7 @@ pub(crate) enum SeqTable {
     PlaybookRuns,
     Automations,
     Events,
+    Audit,
 }
 
 impl SeqTable {
@@ -71,6 +74,7 @@ impl SeqTable {
             SeqTable::PlaybookRuns => "playbook_runs",
             SeqTable::Automations => "automations",
             SeqTable::Events => "events",
+            SeqTable::Audit => "audit_log",
         }
     }
 }
@@ -85,6 +89,18 @@ pub(crate) fn next_seq(
         table.name()
     );
     connection.query_row(&sql, params![id(&investigation_id)], |row| row.get(0))
+}
+
+pub(crate) fn investigation_id_of(
+    connection: &Connection,
+    table: &'static str,
+    row_id: Uuid,
+) -> rusqlite::Result<Uuid> {
+    connection.query_row(
+        &format!("SELECT investigation_id FROM {table} WHERE id = ?1"),
+        params![id(&row_id)],
+        |row| row.uuid(0),
+    )
 }
 
 pub(crate) fn touch_investigation(
@@ -105,6 +121,7 @@ pub(crate) fn touch_investigation(
 pub struct Store {
     connection: Connection,
     path: Option<PathBuf>,
+    identity: Identity,
 }
 
 impl std::fmt::Debug for Store {
@@ -112,6 +129,7 @@ impl std::fmt::Debug for Store {
         formatter
             .debug_struct("Store")
             .field("path", &self.path)
+            .field("identity", &self.identity)
             .finish()
     }
 }
@@ -145,7 +163,19 @@ impl Store {
             .wrap_err("could not configure database")?;
         migrations::migrate(&mut connection).wrap_err("database migration failed")?;
         backfill_link_catalog(&connection).wrap_err("could not catalogue existing link types")?;
-        Ok(Store { connection, path })
+        Ok(Store {
+            connection,
+            path,
+            identity: Identity::from_env(),
+        })
+    }
+
+    pub fn set_identity(&mut self, identity: Identity) {
+        self.identity = identity;
+    }
+
+    pub fn identity(&self) -> &Identity {
+        &self.identity
     }
 
     pub fn path(&self) -> Option<&Path> {
@@ -191,6 +221,7 @@ impl Store {
             name: name.to_string(),
             description: description.trim().to_string(),
             tags: Vec::new(),
+            marking: Marking::Unmarked,
             created_at: timestamp,
             updated_at: timestamp,
         };
@@ -204,13 +235,14 @@ impl Store {
         investigation: &Investigation,
     ) -> Result<()> {
         connection.execute(
-            "INSERT INTO investigations (id, name, description, tags, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO investigations (id, name, description, tags, marking, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 id(&investigation.id),
                 investigation.name,
                 investigation.description,
                 json(&investigation.tags),
+                investigation.marking.as_str(),
                 ts(&investigation.created_at),
                 ts(&investigation.updated_at),
             ],
@@ -220,7 +252,7 @@ impl Store {
 
     pub fn list_investigations(&self) -> Result<Vec<InvestigationSummary>> {
         let mut statement = self.connection.prepare(
-            "SELECT i.id, i.name, i.description, i.tags, i.created_at, i.updated_at,
+            "SELECT i.id, i.name, i.description, i.tags, i.marking, i.created_at, i.updated_at,
                 (SELECT COUNT(*) FROM pages WHERE investigation_id = i.id),
                 (SELECT COUNT(*) FROM sources WHERE investigation_id = i.id),
                 (SELECT COUNT(*) FROM findings WHERE investigation_id = i.id),
@@ -230,10 +262,10 @@ impl Store {
         let rows = statement.query_map([], |row| {
             Ok(InvestigationSummary {
                 investigation: investigation_from_row(row)?,
-                page_count: row.get(6)?,
-                source_count: row.get(7)?,
-                finding_count: row.get(8)?,
-                entity_count: row.get(9)?,
+                page_count: row.get(7)?,
+                source_count: row.get(8)?,
+                finding_count: row.get(9)?,
+                entity_count: row.get(10)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -243,7 +275,7 @@ impl Store {
         Ok(self
             .connection
             .query_row(
-                "SELECT id, name, description, tags, created_at, updated_at FROM investigations WHERE id = ?1",
+                "SELECT id, name, description, tags, marking, created_at, updated_at FROM investigations WHERE id = ?1",
                 params![id(&investigation_id)],
                 investigation_from_row,
             )
@@ -254,7 +286,7 @@ impl Store {
         Ok(self
             .connection
             .query_row(
-                "SELECT id, name, description, tags, created_at, updated_at FROM investigations
+                "SELECT id, name, description, tags, marking, created_at, updated_at FROM investigations
                  WHERE name = ?1 COLLATE NOCASE",
                 params![name.trim()],
                 investigation_from_row,
@@ -277,7 +309,7 @@ impl Store {
             return Ok(None);
         }
         let mut statement = self.connection.prepare(
-            "SELECT id, name, description, tags, created_at, updated_at FROM investigations WHERE id LIKE ?1",
+            "SELECT id, name, description, tags, marking, created_at, updated_at FROM investigations WHERE id LIKE ?1",
         )?;
         let pattern = format!("{}%", query.to_ascii_lowercase());
         let matches = statement
@@ -311,6 +343,7 @@ impl Store {
         {
             bail!("an investigation named {name:?} already exists");
         }
+        self.assert_can_mutate(investigation.id)?;
         self.connection.execute(
             "UPDATE investigations SET name = ?2, description = ?3, tags = ?4, updated_at = ?5 WHERE id = ?1",
             params![
@@ -324,7 +357,38 @@ impl Store {
         Ok(())
     }
 
+    pub fn set_marking(&mut self, investigation_id: Uuid, marking: Marking) -> Result<()> {
+        self.assert_can_set_marking(investigation_id)?;
+        let current = self
+            .get_investigation(investigation_id)?
+            .ok_or_else(|| eyre!("investigation {investigation_id} does not exist"))?;
+        if current.marking == marking {
+            return Ok(());
+        }
+        let identity = self.identity.clone();
+        let transaction = self.connection_mut().transaction()?;
+        transaction.execute(
+            "UPDATE investigations SET marking = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id(&investigation_id), marking.as_str(), ts(&now())],
+        )?;
+        let mut details = crate::model::Fields::new();
+        details.push("from", current.marking.as_str());
+        details.push("to", marking.as_str());
+        audit::append_audit_on(
+            &transaction,
+            investigation_id,
+            &identity,
+            crate::model::AuditKind::MarkingChanged,
+            &format!("Marking {} → {}", current.marking.label(), marking.label()),
+            details,
+            Vec::new(),
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn delete_investigation(&self, investigation_id: Uuid) -> Result<()> {
+        self.assert_can_manage_team(investigation_id)?;
         self.connection.execute(
             "DELETE FROM investigations WHERE id = ?1",
             params![id(&investigation_id)],
@@ -358,13 +422,18 @@ impl Store {
 }
 
 fn investigation_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Investigation> {
+    let marking_key: String = row.get(4)?;
+    let marking = Marking::parse(&marking_key).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(error))
+    })?;
     Ok(Investigation {
         id: row.uuid(0)?,
         name: row.get(1)?,
         description: row.get(2)?,
         tags: row.json(3)?,
-        created_at: row.timestamp(4)?,
-        updated_at: row.timestamp(5)?,
+        marking,
+        created_at: row.timestamp(5)?,
+        updated_at: row.timestamp(6)?,
     })
 }
 

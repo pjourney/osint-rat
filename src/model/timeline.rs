@@ -167,6 +167,7 @@ mod tests {
             name: "t".into(),
             description: String::new(),
             tags: Vec::new(),
+            marking: crate::model::Marking::Unmarked,
             created_at: stamp,
             updated_at: stamp,
         });

@@ -209,6 +209,8 @@ fn form_modal(frame: &mut Frame, area: Rect, form: &crate::app::FormState, theme
         crate::app::FormKind::Playbook => "Run playbook",
         crate::app::FormKind::PlaybookPrompt => "Playbook prompt",
         crate::app::FormKind::Watch => "Watch playbook",
+        crate::app::FormKind::Marking => "Set marking",
+        crate::app::FormKind::TeamMember => "Add team member",
     };
     frame.render_widget(
         Paragraph::new(lines).block(pane_block(title, true, theme)),

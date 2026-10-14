@@ -341,6 +341,7 @@ mod tests {
             name: "cooccur".into(),
             description: String::new(),
             tags: Vec::new(),
+            marking: crate::model::Marking::Unmarked,
             created_at: now(),
             updated_at: now(),
         }

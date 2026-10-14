@@ -43,6 +43,7 @@ impl Store {
         if title.is_empty() {
             bail!("a page needs a title or a target");
         }
+        self.assert_can_mutate(new_page.investigation_id)?;
         let transaction = self.connection_mut().transaction()?;
         let timestamp = now();
         let mut page = Page {
@@ -86,6 +87,7 @@ impl Store {
             bail!("a page needs a title");
         }
         let target = normalize_page_target(&page.kind, page.target.as_deref())?;
+        self.assert_can_mutate(page.investigation_id)?;
         self.connection().execute(
             "UPDATE pages SET title = ?2, kind = ?3, target = ?4, description = ?5, notes = ?6, updated_at = ?7
              WHERE id = ?1",
@@ -104,6 +106,7 @@ impl Store {
     }
 
     pub fn update_page_notes(&self, page_id: Uuid, notes: &str) -> Result<()> {
+        self.assert_can_mutate_record("pages", page_id)?;
         self.connection().execute(
             "UPDATE pages SET notes = ?2, updated_at = ?3 WHERE id = ?1",
             params![id(&page_id), notes, ts(&now())],
@@ -112,6 +115,7 @@ impl Store {
     }
 
     pub fn delete_page(&self, page_id: Uuid) -> Result<()> {
+        self.assert_can_mutate_record("pages", page_id)?;
         self.connection()
             .execute("DELETE FROM pages WHERE id = ?1", params![id(&page_id)])?;
         Ok(())
@@ -127,6 +131,7 @@ impl Store {
         if body.trim().is_empty() {
             bail!("a note cannot be empty");
         }
+        self.assert_can_mutate(investigation_id)?;
         let timestamp = now();
         let note = Note {
             id: Uuid::new_v4(),
@@ -147,6 +152,7 @@ impl Store {
         if body.trim().is_empty() {
             bail!("a note cannot be empty");
         }
+        self.assert_can_mutate_record("notes", note_id)?;
         self.connection().execute(
             "UPDATE notes SET body = ?2, updated_at = ?3 WHERE id = ?1",
             params![id(&note_id), body.trim_end(), ts(&now())],
@@ -155,6 +161,7 @@ impl Store {
     }
 
     pub fn delete_note(&self, note_id: Uuid) -> Result<()> {
+        self.assert_can_mutate_record("notes", note_id)?;
         self.connection()
             .execute("DELETE FROM notes WHERE id = ?1", params![id(&note_id)])?;
         Ok(())

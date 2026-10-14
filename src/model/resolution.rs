@@ -624,6 +624,7 @@ mod tests {
             name: "case".into(),
             description: String::new(),
             tags: Vec::new(),
+            marking: crate::model::Marking::Unmarked,
             created_at: timestamp,
             updated_at: timestamp,
         });

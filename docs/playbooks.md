@@ -27,7 +27,7 @@ steps:
       reason: Same registrable domain or shared certificate SAN cluster
 ```
 
-`format` must be `os-int-playbook`. `format_version` newer than **1** is refused. This version is **not** the investigation archive `FORMAT_VERSION` (currently **3**).
+`format` must be `os-int-playbook`. `format_version` newer than **1** is refused. This version is **not** the investigation archive `FORMAT_VERSION` (currently **4**).
 
 | Step | What happens |
 | --- | --- |

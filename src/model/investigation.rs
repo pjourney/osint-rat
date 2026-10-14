@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::common::Timestamp;
+use super::marking::Marking;
 
 /// The top-level container. Everything in os-int belongs to exactly one investigation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -12,6 +13,9 @@ pub struct Investigation {
     pub name: String,
     pub description: String,
     pub tags: Vec<String>,
+    /// Traffic Light Protocol (or unmarked). Missing on version-1–3 archives.
+    #[serde(default)]
+    pub marking: Marking,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }

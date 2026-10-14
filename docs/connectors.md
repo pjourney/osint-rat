@@ -26,7 +26,7 @@ Sidecar stdout (and `os-int ingest --format batch`) is JSON:
 }
 ```
 
-A raw batch object (no envelope) is accepted. `format_version` newer than **1** is refused. An `os-int-investigation` archive is refused here — use `os-int import`. The investigation archive `FORMAT_VERSION` (currently **3**) is a different constant and is not used on this envelope. Optional `batch.events` (instants or intervals) is additive and does not bump this envelope.
+A raw batch object (no envelope) is accepted. `format_version` newer than **1** is refused. An `os-int-investigation` archive is refused here — use `os-int import`. The investigation archive `FORMAT_VERSION` (currently **4**) is a different constant and is not used on this envelope. Optional `batch.events` (instants or intervals) is additive and does not bump this envelope.
 
 Field meanings, `SourceKey` indexes, upsert keys, and duplicate-source behaviour: [Ontology Exchange Format](ontology-exchange.md). Re-ingest of identical collector + title + URL + content hash is idempotent.
 

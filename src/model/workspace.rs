@@ -11,6 +11,8 @@ use uuid::Uuid;
 
 use super::agent::{AgentRun, Proposal, ProposalStatus};
 use super::artifact::Artifact;
+use super::audit::AuditEntry;
+use super::collaboration::Member;
 use super::entity::{Entity, EntityKind};
 use super::event::Event;
 use super::finding::Finding;
@@ -53,6 +55,12 @@ pub struct InvestigationData {
     /// First-class Event objects (Phase 6). Empty on version-1 and version-2 archives.
     #[serde(default)]
     pub events: Vec<Event>,
+    /// Append-only governance log (Phase 7). Empty on version-1–3 archives.
+    #[serde(default)]
+    pub audit: Vec<AuditEntry>,
+    /// Case members and roles (Phase 7). Empty means single-user owner.
+    #[serde(default)]
+    pub members: Vec<Member>,
 }
 
 impl InvestigationData {
@@ -73,6 +81,8 @@ impl InvestigationData {
             page_entities: Vec::new(),
             resolutions: Vec::new(),
             events: Vec::new(),
+            audit: Vec::new(),
+            members: Vec::new(),
         }
     }
 }
@@ -357,6 +367,9 @@ fn build_index(data: &InvestigationData) -> WorkspaceIndex {
     }
     for event in &data.events {
         register(event.id, RefKind::Event, event.seq);
+    }
+    for entry in &data.audit {
+        register(entry.id, RefKind::Audit, entry.seq);
     }
     index.pages = position_map(data.pages.iter().map(|page| page.id));
     index.sources = position_map(data.sources.iter().map(|source| source.id));

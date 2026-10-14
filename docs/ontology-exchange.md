@@ -2,16 +2,16 @@
 
 Two related payloads move investigation data in and out of os-int:
 
-1. **Investigation archive** — the on-disk export written by `os-int export` (`investigation.osint.json` plus a `files/` tree). This is format `os-int-investigation`, version **`3`**.
+1. **Investigation archive** — the on-disk export written by `os-int export` (`investigation.osint.json` plus a `files/` tree). This is format `os-int-investigation`, version **`4`**.
 2. **Evidence batch** — the in-memory and connector payload collectors and ingest return. `storage::apply` writes it in one transaction. On disk / sidecar stdout it uses envelope `format` `os-int-evidence-batch`, `format_version` **1** (`ingest::BATCH_FORMAT_VERSION`). That constant is not the archive `FORMAT_VERSION`.
 
-This page describes **today’s** shapes from [`src/exchange.rs`](../src/exchange.rs), [`src/model/batch.rs`](../src/model/batch.rs), and [`docs/schema.md`](schema.md), then reserved later-version extension points (markings, audit) and the rules for bumping `FORMAT_VERSION`. Version 2 ships **resolution bags** as `data.resolutions`. Version 3 ships **first-class Event objects** as `data.events`. Playbook YAML is a **separate** envelope (`os-int-playbook`, `PLAYBOOK_FORMAT_VERSION` 1) and is not this archive. Do not emit reserved keys that are not listed as implemented.
+This page describes **today’s** shapes from [`src/exchange.rs`](../src/exchange.rs), [`src/model/batch.rs`](../src/model/batch.rs), and [`docs/schema.md`](schema.md), then reserved later-version extension points and the rules for bumping `FORMAT_VERSION`. Version 2 ships **resolution bags** as `data.resolutions`. Version 3 ships **first-class Event objects** as `data.events`. Version 4 ships **structured markings** on `investigation.marking`, **`data.audit`**, and **`data.members`**. Playbook YAML is a **separate** envelope (`os-int-playbook`, `PLAYBOOK_FORMAT_VERSION` 1) and is not this archive. Do not emit reserved keys that are not listed as implemented.
 
 The product thesis is in [VISION.md](../VISION.md). Phase gates are in [PHASED_ROADMAP.md](../PHASED_ROADMAP.md).
 
 ---
 
-## Investigation archive (format version 3)
+## Investigation archive (format version 4)
 
 `os-int export` writes a directory:
 
@@ -21,7 +21,7 @@ The product thesis is in [VISION.md](../VISION.md). Phase gates are in [PHASED_R
   files/                      # copy of the investigation directory (if it exists)
 ```
 
-`exchange::MANIFEST_NAME` is `investigation.osint.json`. `exchange::FORMAT_VERSION` is `3`. Version 1 and version 2 archives still import (`events` defaults to empty). Suggested directory name: `<sanitized-investigation-name>-<32 hex digits>` (`exchange::suggested_export_name` uses `Uuid::simple()`, no hyphens).
+`exchange::MANIFEST_NAME` is `investigation.osint.json`. `exchange::FORMAT_VERSION` is `4`. Version 1–3 archives still import (`events` / `audit` / `members` default to empty; `investigation.marking` defaults to `unmarked`). Suggested directory name: `<sanitized-investigation-name>-<32 hex digits>` (`exchange::suggested_export_name` uses `Uuid::simple()`, no hyphens).
 
 Import accepts either the directory or a path to the JSON file. When the path is a file, `files/` is taken as a sibling of that file.
 
@@ -32,7 +32,7 @@ Import accepts either the directory or a path to the JSON file. When the path is
 | Field | Type | Today |
 | --- | --- | --- |
 | `format` | string | Always `os-int-investigation`. |
-| `format_version` | `u32` | `3` (`exchange::FORMAT_VERSION`). Readers accept any version ≤ 3. |
+| `format_version` | `u32` | `4` (`exchange::FORMAT_VERSION`). Readers accept any version ≤ 4. |
 | `exported_at` | RFC 3339 timestamp | Set at export time (`model::now()`, millisecond UTC). |
 | `data` | object | `InvestigationData` — every record of one investigation. |
 
@@ -44,7 +44,7 @@ Paths inside `data` stay **relative** to the investigation directory. Export doe
 
 | Field | SQLite / notes |
 | --- | --- |
-| `investigation` | One case: `id`, `name`, `description`, `tags` (string array), `created_at`, `updated_at`. `name` is unique case-insensitively in a store. |
+| `investigation` | One case: `id`, `name`, `description`, `tags` (string array), `marking` (`unmarked` / `tlp:clear` / `tlp:green` / `tlp:amber` / `tlp:amber+strict` / `tlp:red`; default `unmarked` on older archives), `created_at`, `updated_at`. `name` is unique case-insensitively in a store. |
 | `pages` | Subjects: `id`, `investigation_id`, `seq`, `title`, `kind`, `target`, `description`, `notes`, `entity_id`, timestamps. |
 | `sources` | Observations. `snapshot_path` is relative. `content_hash` is SHA-256 hex of the raw snapshot. |
 | `findings` | Claims. `source_ids` is the flattened `finding_sources` join. Empty `source_ids` is a hypothesis. |
@@ -59,6 +59,8 @@ Paths inside `data` stay **relative** to the investigation directory. Export doe
 | `proposals` | Structured `AgentAction` values with `pending` / `accepted` / `rejected` / `invalid`. Optional `decided_by` (local actor) is present after accept/reject on current binaries; missing on version-1 archives. |
 | `resolutions` | Resolution bags (Phase 3). Empty / omitted on version-1 archives (`#[serde(default)]`). |
 | `page_entities` | `{ "page_id", "entity_id" }` links (`page_entities` table). A page’s `entity_id` is the primary subject and may be omitted from this list. |
+| `audit` | Append-only governance log (Phase 7). Empty / omitted on version-1–3 archives (`#[serde(default)]`). |
+| `members` | Case members and roles. Empty means single-user owner. Empty / omitted on version-1–3 archives. |
 
 **Not exported:** `ui_state` (last view, last page, agent thread), `playbook_runs`, and `automations`. Those are local workbench chrome, not case evidence. Playbook YAML lives under [`playbooks/`](../playbooks/) or a path you pass to `os-int playbook run`; it is not packed into the archive.
 
@@ -128,13 +130,21 @@ Each Event:
 
 The Timeline screen overlays `timeline` log rows and `events`. When both exist for the same kind/time/title, the Event wins so intervals stay visible. Observation-hash changes and diagnostic flips still write a log row and also promote an Event candidate (analyst-approved if an agent suggested a finding).
 
-### Import behavior (v1, v2, and v3)
+### `data.audit` and `data.members` (format version 4)
+
+Each audit row: `id`, `investigation_id`, `seq` (short ref `L-n`), `kind` (`entities_merged`, `entities_unresolved`, `action_accepted`, `playbook_run`, `export`, `marking_changed`, `member_added`, `member_role_changed`, `member_removed`), `actor`, `machine`, `occurred_at`, `summary`, `details` (field bag), `target_ids` (related UUIDs). `--rename` remaps `id`, `investigation_id`, and `target_ids`.
+
+Each member: `investigation_id`, `user_id`, `role` (`owner` / `analyst` / `reader`), `added_by`, `added_at`. `--rename` rewrites `investigation_id` only (`user_id` is not a record UUID).
+
+Object-level markings are optional keys on `entities.fields` (`marking`). They do not have their own collection.
+
+### Import behavior (v1, v2, v3, and v4)
 
 From `exchange::import_investigation`:
 
 1. Parse the manifest. If `format_version` **>** `FORMAT_VERSION`, reject. Older or equal versions are accepted.
 2. Reject artifact `path` or source `snapshot_path` values that are not safe relative paths (`paths::is_safe_relative_path`).
-3. If an investigation with the same `id` exists: reject unless `--rename`. `--rename` assigns a new investigation UUID, suffixes the name with ` (imported)`, remaps every record UUID (pages, sources, entities, relationships, resolutions, events, and all internal references), and rewrites `investigation_id` on child rows.
+3. If an investigation with the same `id` exists: reject unless `--rename`. `--rename` assigns a new investigation UUID, suffixes the name with ` (imported)`, remaps every record UUID (pages, sources, entities, relationships, resolutions, events, audit entries, and all internal references), and rewrites `investigation_id` on child rows and members.
 4. If the name already exists (case-insensitive), append ` (2)`, ` (3)`, … or a UUID suffix.
 5. Insert `InvestigationData`, then copy `files/` into the new investigation directory.
 
@@ -156,7 +166,7 @@ This is the ingest shape connectors emit as JSON. It is **not** `investigation.o
 { "format": "os-int-evidence-batch", "format_version": 1, "batch": { … } }
 ```
 
-`ingest::BATCH_FORMAT_VERSION` is **1**. A raw batch object (no envelope) is accepted. Versions greater than 1 are refused. An `os-int-investigation` archive is refused here (`os-int import` is the archive path). Do not overload the archive `FORMAT_VERSION` (currently **3**). Protocol, caps, and examples: [connectors.md](connectors.md). Optional `events` on a batch is additive (`#[serde(default)]`) and does not bump the batch envelope.
+`ingest::BATCH_FORMAT_VERSION` is **1**. A raw batch object (no envelope) is accepted. Versions greater than 1 are refused. An `os-int-investigation` archive is refused here (`os-int import` is the archive path). Do not overload the archive `FORMAT_VERSION` (currently **4**). Protocol, caps, and examples: [connectors.md](connectors.md). Optional `events` on a batch is additive (`#[serde(default)]`) and does not bump the batch envelope.
 
 | Field | Role |
 | --- | --- |
@@ -187,8 +197,8 @@ v1 already stores a cited graph. Phase 1 registers object types, link verbs, and
 | **Event** | 6 | `data.events` (format version 3) plus overlay of `data.timeline` | Interval or instant Event objects; links from entities to events; co-occurrence. Log rows remain. |
 | **Action** | 1, 5 | `data.proposals` + `AgentAction` | Catalog of action kinds including `RUN_PLAYBOOK` and `ASSERT_FINDING_TEMPLATE`. Optional `decided_by` plus existing `decided_at`. Automations propose; they do not silently write. |
 | **Resolution bag** | 3 | `data.resolutions` (format version 2) | Canonical object + constituents; property writes tracked for unresolve. Never auto-merge. |
-| **Markings** | 7 | `investigation.tags` (free strings) | TLP (or confidentiality labels) on the investigation and optionally on objects. Visible in the UI and the manifest. |
-| **Audit** | 7 | *(none; jobs/proposals are not an audit log)* | Append-only merge / accept / playbook / export / marking events. |
+| **Markings** | 7 | `investigation.marking` (format version 4); optional `entities.fields.marking` | TLP on the investigation and optionally on objects. Visible in the UI and the manifest. |
+| **Audit** | 7 | `data.audit` (format version 4) | Append-only merge / accept / playbook / export / marking / membership events. |
 
 Ingest (Phase 4) still lands through `EvidenceBatch` → `storage::apply`. External connectors should emit the batch JSON, not a hand-built SQLite file.
 
@@ -199,8 +209,9 @@ Reserved **`data` keys** for a version-2 archive (do not write them at `format_v
 - `events` — **shipped in version 3** (Phase 6)
 - `actions` — if Actions outgrow `proposals`
 - `resolutions` — **shipped in version 2** (Phase 3)
-- `markings` — structured markings (Phase 7)
-- `audit` — audit slice (Phase 7)
+- `markings` — **shipped in version 4** as `investigation.marking` (not a parallel collection)
+- `audit` — **shipped in version 4** as `data.audit`
+- `members` — **shipped in version 4** as `data.members`
 
 Prefer **evolving the existing arrays** (add optional fields with `#[serde(default)]`) over forking new collections. Add a new collection only when the old row cannot carry the semantics (resolution bags, audit).
 
@@ -210,15 +221,15 @@ Reserved **`EvidenceBatch` keys** for a future connector protocol: `objects`, `l
 
 ## `FORMAT_VERSION` bump rules
 
-`FORMAT_VERSION` lives in `src/exchange.rs` and is **`3`**. Phase 3 added `resolutions` (1 → 2). Phase 6 added `events` (2 → 3) so a down-level binary refuses the file instead of dropping Events. Version-1 and version-2 archives still import (`resolutions` / `events` default to empty). Import still rejects any archive whose `format_version` is **greater** than the running binary.
+`FORMAT_VERSION` lives in `src/exchange.rs` and is **`4`**. Phase 3 added `resolutions` (1 → 2). Phase 6 added `events` (2 → 3). Phase 7 added markings, `data.audit`, and `data.members` (3 → 4) so a down-level binary refuses the file instead of dropping the governance slice. Version-1–3 archives still import (`resolutions` / `events` / `audit` / `members` default to empty; `marking` defaults to unmarked). Import still rejects any archive whose `format_version` is **greater** than the running binary.
 
-Checked-in proof: `tests/fixtures/archives/v1-minimal/investigation.osint.json` (no `decided_by`, no `resolutions`, no `events`) plus `export_then_import_round_trips`, `export_import_preserves_resolution_bags`, and `export_import_preserves_events_and_rename_remaps_them`. `--rename` remaps every record UUID, including `events.id` and `events.entity_ids`.
+Checked-in proof: `tests/fixtures/archives/v1-minimal/investigation.osint.json` (no `decided_by`, no `resolutions`, no `events`, no `audit`) plus `export_then_import_round_trips`, `export_import_preserves_resolution_bags`, `export_import_preserves_events_and_rename_remaps_them`, and `export_import_preserves_marking_and_audit_and_rename_remaps_them`. `--rename` remaps every record UUID, including `events.id`, `audit.id`, and `audit.target_ids`.
 
 Cross-phase rule (roadmap): a format bump **and** import compatibility notes land in the same PR as the behavior change.
 
 ### Must bump
 
-Bump `FORMAT_VERSION` (1 → 2 → 3, never reuse a number) when any of the following is true:
+Bump `FORMAT_VERSION` (1 → 2 → 3 → 4, never reuse a number) when any of the following is true:
 
 1. A required field is added, removed, renamed, or retyped on the manifest or on `InvestigationData` (or a nested record that has no default).
 2. A new first-class collection must survive export → import (resolution bags, audit, first-class Event objects, structured markings). Silent drop by a v1 reader is not acceptable — the higher version makes old binaries refuse the file instead of losing data.
@@ -261,5 +272,6 @@ In the same PR:
 - [Architecture — storage layout](ARCHITECTURE.md#storage-layout)
 - [Examples — export and import](examples.md#write-a-report-and-hand-the-case-over)
 - [User guide — reports, export, and import](guide.md#reports-export-and-import)
+- [Collaboration](collaboration.md)
 - [Vision](../VISION.md)
 - [Phased roadmap](../PHASED_ROADMAP.md)

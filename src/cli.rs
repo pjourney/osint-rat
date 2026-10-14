@@ -12,8 +12,8 @@ use crate::ingest::{
 };
 use crate::jobs::JobContext;
 use crate::model::{
-    JobRecord, JobStatus, MAX_CONCURRENT_PLAYBOOK_JOBS, PageKind, Target, TargetKind, Workspace,
-    now,
+    AuditKind, JobRecord, JobStatus, MAX_CONCURRENT_PLAYBOOK_JOBS, Marking, PageKind, Role, Target,
+    TargetKind, Workspace, now,
 };
 use crate::paths::AppPaths;
 use crate::playbook::{
@@ -219,6 +219,66 @@ pub enum Command {
     /// Also prints the database path and the log directory after flags, environment variables,
     /// and `storage.data_dir` have been applied.
     Config,
+    /// Show or set the Traffic Light Protocol marking on a case (or an object).
+    Marking {
+        #[command(subcommand)]
+        command: MarkingCommand,
+    },
+    /// List, add, or change case members (`owner` / `analyst` / `reader`).
+    Team {
+        #[command(subcommand)]
+        command: TeamCommand,
+    },
+    /// Print the append-only audit log for an investigation.
+    Audit {
+        /// Investigation name, UUID, or unique UUID prefix.
+        investigation: String,
+        /// Optional kind filter (`merge`, `accept`, `export`, `playbook`, `marking`).
+        #[arg(long)]
+        kind: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MarkingCommand {
+    /// Print the investigation marking (and object marking when `--entity` is set).
+    Get {
+        investigation: String,
+        #[arg(long)]
+        entity: Option<String>,
+    },
+    /// Set TLP:CLEAR / GREEN / AMBER / AMBER+STRICT / RED, or unmarked.
+    Set {
+        investigation: String,
+        marking: String,
+        #[arg(long)]
+        entity: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TeamCommand {
+    /// List members. Empty list means single-user owner.
+    List { investigation: String },
+    /// Add a member. The first add seeds the local identity as owner.
+    Add {
+        investigation: String,
+        user_id: String,
+        #[arg(long)]
+        role: String,
+    },
+    /// Change a member's role.
+    SetRole {
+        investigation: String,
+        user_id: String,
+        #[arg(long)]
+        role: String,
+    },
+    /// Remove a member. The last owner cannot be removed.
+    Remove {
+        investigation: String,
+        user_id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -265,7 +325,11 @@ impl Runtime {
         paths.ensure_dirs()?;
         let log =
             crate::logging::init(&paths, cli.debug).wrap_err("could not initialize logging")?;
-        let store = Store::open(&paths.database())?;
+        let mut store = Store::open(&paths.database())?;
+        store.set_identity(crate::model::Identity::resolve(
+            &loaded.config.identity.user_id,
+            &loaded.config.identity.machine_name,
+        ));
         if loaded.created {
             tracing::info!(path = %paths.config_file.display(), "wrote default config");
         }
@@ -400,6 +464,12 @@ pub async fn run_with(cli: Cli) -> Result<()> {
         }
         Some(Command::Doctor) => doctor(&cli),
         Some(Command::Config) => show_config(&cli),
+        Some(Command::Marking { ref command }) => marking_command(&cli, command),
+        Some(Command::Team { ref command }) => team_command(&cli, command),
+        Some(Command::Audit {
+            ref investigation,
+            ref kind,
+        }) => audit_command(&cli, investigation, kind.as_deref()),
     }
 }
 
@@ -423,15 +493,16 @@ fn list(cli: &Cli) -> Result<()> {
         return Ok(());
     }
     println!(
-        "{:<28} {:<8} {:>5} {:>7} {:>8} {:>8}",
-        "NAME", "ID", "PAGES", "SOURCES", "FINDINGS", "ENTITIES"
+        "{:<28} {:<8} {:<16} {:>5} {:>7} {:>8} {:>8}",
+        "NAME", "ID", "MARKING", "PAGES", "SOURCES", "FINDINGS", "ENTITIES"
     );
     for summary in investigations {
         let id = summary.investigation.id.simple().to_string();
         println!(
-            "{:<28} {:<8} {:>5} {:>7} {:>8} {:>8}",
+            "{:<28} {:<8} {:<16} {:>5} {:>7} {:>8} {:>8}",
             truncate(&summary.investigation.name, 28),
             &id[..8.min(id.len())],
+            summary.investigation.marking.label(),
             summary.page_count,
             summary.source_count,
             summary.finding_count,
@@ -452,7 +523,7 @@ fn export(cli: &Cli, query: &str, output: Option<&std::path::Path>, format: &str
 }
 
 fn export_archive(cli: &Cli, query: &str, output: Option<&std::path::Path>) -> Result<()> {
-    let runtime = Runtime::load(cli)?;
+    let mut runtime = Runtime::load(cli)?;
     let investigation = runtime.store.require_investigation(query)?;
     let data = runtime.store.load_investigation(investigation.id)?;
     let destination = match output {
@@ -461,7 +532,7 @@ fn export_archive(cli: &Cli, query: &str, output: Option<&std::path::Path>) -> R
     };
     let files = runtime.paths.investigation_dir(investigation.id);
     let manifest = crate::exchange::export_investigation(
-        &runtime.store,
+        &mut runtime.store,
         investigation.id,
         &files,
         &destination,
@@ -1113,6 +1184,162 @@ fn existing_or_create_page(
         PageKind::from_target_kind(seed.kind()),
         Some(&seed.value()),
     ))
+}
+
+fn marking_command(cli: &Cli, command: &MarkingCommand) -> Result<()> {
+    match command {
+        MarkingCommand::Get {
+            investigation,
+            entity,
+        } => {
+            let runtime = Runtime::load(cli)?;
+            let investigation = runtime.store.require_investigation(investigation)?;
+            if let Some(query) = entity {
+                let data = runtime.store.load_investigation(investigation.id)?;
+                let workspace = Workspace::new(data);
+                let entity_id = resolve_entity_query(&workspace, query)?;
+                let entity = workspace
+                    .entity(entity_id)
+                    .ok_or_else(|| user_err(format!("unknown entity {query}")))?;
+                println!(
+                    "{} {}  {}",
+                    entity.short_ref(),
+                    entity.display_name(),
+                    entity.marking().label()
+                );
+            } else {
+                println!("{}  {}", investigation.name, investigation.marking.label());
+            }
+            Ok(())
+        }
+        MarkingCommand::Set {
+            investigation,
+            marking,
+            entity,
+        } => {
+            let mut runtime = Runtime::load(cli)?;
+            let investigation = runtime.store.require_investigation(investigation)?;
+            let parsed = Marking::parse(marking).map_err(user_err)?;
+            if let Some(query) = entity {
+                let data = runtime.store.load_investigation(investigation.id)?;
+                let workspace = Workspace::new(data);
+                let entity_id = resolve_entity_query(&workspace, query)?;
+                runtime.store.set_entity_marking(entity_id, parsed)?;
+                println!("Set object marking to {}", parsed.label());
+            } else {
+                runtime.store.set_marking(investigation.id, parsed)?;
+                println!("Set {} to {}", investigation.name, parsed.label());
+            }
+            Ok(())
+        }
+    }
+}
+
+fn team_command(cli: &Cli, command: &TeamCommand) -> Result<()> {
+    match command {
+        TeamCommand::List { investigation } => {
+            let runtime = Runtime::load(cli)?;
+            let investigation = runtime.store.require_investigation(investigation)?;
+            let members = runtime.store.list_members(investigation.id)?;
+            let role = runtime.store.role_for(investigation.id)?;
+            println!(
+                "{}  local identity {} ({})",
+                investigation.name,
+                runtime.store.identity().user_id,
+                role.as_str()
+            );
+            if members.is_empty() {
+                println!("(no members; single-user owner)");
+                return Ok(());
+            }
+            for member in members {
+                println!(
+                    "  {:<16}  {:<8}  added by {}",
+                    member.user_id,
+                    member.role.as_str(),
+                    member.added_by
+                );
+            }
+            Ok(())
+        }
+        TeamCommand::Add {
+            investigation,
+            user_id,
+            role,
+        } => {
+            let mut runtime = Runtime::load(cli)?;
+            let investigation = runtime.store.require_investigation(investigation)?;
+            let role = Role::parse(role).map_err(user_err)?;
+            runtime.store.add_member(investigation.id, user_id, role)?;
+            println!("Added {user_id} as {}", role.as_str());
+            Ok(())
+        }
+        TeamCommand::SetRole {
+            investigation,
+            user_id,
+            role,
+        } => {
+            let mut runtime = Runtime::load(cli)?;
+            let investigation = runtime.store.require_investigation(investigation)?;
+            let role = Role::parse(role).map_err(user_err)?;
+            runtime
+                .store
+                .set_member_role(investigation.id, user_id, role)?;
+            println!("Set {user_id} to {}", role.as_str());
+            Ok(())
+        }
+        TeamCommand::Remove {
+            investigation,
+            user_id,
+        } => {
+            let mut runtime = Runtime::load(cli)?;
+            let investigation = runtime.store.require_investigation(investigation)?;
+            runtime.store.remove_member(investigation.id, user_id)?;
+            println!("Removed {user_id}");
+            Ok(())
+        }
+    }
+}
+
+fn audit_command(cli: &Cli, query: &str, kind: Option<&str>) -> Result<()> {
+    let runtime = Runtime::load(cli)?;
+    let investigation = runtime.store.require_investigation(query)?;
+    let filter = kind.map(AuditKind::parse).transpose().map_err(user_err)?;
+    let entries = runtime.store.list_audit(investigation.id)?;
+    if entries.is_empty() {
+        println!("No audit events.");
+        return Ok(());
+    }
+    for entry in entries {
+        if let Some(kind) = filter
+            && entry.kind != kind
+        {
+            continue;
+        }
+        println!(
+            "{}  {}  {}@{}  {}",
+            entry.short_ref(),
+            entry.occurred_at.to_rfc3339(),
+            entry.actor,
+            entry.machine,
+            entry.summary
+        );
+    }
+    Ok(())
+}
+
+fn resolve_entity_query(workspace: &Workspace, query: &str) -> Result<uuid::Uuid> {
+    if let Ok(uuid) = uuid::Uuid::parse_str(query) {
+        return Ok(uuid);
+    }
+    if let Ok(reference) = query.parse::<crate::model::ShortRef>()
+        && let Some(id) = workspace.resolve_ref(reference)
+    {
+        return Ok(id);
+    }
+    Err(user_err(format!(
+        "unknown entity {query:?}; use a UUID or short ref such as E-1"
+    )))
 }
 
 fn doctor(cli: &Cli) -> Result<()> {
