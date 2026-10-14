@@ -191,9 +191,19 @@ impl EvidenceBatch {
     }
 
     /// Adds a field to an entity already in the batch.
+    ///
+    /// Appends a new pair even when `field` already exists (TXT verification tags, and similar).
+    /// Use [`Self::set_field`] when a later write should replace the same key.
     pub fn annotate(&mut self, key: &EntityKey, field: &str, value: impl Into<String>) {
         if let Some(entity) = self.entities.iter_mut().find(|entity| &entity.key == key) {
             entity.fields.push(field, value);
+        }
+    }
+
+    /// Inserts or replaces a field on an entity already in the batch.
+    pub fn set_field(&mut self, key: &EntityKey, field: &str, value: impl Into<String>) {
+        if let Some(entity) = self.entities.iter_mut().find(|entity| &entity.key == key) {
+            entity.fields.set(field, value);
         }
     }
 

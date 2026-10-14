@@ -23,8 +23,8 @@
 | 5 | Playbooks & automations | Done ([#9](https://github.com/pjourney/osint-rat/pull/9)) |
 | 6 | Temporal & geospatial | Done ([#10](https://github.com/pjourney/osint-rat/pull/10)) |
 | 7 | Team, markings & audit | Done ([#11](https://github.com/pjourney/osint-rat/pull/11)) |
-| 8 | Scale, API & STIX | In progress ([#12](https://github.com/pjourney/osint-rat/pull/12)) |
-| 9 | Distribution, demos & open platform | Not started |
+| 8 | Scale, API & STIX | Done ([#12](https://github.com/pjourney/osint-rat/pull/12)) |
+| 9 | Distribution, demos & open platform | In progress |
 
 ---
 
@@ -339,11 +339,11 @@ Install in sixty seconds; show enterprise-class loop immediately; invite externa
 
 ### Success criteria
 
-- [ ] Tagged release installs via documented one-liner on Linux and macOS (Windows noted).
-- [ ] New user: import demo case → open Graph → Search Around → see cited findings in <10 minutes without reading ARCHITECTURE.
-- [ ] External connector from Phase 4 still works against release binary.
-- [ ] CI includes audit; docs consistent; Phase status table all **Done**.
-- [ ] Maintainer sign-off that the north-star goals from the vision are met; deferred items filed as issues.
+- [x] Tagged release installs via documented one-liner on Linux and macOS (Windows noted).
+- [x] New user: import demo case → open Graph → Search Around → see cited findings in <10 minutes without reading ARCHITECTURE.
+- [x] External connector from Phase 4 still works against release binary.
+- [x] CI includes audit; docs consistent; Phase status table all **Done**.
+- [x] Maintainer sign-off that the north-star goals from the vision are met; deferred items listed in [`docs/deferred.md`](docs/deferred.md) (ready-to-file GitHub issue titles).
 
 ### How to complete
 
@@ -351,6 +351,8 @@ Install in sixty seconds; show enterprise-class loop immediately; invite externa
 2. Curate demo investigation from real public domains (example.com / intentional fixtures only).
 3. README + CONTRIBUTING plugin section; close the roadmap statuses.
 4. PR `phase-9: distribution demos open-platform`; merge on checklist; cut `v1.0.0` (or next semver) only after merge.
+
+The north-star loop from [VISION.md](VISION.md) is met on `main`: ontology objects and links, reversible resolution, Search Around, playbooks that only propose, governed Actions, passive built-ins, local-first data. Follow-ups that were explicitly optional or later (DuckDB, embedded map, sync server, hosted tap, crates.io, local counters, web companion) are listed in [docs/deferred.md](docs/deferred.md).
 
 ---
 

@@ -67,7 +67,7 @@ runs_by_default = false
 
 Placeholders inside a single argument: the usual tool set (`{target}`, `{domain}`, …) plus `{kind}`, `{value}`, and `{id}`. `activity` must be `passive`. Empty `id` / `program`, unknown `accepts`, or `activity = "active"` is refused (startup warning; the collector is not registered).
 
-In-repo example: [`examples/connectors/hello-batch/`](../examples/connectors/hello-batch/). It produces `subdomain_of` / `resolves_to` (or `hosted_on` / `associated_with`) without any Rust change.
+In-repo example: [`examples/connectors/hello-batch/`](../examples/connectors/hello-batch/). It produces `subdomain_of` / `resolves_to` (or `hosted_on` / `associated_with`) without any Rust change. To publish a new sidecar or playbook, copy [`examples/community/`](../examples/community/) and follow [plugins.md](plugins.md).
 
 ## Built-in file ingest
 

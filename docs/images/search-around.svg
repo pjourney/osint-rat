@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="420" viewBox="0 0 920 420" role="img" aria-labelledby="title desc">
+  <title id="title">os-int Search Around</title>
+  <desc id="desc">Terminal sketch of Search Around two hops from example.com.</desc>
+  <rect width="920" height="420" rx="8" fill="#111827"/>
+  <rect x="12" y="12" width="896" height="396" rx="6" fill="#0b1220" stroke="#334155"/>
+  <text x="28" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" fill="#93c5fd">os-int · Example Corp · Search Around · seed E-1 · hops 2</text>
+  <text x="28" y="64" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#64748b">s from selection   + /  hops   [ ] facet   f apply</text>
+  <text x="28" y="100" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#86efac">hop 0</text>
+  <text x="140" y="100" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#e2e8f0">E-1  Domain  example.com</text>
+  <text x="28" y="132" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#86efac">hop 1</text>
+  <text x="140" y="132" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#e2e8f0">IPs 192.0.2.1  192.0.2.10  2001:db8::1</text>
+  <text x="140" y="154" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#e2e8f0">www  mail  ftp  mx  blog   NS a.iana-servers.net</text>
+  <text x="140" y="176" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#e2e8f0">certificate   registrar   URL https://example.com/</text>
+  <text x="28" y="208" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#86efac">hop 2</text>
+  <text x="140" y="208" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#e2e8f0">AS64496   Example Organization   mx/ftp addresses</text>
+  <text x="28" y="252" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#cbd5e1">Cited findings stay on the seed: F-1 F-2 F-3 each list S-n.</text>
+  <text x="28" y="280" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#cbd5e1">Playbook domain-infra is T-2 on Timeline (kind playbook_run).</text>
+  <text x="28" y="320" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#64748b">CLI: os-int search-around "Example Corp" E-1 --hops 2</text>
+  <text x="28" y="360" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#64748b">Caps 200 nodes / 400 edges. Above that, confirm. No auto-merge.</text>
+</svg>

@@ -30,6 +30,7 @@
 //! | [`query`] | Scriptable list/get/search-around/resolve helpers for CLI and API. |
 //! | [`report`] | Markdown and JSON reports. |
 //! | [`exchange`] | Versioned import and export. |
+//! | [`demo`] | Bundled Example Corp investigation archive. |
 //! | [`ingest`] | STIX, MISP, CSV/JSON, and Evidence Batch file ingest. |
 //! | [`geo`] | Local geo lookups (JSON or MMDB). No network. Missing files degrade. |
 //! | [`playbook`] | YAML playbooks and watch-set automations. Collectors still return batches. |
@@ -45,6 +46,7 @@ pub mod app;
 pub mod cli;
 pub mod collectors;
 pub mod config;
+pub mod demo;
 pub mod doctor;
 pub mod exchange;
 pub mod exec;

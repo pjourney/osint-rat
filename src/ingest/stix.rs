@@ -213,9 +213,9 @@ fn ingest_malware(
     let key = report
         .batch
         .entity(EntityKind::Unknown, &name, Some(source));
-    report.batch.annotate(&key, "stix_type", "malware");
+    report.batch.set_field(&key, "stix_type", "malware");
     if let Some(description) = string(object, "description") {
-        report.batch.annotate(&key, "description", description);
+        report.batch.set_field(&key, "description", description);
     }
     report.batch.label(&key, name.clone());
     report.batch.add_external_finding(
@@ -366,9 +366,19 @@ fn apply_imported_marking(
     if marking == Marking::Unmarked {
         return;
     }
-    report
+    let existing = report
         .batch
-        .annotate(&key, OBJECT_MARKING_FIELD, marking.as_str());
+        .entities
+        .iter()
+        .find(|entity| entity.key == key)
+        .and_then(|entity| entity.fields.get(OBJECT_MARKING_FIELD))
+        .and_then(|value| Marking::parse(value).ok())
+        .unwrap_or(Marking::Unmarked);
+    report.batch.set_field(
+        &key,
+        OBJECT_MARKING_FIELD,
+        existing.restrict(marking).as_str(),
+    );
 }
 
 fn ingest_top_level_sco(
@@ -734,5 +744,37 @@ mod tests {
         assert!(parse_stix("{", "x").is_err());
         assert!(parse_stix("[]", "x").is_err());
         assert!(parse_stix(r#"{"type":"bundle","objects":[]}"#, "x").is_err());
+    }
+
+    #[test]
+    fn imported_marking_replaces_rather_than_appending() {
+        let input = r#"{
+          "type": "bundle",
+          "spec_version": "2.1",
+          "objects": [
+            {"type": "marking-definition", "id": "marking-definition--5e57c739-391a-4eb3-b6be-7d15ca92d5ed",
+             "definition_type": "tlp", "definition": {"tlp": "red"}},
+            {"type": "marking-definition", "id": "marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da",
+             "definition_type": "tlp", "definition": {"tlp": "green"}},
+            {"type": "domain-name", "id": "domain-name--1", "value": "dup.example",
+             "object_marking_refs": ["marking-definition--34098fce-860f-48ae-8e50-ebd3cc5e41da"]},
+            {"type": "domain-name", "id": "domain-name--2", "value": "dup.example",
+             "object_marking_refs": ["marking-definition--5e57c739-391a-4eb3-b6be-7d15ca92d5ed"]}
+          ]
+        }"#;
+        let actual = parse_stix(input, "dup.json").expect("parse");
+        let entity = actual
+            .batch
+            .entities
+            .iter()
+            .find(|entity| entity.key.value == "dup.example")
+            .expect("entity");
+        let markings: Vec<_> = entity
+            .fields
+            .iter()
+            .filter(|(key, _)| *key == OBJECT_MARKING_FIELD)
+            .collect();
+        assert_eq!(markings.len(), 1, "marking must be set, not pushed twice");
+        assert_eq!(markings[0].1, Marking::TlpRed.as_str());
     }
 }

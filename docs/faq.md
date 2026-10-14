@@ -2,6 +2,10 @@
 
 Short answers to the questions that come up while installing and using os-int. The [user guide](guide.md) has the full behavior, and [examples](examples.md) has copy-paste sessions.
 
+## How do I install without compiling Rust?
+
+On Linux and macOS, run the [install one-liner](install.md) after a tagged GitHub Release, or `cargo binstall os-int`. Windows uses the release zip plus its `.sha256` file. From source: `cargo install --git https://github.com/pjourney/osint-rat` (Rust 1.88+). Then import [`examples/demo-case/`](../examples/demo-case/) before collecting anything.
+
 ## What is a page, and what is an entity?
 
 A **page** is a subject you chose to work on: "look at example.com". An **entity** is a normalized identifier that showed up, including ones you did not create a page for (a nameserver, an address in a certificate, an email in a page). Several pages can mention the same entity. Collectors link them with relationships such as `resolves_to`.

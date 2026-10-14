@@ -11,6 +11,17 @@ alias os-int-learn='os-int --data-dir /tmp/os-int-learn --config /tmp/os-int-lea
 
 Drop the alias when you want the platform data directory again. `os-int-learn config` prints the paths this alias will use.
 
+## Import the demo case (no network)
+
+The bundled archive is a documentation-range fixture with Graph, a resolved identity, playbook output, and cited findings. Walkthrough: [`examples/demo-case/README.md`](../examples/demo-case/README.md).
+
+```bash
+os-int-learn import ../examples/demo-case
+os-int-learn open "Example Corp"
+```
+
+Inside the workbench: `g` Graph, `s` Search Around two hops, `Enter` Object View, `4` cited findings, `6` playbook timeline. From the clone root the import path is `examples/demo-case`.
+
 ## Collect a domain, then read it
 
 `collect` creates the investigation and the page, runs the default collectors, and returns to the shell. For a domain those collectors are DNS, RDAP, HTTP, TLS, certificate transparency, and subdomain expansion.

@@ -1,0 +1,1171 @@
+{
+  "format": "os-int-investigation",
+  "format_version": 4,
+  "exported_at": "2024-06-15T12:00:00.000+00:00",
+  "data": {
+    "investigation": {
+      "id": "01234567-89ab-4cde-8000-000000000001",
+      "name": "Example Corp",
+      "description": "Documentation-range fixture: example.com after a domain-infra playbook. Import this first to see Graph, a resolved identity, and cited findings.",
+      "tags": [
+        "demo",
+        "fixture"
+      ],
+      "marking": "tlp:clear",
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-06-15T12:00:00Z"
+    },
+    "pages": [
+      {
+        "id": "01234567-89ab-4cde-8000-000000000002",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 1,
+        "title": "example.com",
+        "kind": "domain",
+        "target": "example.com",
+        "description": "Public documentation domain (RFC 2606).",
+        "notes": "Seed page for the bundled demo. Collectors are not required; the graph is already cited.",
+        "entity_id": "01234567-89ab-4cde-8000-00000000001e",
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      }
+    ],
+    "sources": [
+      {
+        "id": "01234567-89ab-4cde-8000-00000000000a",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 1,
+        "kind": "dns",
+        "title": "DNS records for example.com",
+        "url": null,
+        "retrieved_at": "2024-06-15T12:00:00Z",
+        "last_seen_at": "2024-06-15T12:00:00Z",
+        "published_at": null,
+        "author": null,
+        "collector": "dns",
+        "content_hash": "0000000000000000000000000000000000000000000000000000000000000001",
+        "snapshot_path": null,
+        "content": "example.com. 300 IN A 192.0.2.1\nexample.com. 300 IN AAAA 2001:db8::1\nwww.example.com. 300 IN CNAME example.com.\nmail.example.com. 300 IN A 192.0.2.10\nexample.com. 300 IN NS a.iana-servers.net.\nexample.com. 300 IN NS b.iana-servers.net.",
+        "fields": [],
+        "notes": "",
+        "provenance": "collected",
+        "page_id": "01234567-89ab-4cde-8000-000000000002",
+        "job_id": null
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000000b",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 2,
+        "kind": "http",
+        "title": "HTTP GET https://example.com/",
+        "url": null,
+        "retrieved_at": "2024-06-15T12:00:00Z",
+        "last_seen_at": "2024-06-15T12:00:00Z",
+        "published_at": null,
+        "author": null,
+        "collector": "http",
+        "content_hash": "0000000000000000000000000000000000000000000000000000000000000002",
+        "snapshot_path": null,
+        "content": "HTTP/1.1 200 OK\nserver: ExampleCDN",
+        "fields": [],
+        "notes": "",
+        "provenance": "collected",
+        "page_id": "01234567-89ab-4cde-8000-000000000002",
+        "job_id": null
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000000c",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 3,
+        "kind": "tls",
+        "title": "TLS certificate for example.com",
+        "url": null,
+        "retrieved_at": "2024-06-15T12:00:00Z",
+        "last_seen_at": "2024-06-15T12:00:00Z",
+        "published_at": null,
+        "author": null,
+        "collector": "tls",
+        "content_hash": "0000000000000000000000000000000000000000000000000000000000000003",
+        "snapshot_path": null,
+        "content": "subject=CN=example.com\nSAN=example.com,www.example.com",
+        "fields": [],
+        "notes": "",
+        "provenance": "collected",
+        "page_id": "01234567-89ab-4cde-8000-000000000002",
+        "job_id": null
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000000d",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 4,
+        "kind": "rdap",
+        "title": "RDAP for example.com",
+        "url": null,
+        "retrieved_at": "2024-06-15T12:00:00Z",
+        "last_seen_at": "2024-06-15T12:00:00Z",
+        "published_at": null,
+        "author": null,
+        "collector": "rdap",
+        "content_hash": "0000000000000000000000000000000000000000000000000000000000000004",
+        "snapshot_path": null,
+        "content": "ldhName example.com\nregistrar Example Registrar\norg Example Organization",
+        "fields": [],
+        "notes": "",
+        "provenance": "collected",
+        "page_id": "01234567-89ab-4cde-8000-000000000002",
+        "job_id": null
+      }
+    ],
+    "findings": [
+      {
+        "id": "01234567-89ab-4cde-8000-000000000014",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 1,
+        "page_id": "01234567-89ab-4cde-8000-000000000002",
+        "title": "example.com resolves to documentation-range 192.0.2.1",
+        "details": "A and AAAA land in TEST-NET-1 / documentation IPv6. Cited by S-1.",
+        "confidence": "high",
+        "provenance": "collected",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000015",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 2,
+        "page_id": "01234567-89ab-4cde-8000-000000000002",
+        "title": "HTTPS is served at the example.com apex",
+        "details": "HTTP GET of https://example.com/ returned 200. Cited by S-2.",
+        "confidence": "high",
+        "provenance": "collected",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000b"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000016",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 3,
+        "page_id": "01234567-89ab-4cde-8000-000000000002",
+        "title": "Presented certificate covers example.com and www.example.com",
+        "details": "TLS SAN list includes the apex and www. Cited by S-3.",
+        "confidence": "high",
+        "provenance": "collected",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000c"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      }
+    ],
+    "entities": [
+      {
+        "id": "01234567-89ab-4cde-8000-00000000001e",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 1,
+        "kind": "domain",
+        "value": "example.com",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [
+          [
+            "registrar",
+            "Example Registrar"
+          ]
+        ],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a",
+          "01234567-89ab-4cde-8000-00000000000b",
+          "01234567-89ab-4cde-8000-00000000000c",
+          "01234567-89ab-4cde-8000-00000000000d"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000001f",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 2,
+        "kind": "hostname",
+        "value": "example.com",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000020",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 3,
+        "kind": "hostname",
+        "value": "www.example.com",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a",
+          "01234567-89ab-4cde-8000-00000000000c"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000021",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 4,
+        "kind": "hostname",
+        "value": "mail.example.com",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000022",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 5,
+        "kind": "ip",
+        "value": "192.0.2.1",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [
+          [
+            "prefix",
+            "192.0.2.0/24"
+          ],
+          [
+            "country",
+            "US"
+          ]
+        ],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000023",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 6,
+        "kind": "ip",
+        "value": "192.0.2.10",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [
+          [
+            "prefix",
+            "192.0.2.0/24"
+          ]
+        ],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000024",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 7,
+        "kind": "ip",
+        "value": "2001:db8::1",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [
+          [
+            "prefix",
+            "2001:db8::/32"
+          ]
+        ],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000025",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 8,
+        "kind": "hostname",
+        "value": "a.iana-servers.net",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000026",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 9,
+        "kind": "hostname",
+        "value": "b.iana-servers.net",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000027",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 10,
+        "kind": "asn",
+        "value": "AS64496",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000028",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 11,
+        "kind": "organization",
+        "value": "Example Organization",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000d"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000029",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 12,
+        "kind": "organization",
+        "value": "Example Registrar",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000d"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000002a",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 13,
+        "kind": "certificate",
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [
+          [
+            "issuer",
+            "Example CA"
+          ]
+        ],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000c"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000002b",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 14,
+        "kind": "url",
+        "value": "https://example.com/",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000b"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000002c",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 15,
+        "kind": "email",
+        "value": "admin@example.com",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000d"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000002d",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 16,
+        "kind": "hostname",
+        "value": "_spf.example.net",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000002e",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 17,
+        "kind": "hostname",
+        "value": "ftp.example.com",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000002f",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 18,
+        "kind": "ip",
+        "value": "192.0.2.20",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [
+          [
+            "prefix",
+            "192.0.2.0/24"
+          ]
+        ],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000030",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 19,
+        "kind": "hostname",
+        "value": "mx.example.com",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000031",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 20,
+        "kind": "ip",
+        "value": "192.0.2.25",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [
+          [
+            "prefix",
+            "192.0.2.0/24"
+          ]
+        ],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000004e",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 21,
+        "kind": "hostname",
+        "value": "blog.example.com",
+        "label": "",
+        "notes": "",
+        "provenance": "collected",
+        "fields": [],
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      }
+    ],
+    "relationships": [
+      {
+        "id": "01234567-89ab-4cde-8000-000000000032",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 1,
+        "from_id": "01234567-89ab-4cde-8000-000000000020",
+        "to_id": "01234567-89ab-4cde-8000-00000000001e",
+        "kind": "subdomain_of",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000033",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 2,
+        "from_id": "01234567-89ab-4cde-8000-000000000021",
+        "to_id": "01234567-89ab-4cde-8000-00000000001e",
+        "kind": "subdomain_of",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000034",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 3,
+        "from_id": "01234567-89ab-4cde-8000-00000000001e",
+        "to_id": "01234567-89ab-4cde-8000-000000000022",
+        "kind": "resolves_to",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000035",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 4,
+        "from_id": "01234567-89ab-4cde-8000-00000000001e",
+        "to_id": "01234567-89ab-4cde-8000-000000000024",
+        "kind": "resolves_to",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000036",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 5,
+        "from_id": "01234567-89ab-4cde-8000-000000000020",
+        "to_id": "01234567-89ab-4cde-8000-000000000022",
+        "kind": "resolves_to",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000037",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 6,
+        "from_id": "01234567-89ab-4cde-8000-000000000021",
+        "to_id": "01234567-89ab-4cde-8000-000000000023",
+        "kind": "resolves_to",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000038",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 7,
+        "from_id": "01234567-89ab-4cde-8000-00000000001e",
+        "to_id": "01234567-89ab-4cde-8000-000000000025",
+        "kind": "uses_nameserver",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000039",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 8,
+        "from_id": "01234567-89ab-4cde-8000-00000000001e",
+        "to_id": "01234567-89ab-4cde-8000-000000000026",
+        "kind": "uses_nameserver",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000003a",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 9,
+        "from_id": "01234567-89ab-4cde-8000-000000000022",
+        "to_id": "01234567-89ab-4cde-8000-000000000027",
+        "kind": "announced_by",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000003b",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 10,
+        "from_id": "01234567-89ab-4cde-8000-000000000023",
+        "to_id": "01234567-89ab-4cde-8000-000000000027",
+        "kind": "announced_by",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000003c",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 11,
+        "from_id": "01234567-89ab-4cde-8000-000000000024",
+        "to_id": "01234567-89ab-4cde-8000-000000000027",
+        "kind": "announced_by",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000003d",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 12,
+        "from_id": "01234567-89ab-4cde-8000-000000000022",
+        "to_id": "01234567-89ab-4cde-8000-000000000028",
+        "kind": "operated_by",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000003e",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 13,
+        "from_id": "01234567-89ab-4cde-8000-00000000001e",
+        "to_id": "01234567-89ab-4cde-8000-000000000029",
+        "kind": "registered_with",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000003f",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 14,
+        "from_id": "01234567-89ab-4cde-8000-00000000001e",
+        "to_id": "01234567-89ab-4cde-8000-00000000002a",
+        "kind": "presents_certificate",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000040",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 15,
+        "from_id": "01234567-89ab-4cde-8000-00000000002a",
+        "to_id": "01234567-89ab-4cde-8000-00000000001e",
+        "kind": "covers",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000041",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 16,
+        "from_id": "01234567-89ab-4cde-8000-00000000002a",
+        "to_id": "01234567-89ab-4cde-8000-000000000020",
+        "kind": "covers",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000042",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 17,
+        "from_id": "01234567-89ab-4cde-8000-00000000001e",
+        "to_id": "01234567-89ab-4cde-8000-00000000002b",
+        "kind": "serves",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000043",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 18,
+        "from_id": "01234567-89ab-4cde-8000-00000000002c",
+        "to_id": "01234567-89ab-4cde-8000-00000000001e",
+        "kind": "hosted_on",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000044",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 19,
+        "from_id": "01234567-89ab-4cde-8000-00000000001e",
+        "to_id": "01234567-89ab-4cde-8000-00000000002d",
+        "kind": "spf_includes",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000045",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 20,
+        "from_id": "01234567-89ab-4cde-8000-000000000022",
+        "to_id": "01234567-89ab-4cde-8000-00000000001e",
+        "kind": "reverse_dns",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000046",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 21,
+        "from_id": "01234567-89ab-4cde-8000-000000000020",
+        "to_id": "01234567-89ab-4cde-8000-00000000001e",
+        "kind": "alias_of",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000047",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 22,
+        "from_id": "01234567-89ab-4cde-8000-00000000002e",
+        "to_id": "01234567-89ab-4cde-8000-00000000001e",
+        "kind": "subdomain_of",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000048",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 23,
+        "from_id": "01234567-89ab-4cde-8000-00000000002e",
+        "to_id": "01234567-89ab-4cde-8000-00000000002f",
+        "kind": "resolves_to",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000049",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 24,
+        "from_id": "01234567-89ab-4cde-8000-00000000002f",
+        "to_id": "01234567-89ab-4cde-8000-000000000027",
+        "kind": "announced_by",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000004a",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 25,
+        "from_id": "01234567-89ab-4cde-8000-000000000030",
+        "to_id": "01234567-89ab-4cde-8000-00000000001e",
+        "kind": "subdomain_of",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000004b",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 26,
+        "from_id": "01234567-89ab-4cde-8000-00000000001e",
+        "to_id": "01234567-89ab-4cde-8000-000000000030",
+        "kind": "mail_handled_by",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000004c",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 27,
+        "from_id": "01234567-89ab-4cde-8000-000000000030",
+        "to_id": "01234567-89ab-4cde-8000-000000000031",
+        "kind": "resolves_to",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000004d",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 28,
+        "from_id": "01234567-89ab-4cde-8000-000000000031",
+        "to_id": "01234567-89ab-4cde-8000-000000000027",
+        "kind": "announced_by",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000004f",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 29,
+        "from_id": "01234567-89ab-4cde-8000-00000000004e",
+        "to_id": "01234567-89ab-4cde-8000-00000000001e",
+        "kind": "subdomain_of",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000053",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 30,
+        "from_id": "01234567-89ab-4cde-8000-00000000004e",
+        "to_id": "01234567-89ab-4cde-8000-000000000022",
+        "kind": "resolves_to",
+        "provenance": "collected",
+        "confidence": "high",
+        "notes": "",
+        "source_ids": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      }
+    ],
+    "notes": [
+      {
+        "id": "01234567-89ab-4cde-8000-000000000078",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 1,
+        "page_id": "01234567-89ab-4cde-8000-000000000002",
+        "body": "Import path: open Graph (`g`) on example.com, Search Around (`s`) two hops, then open Object View (`v`) on the canonical domain. Constituent hostname example.com is merged. Playbook domain-infra is on the timeline as T-2.",
+        "provenance": "analyst",
+        "created_at": "2024-06-15T12:00:00Z",
+        "updated_at": "2024-06-15T12:00:00Z"
+      }
+    ],
+    "artifacts": [],
+    "timeline": [
+      {
+        "id": "01234567-89ab-4cde-8000-000000000050",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 1,
+        "occurred_at": "2024-06-15T12:00:00Z",
+        "kind": "observed",
+        "title": "Collected DNS, HTTP, TLS, and RDAP for example.com",
+        "description": "Fixture observations, not a live collection.",
+        "provenance": "collected",
+        "source_id": "01234567-89ab-4cde-8000-00000000000a",
+        "entity_id": "01234567-89ab-4cde-8000-00000000001e",
+        "page_id": "01234567-89ab-4cde-8000-000000000002",
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000051",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 2,
+        "occurred_at": "2024-06-15T12:00:00Z",
+        "kind": "playbook_run",
+        "title": "Playbook domain-infra",
+        "description": "4 new source(s), 21 new entities (21 seen), 30 new relationships",
+        "provenance": "analyst",
+        "source_id": null,
+        "entity_id": "01234567-89ab-4cde-8000-00000000001e",
+        "page_id": "01234567-89ab-4cde-8000-000000000002",
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-000000000052",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 3,
+        "occurred_at": "2024-06-15T12:00:00Z",
+        "kind": "entities_resolved",
+        "title": "Resolved example.com domain and hostname",
+        "description": "Same canonical value; hostname absorbed.",
+        "provenance": "analyst",
+        "source_id": null,
+        "entity_id": "01234567-89ab-4cde-8000-00000000001e",
+        "page_id": "01234567-89ab-4cde-8000-000000000002",
+        "created_at": "2024-06-15T12:00:00Z"
+      }
+    ],
+    "jobs": [],
+    "agent_runs": [],
+    "proposals": [],
+    "page_entities": [
+      {
+        "page_id": "01234567-89ab-4cde-8000-000000000002",
+        "entity_id": "01234567-89ab-4cde-8000-00000000001e"
+      },
+      {
+        "page_id": "01234567-89ab-4cde-8000-000000000002",
+        "entity_id": "01234567-89ab-4cde-8000-000000000020"
+      },
+      {
+        "page_id": "01234567-89ab-4cde-8000-000000000002",
+        "entity_id": "01234567-89ab-4cde-8000-000000000022"
+      }
+    ],
+    "resolutions": [
+      {
+        "id": "01234567-89ab-4cde-8000-000000000064",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 1,
+        "canonical_id": "01234567-89ab-4cde-8000-00000000001e",
+        "constituent_ids": [
+          "01234567-89ab-4cde-8000-00000000001e",
+          "01234567-89ab-4cde-8000-00000000001f"
+        ],
+        "status": "active",
+        "reason": "Same canonical value example.com",
+        "created_by": "demo",
+        "created_at": "2024-06-15T12:00:00Z",
+        "unresolved_by": null,
+        "unresolved_at": null,
+        "property_writes": [],
+        "source_writes": [
+          "01234567-89ab-4cde-8000-00000000000a"
+        ]
+      }
+    ],
+    "events": [
+      {
+        "id": "01234567-89ab-4cde-8000-00000000005a",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 1,
+        "kind": "registration",
+        "title": "example.com registered (fixture)",
+        "description": "RDAP registration instant for the demo.",
+        "started_at": "2024-01-01T00:00:00Z",
+        "ended_at": null,
+        "provenance": "collected",
+        "source_id": "01234567-89ab-4cde-8000-00000000000d",
+        "page_id": "01234567-89ab-4cde-8000-000000000002",
+        "fields": [],
+        "entity_ids": [
+          "01234567-89ab-4cde-8000-00000000001e"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000005b",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 2,
+        "kind": "certificate_issued",
+        "title": "Certificate issued for example.com",
+        "description": "Covers apex and www.",
+        "started_at": "2024-01-01T00:00:00Z",
+        "ended_at": null,
+        "provenance": "collected",
+        "source_id": "01234567-89ab-4cde-8000-00000000000c",
+        "page_id": "01234567-89ab-4cde-8000-000000000002",
+        "fields": [],
+        "entity_ids": [
+          "01234567-89ab-4cde-8000-00000000002a",
+          "01234567-89ab-4cde-8000-00000000001e",
+          "01234567-89ab-4cde-8000-000000000020"
+        ],
+        "created_at": "2024-06-15T12:00:00Z"
+      }
+    ],
+    "audit": [
+      {
+        "id": "01234567-89ab-4cde-8000-00000000006e",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 1,
+        "kind": "playbook_run",
+        "actor": "demo",
+        "machine": "fixture",
+        "occurred_at": "2024-06-15T12:00:00Z",
+        "summary": "Playbook domain-infra",
+        "details": [
+          [
+            "playbook_id",
+            "domain-infra"
+          ]
+        ],
+        "target_ids": []
+      },
+      {
+        "id": "01234567-89ab-4cde-8000-00000000006f",
+        "investigation_id": "01234567-89ab-4cde-8000-000000000001",
+        "seq": 2,
+        "kind": "entities_merged",
+        "actor": "demo",
+        "machine": "fixture",
+        "occurred_at": "2024-06-15T12:00:00Z",
+        "summary": "Merged example.com hostname into domain",
+        "details": [],
+        "target_ids": [
+          "01234567-89ab-4cde-8000-00000000001e",
+          "01234567-89ab-4cde-8000-00000000001f"
+        ]
+      }
+    ],
+    "members": []
+  }
+}

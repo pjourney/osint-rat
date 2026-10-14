@@ -1,6 +1,6 @@
 # os-int user guide
 
-This is the complete guide to using os-int: the workbench, the collectors, the agent, the command line, and the configuration file. For a shorter introduction, start with the [README](../README.md). For copy-paste sessions, see [examples](examples.md). For how the code is put together, see [ARCHITECTURE.md](ARCHITECTURE.md).
+This is the complete guide to using os-int: the workbench, the collectors, the agent, the command line, and the configuration file. For a shorter introduction, start with the [README](../README.md). **New users:** [install](install.md), then import [`examples/demo-case/`](../examples/demo-case/) and press `g` then `s`. For copy-paste sessions, see [examples](examples.md). For how the code is put together, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Contents
 
@@ -25,6 +25,8 @@ This is the complete guide to using os-int: the workbench, the collectors, the a
 - [Keyboard](#keyboard)
 - [Troubleshooting](#troubleshooting)
 - [Using it responsibly](#using-it-responsibly)
+
+Install one-liners: [install.md](install.md). Plugin publishing: [plugins.md](plugins.md).
 
 Worked sessions are in [examples](examples.md). Common questions are in the [FAQ](faq.md). The SQLite table map is in [schema](schema.md).
 

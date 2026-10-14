@@ -12,6 +12,8 @@ Do not file a public issue for a vulnerability that could be exploited.
 
 We will acknowledge receipt as soon as we can and work on a fix before any public disclosure.
 
+CI runs `cargo audit` on every pull request. Dependabot opens weekly PRs for Cargo and GitHub Actions. That does not replace a private report for a vulnerability in os-int itself.
+
 ## What os-int does
 
 os-int is a local investigation notebook for observation, monitoring, and diagnosis. It:

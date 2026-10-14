@@ -154,30 +154,20 @@ fn location_from_json(record: &serde_json::Value) -> GeoLocation {
 fn load_mmdb(path: &Path, ip: IpAddr) -> Result<Option<GeoLocation>, String> {
     let reader = maxminddb::Reader::open_readfile(path)
         .map_err(|error| format!("could not open geo database {}: {error}", path.display()))?;
-    let lookup: Result<Option<maxminddb::geoip2::City<'_>>, _> = reader.lookup(ip);
-    let city = match lookup {
-        Ok(value) => value,
-        Err(error) => {
-            return Err(format!(
-                "geo database {} lookup failed: {error}",
-                path.display()
-            ));
-        }
-    };
+    let lookup = reader
+        .lookup(ip)
+        .map_err(|error| format!("geo database {} lookup failed: {error}", path.display()))?;
+    let city = lookup
+        .decode::<maxminddb::geoip2::City<'_>>()
+        .map_err(|error| format!("geo database {} decode failed: {error}", path.display()))?;
     let Some(city) = city else {
         return Ok(None);
     };
-    let country = city
-        .country
-        .as_ref()
-        .and_then(|country| country.iso_code)
-        .map(ToString::to_string);
-    let point = city.location.as_ref().and_then(|location| {
-        GeoPoint::new(
-            location.latitude.unwrap_or(f64::NAN),
-            location.longitude.unwrap_or(f64::NAN),
-        )
-    });
+    let country = city.country.iso_code.map(ToString::to_string);
+    let point = GeoPoint::new(
+        city.location.latitude.unwrap_or(f64::NAN),
+        city.location.longitude.unwrap_or(f64::NAN),
+    );
     if country.is_none() && point.is_none() {
         return Ok(None);
     }

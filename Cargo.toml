@@ -3,12 +3,20 @@ name = "os-int"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
-description = "An open-source intelligence (OSINT) investigation workbench for the terminal, with first-class AI agent CLI integration"
+description = "A local-first investigation ontology workbench for OSINT and cyber cases"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/pjourney/osint-rat"
 readme = "README.md"
 keywords = ["osint", "tui", "ratatui", "investigation", "security"]
 categories = ["command-line-utilities"]
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
 
 [lib]
 name = "os_int"
@@ -27,7 +35,7 @@ directories = "6.0.0"
 futures = { version = "0.3.34", default-features = false, features = ["std", "async-await"] }
 hex = "0.4.3"
 hickory-resolver = "0.26.3"
-maxminddb = "0.26"
+maxminddb = "0.27"
 infer = "0.22.0"
 ratatui = "0.30.2"
 regex = "1.13.1"

@@ -72,7 +72,7 @@ impl Store {
         };
         insert_playbook_run(&transaction, &run)?;
         let kind = TimelineKind::PlaybookRun;
-        let _ = insert_timeline_event(
+        if let Some(timeline_id) = insert_timeline_event(
             &transaction,
             TimelineInsert {
                 investigation_id: context.investigation_id,
@@ -85,7 +85,9 @@ impl Store {
                 entity_id: None,
                 page_id: context.page_id,
             },
-        )?;
+        )? {
+            summary.timeline_ids.push(timeline_id);
+        }
         let mut details = crate::model::Fields::new();
         details.push("playbook_id", playbook.id.as_str());
         if automation {

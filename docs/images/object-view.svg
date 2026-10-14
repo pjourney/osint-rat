@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="420" viewBox="0 0 920 420" role="img" aria-labelledby="title desc">
+  <title id="title">os-int Object View</title>
+  <desc id="desc">Terminal sketch of Object View for the canonical example.com entity.</desc>
+  <rect width="920" height="420" rx="8" fill="#111827"/>
+  <rect x="12" y="12" width="896" height="396" rx="6" fill="#0b1220" stroke="#334155"/>
+  <text x="28" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" fill="#93c5fd">os-int ∑ Example Corp ∑ Object View ∑ E-1 Domain</text>
+  <text x="28" y="64" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#e2e8f0">example.com     [COL]     TLP:CLEAR     V-1 resolved</text>
+  <text x="28" y="100" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#86efac">Identity</text>
+  <text x="28" y="122" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#cbd5e1">  kind        domain</text>
+  <text x="28" y="142" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#cbd5e1">  value       example.com</text>
+  <text x="28" y="162" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#cbd5e1">  registrar   Example Registrar</text>
+  <text x="28" y="190" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#86efac">Links</text>
+  <text x="28" y="212" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#cbd5e1">  resolves_to           192.0.2.1    2001:db8::1</text>
+  <text x="28" y="232" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#cbd5e1">  subdomain_of ê        www  mail  ftp  mx  blog</text>
+  <text x="28" y="252" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#cbd5e1">  uses_nameserver       a.iana-servers.net  b.iana-servers.net</text>
+  <text x="28" y="280" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#86efac">Sources and findings</text>
+  <text x="28" y="302" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#cbd5e1">  S-1 DNS   S-2 HTTP   S-3 TLS   S-4 RDAP</text>
+  <text x="28" y="322" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#cbd5e1">  F-1 [COL] example.com resolves to documentation-range 192.0.2.1</text>
+  <text x="28" y="350" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#86efac">Constituents</text>
+  <text x="28" y="372" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#cbd5e1">  hostname example.com (absorbed; unresolve with u)</text>
+</svg>

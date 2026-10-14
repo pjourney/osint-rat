@@ -33,3 +33,9 @@ jobs:
         run: cargo test --all-targets
       - name: Doctor (smoke)
         run: cargo run --quiet -- doctor
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: Security audit
+        run: cargo audit
