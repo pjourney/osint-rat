@@ -5,7 +5,8 @@ use serde_json::Value;
 use super::{IngestError, IngestReport, MAX_OBJECTS};
 use crate::files::sha256_hex;
 use crate::model::{
-    Confidence, EntityKey, EntityKind, EvidenceBatch, NewSource, SourceKind, relation,
+    Confidence, EntityKey, EntityKind, EvidenceBatch, Fields, NewEvent, NewSource, SourceKind,
+    TimelineKind, parse_timestamp_untrusted, relation,
 };
 use crate::sanitize::{sanitize_line, sanitize_text};
 
@@ -137,19 +138,57 @@ fn ingest_observed_data(
 ) {
     let sco = object.get("objects").and_then(Value::as_object);
     let mut first_sco = None;
+    let mut keys = Vec::new();
     if let Some(map) = sco {
         for nested in map.values() {
             if let Some(key) = sco_to_entity(nested, source, report) {
                 if first_sco.is_none() {
                     first_sco = Some(key.clone());
                 }
-                remember_id(nested, key, ids);
+                remember_id(nested, key.clone(), ids);
+                keys.push(key);
             }
         }
     }
     if let Some(first) = first_sco {
         remember_id(object, first, ids);
     }
+    ingest_observed_window(object, source, &keys, report);
+}
+
+fn ingest_observed_window(
+    object: &Value,
+    source: usize,
+    keys: &[EntityKey],
+    report: &mut IngestReport,
+) {
+    let Some(started_at) =
+        string(object, "first_observed").and_then(|text| parse_timestamp_untrusted(&text))
+    else {
+        return;
+    };
+    let ended_at = super::interval_end_or_skip(
+        started_at,
+        string(object, "last_observed").and_then(|text| parse_timestamp_untrusted(&text)),
+        report,
+        "observed-data last_observed",
+    );
+    let title = string(object, "id").unwrap_or_else(|| "STIX observed-data".into());
+    let mut fields = Fields::new();
+    fields.set("stix_type", "observed-data");
+    if let Some(stix_id) = string(object, "id") {
+        fields.set("stix_id", stix_id);
+    }
+    report.batch.case_event(NewEvent {
+        started_at,
+        ended_at,
+        kind: TimelineKind::Observed,
+        title,
+        description: string(object, "description").unwrap_or_default(),
+        source: Some(source),
+        entities: keys.to_vec(),
+        fields,
+    });
 }
 
 fn ingest_malware(
@@ -376,7 +415,10 @@ mod tests {
         {"type": "malware", "id": "malware--x", "name": "example-malware", "description": "toy"},
         {"type": "indicator", "id": "indicator--1", "name": "bad domain",
          "pattern": "[domain-name:value = 'evil.example'] AND [ipv4-addr:value = '192.0.2.55']"},
-        {"type": "observed-data", "id": "observed-data--1", "objects": {
+        {"type": "observed-data", "id": "observed-data--1",
+         "first_observed": "2024-05-01T12:00:00Z",
+         "last_observed": "2024-05-01T18:00:00Z",
+         "objects": {
             "0": {"type": "url", "value": "https://evil.example/path"},
             "1": {"type": "email-addr", "value": "bad@evil.example"}
         }},
@@ -441,6 +483,51 @@ mod tests {
                 .iter()
                 .any(|entity| entity.key.kind == EntityKind::Unknown
                     && entity.key.value.starts_with("observed-data--"))
+        );
+        assert_eq!(actual.batch.events.len(), 1);
+        assert!(actual.batch.events[0].ended_at.is_some());
+        assert_eq!(actual.batch.events[0].entities.len(), 2);
+    }
+
+    #[test]
+    fn malformed_observed_timestamps_do_not_panic() {
+        let input = r#"{
+          "type": "bundle",
+          "objects": [
+            {"type": "observed-data", "id": "observed-data--bad",
+             "first_observed": "NaN",
+             "last_observed": "not-a-date",
+             "objects": {"0": {"type": "ipv4-addr", "value": "192.0.2.9"}}}
+          ]
+        }"#;
+        let actual = parse_stix(input, "bad.json").expect("parse");
+        assert!(actual.batch.events.is_empty());
+        assert!(
+            actual
+                .batch
+                .entities
+                .iter()
+                .any(|entity| entity.key.value == "192.0.2.9")
+        );
+
+        let inverted = r#"{
+          "type": "bundle",
+          "objects": [
+            {"type": "observed-data", "id": "observed-data--back",
+             "first_observed": "2024-05-02T00:00:00Z",
+             "last_observed": "2024-05-01T00:00:00Z",
+             "objects": {"0": {"type": "ipv4-addr", "value": "192.0.2.8"}}}
+          ]
+        }"#;
+        let actual = parse_stix(inverted, "back.json").expect("parse");
+        assert_eq!(actual.batch.events.len(), 1);
+        assert!(actual.batch.events[0].ended_at.is_none());
+        assert_eq!(actual.skipped, 1);
+        assert!(
+            actual
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("ended_at precedes started_at"))
         );
     }
 

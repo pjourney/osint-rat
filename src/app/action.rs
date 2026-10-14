@@ -77,6 +77,14 @@ pub enum Action {
     GraphApplyFacet,
     /// Clear kind / link / provenance filters on the Graph screen.
     GraphClearFilters,
+    /// Move the Timeline entity-filter cursor.
+    TimelineFacetMove(i32),
+    /// Apply (or toggle) the highlighted Timeline entity filter.
+    TimelineApplyFilter,
+    /// Clear the Timeline entity filter.
+    TimelineClearFilter,
+    /// Toggle nearby (same country or prefix) on Timeline or Entities.
+    ToggleNearby,
     /// Toggle the highlighted entity into the merge set (Entities).
     ToggleMergeMark,
     /// Propose merging the marked entities (confirm required).

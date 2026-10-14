@@ -27,7 +27,7 @@ steps:
       reason: Same registrable domain or shared certificate SAN cluster
 ```
 
-`format` must be `os-int-playbook`. `format_version` newer than **1** is refused. This version is **not** the investigation archive `FORMAT_VERSION` (currently **2**).
+`format` must be `os-int-playbook`. `format_version` newer than **1** is refused. This version is **not** the investigation archive `FORMAT_VERSION` (currently **3**).
 
 | Step | What happens |
 | --- | --- |
@@ -86,7 +86,7 @@ os-int watch --playbook domain-infra --investigation "Example Corp" --interval 3
 
 Untrusted playbooks cannot set provenance or delete collected findings (`resolved_findings` is refused at parse, and ingest-style honors rules still apply on collector batches). Resolution bags are unchanged: collect upserts by `(kind, value)` onto the canonical.
 
-Playbook runs and watch rows live in SQLite (`playbook_runs`, `automations`) and are **not** exported. Timeline kind `playbook_run` is additive (no archive `FORMAT_VERSION` bump).
+Playbook runs and watch rows live in SQLite (`playbook_runs`, `automations`) and are **not** exported. Timeline kind `playbook_run` is additive (no archive `FORMAT_VERSION` bump). Collect still applies through `EvidenceBatch`; first-class Events from collectors and change intelligence land in the same transaction. A cancelled collector is cancellation (not failure) so `watch` can stop cleanly. Watch `AddFinding` identity includes the change digest so a distinct change with the same observation count opens a new notice.
 
 ## See also
 

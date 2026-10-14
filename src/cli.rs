@@ -83,9 +83,28 @@ pub enum Command {
     Export {
         /// Investigation name, UUID, or unique UUID prefix.
         investigation: String,
-        /// Directory to create. Defaults to `<sanitized-name>-<uuid>` in the current directory.
+        /// Directory (archive) or file (GeoJSON) to create.
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// `archive` (default) writes `investigation.osint.json`. `geojson` writes a FeatureCollection.
+        #[arg(long, default_value = "archive")]
+        format: String,
+    },
+    /// Write GeoJSON for entities that have a country, prefix, or coordinates.
+    Geojson {
+        /// Investigation name, UUID, or unique UUID prefix.
+        investigation: String,
+        /// File to write. Defaults to `<sanitized-name>.geojson`.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Print entity pairs that share an Event, a source, or a time window.
+    Cooccur {
+        /// Investigation name, UUID, or unique UUID prefix.
+        investigation: String,
+        /// Window in hours for instants (default 24).
+        #[arg(long)]
+        window: Option<u64>,
     },
     /// Import a previously exported investigation.
     ///
@@ -314,7 +333,16 @@ pub async fn run_with(cli: Cli) -> Result<()> {
         Some(Command::Export {
             ref investigation,
             ref output,
-        }) => export(&cli, investigation, output.as_deref()),
+            ref format,
+        }) => export(&cli, investigation, output.as_deref(), format),
+        Some(Command::Geojson {
+            ref investigation,
+            ref output,
+        }) => geojson(&cli, investigation, output.as_deref()),
+        Some(Command::Cooccur {
+            ref investigation,
+            window,
+        }) => cooccur(&cli, investigation, window),
         Some(Command::Import { ref path, rename }) => import(&cli, path, rename),
         Some(Command::Collect {
             ref kind,
@@ -413,7 +441,17 @@ fn list(cli: &Cli) -> Result<()> {
     Ok(())
 }
 
-fn export(cli: &Cli, query: &str, output: Option<&std::path::Path>) -> Result<()> {
+fn export(cli: &Cli, query: &str, output: Option<&std::path::Path>, format: &str) -> Result<()> {
+    match format.trim().to_ascii_lowercase().as_str() {
+        "archive" | "osint" | "" => export_archive(cli, query, output),
+        "geojson" | "geo" => geojson(cli, query, output),
+        other => Err(user_err(format!(
+            "unknown export format {other:?}; use archive or geojson"
+        ))),
+    }
+}
+
+fn export_archive(cli: &Cli, query: &str, output: Option<&std::path::Path>) -> Result<()> {
     let runtime = Runtime::load(cli)?;
     let investigation = runtime.store.require_investigation(query)?;
     let data = runtime.store.load_investigation(investigation.id)?;
@@ -433,6 +471,65 @@ fn export(cli: &Cli, query: &str, output: Option<&std::path::Path>) -> Result<()
         investigation.name,
         manifest.parent().unwrap_or(&destination).display()
     );
+    Ok(())
+}
+
+fn geojson(cli: &Cli, query: &str, output: Option<&std::path::Path>) -> Result<()> {
+    let runtime = Runtime::load(cli)?;
+    let investigation = runtime.store.require_investigation(query)?;
+    let data = runtime.store.load_investigation(investigation.id)?;
+    let collection = crate::model::geojson_collection(&data);
+    let json = serde_json::to_string_pretty(&collection).wrap_err("could not serialize GeoJSON")?;
+    let destination = match output {
+        Some(path) => path.to_path_buf(),
+        None => PathBuf::from(format!(
+            "{}.geojson",
+            crate::paths::sanitize_filename(&investigation.name)
+        )),
+    };
+    crate::files::write_atomically(&destination, json.as_bytes())
+        .wrap_err_with(|| format!("could not write {}", destination.display()))?;
+    println!(
+        "Wrote {} GeoJSON feature(s) to {}",
+        collection.features.len(),
+        destination.display()
+    );
+    Ok(())
+}
+
+fn cooccur(cli: &Cli, query: &str, window_hours: Option<u64>) -> Result<()> {
+    let runtime = Runtime::load(cli)?;
+    let investigation = runtime.store.require_investigation(query)?;
+    let data = runtime.store.load_investigation(investigation.id)?;
+    let window = window_hours.map(|hours| chrono::Duration::hours(hours as i64));
+    let pairs = crate::model::co_occur(
+        &data,
+        &crate::model::CoOccurrenceQuery {
+            entity_ids: Vec::new(),
+            window,
+        },
+    );
+    if pairs.is_empty() {
+        println!("No co-occurring pairs.");
+        return Ok(());
+    }
+    let workspace = crate::model::Workspace::new(data);
+    println!("{:<14} {:<8} {:<8} EVIDENCE", "KIND", "LEFT", "RIGHT");
+    for pair in pairs {
+        let left = workspace
+            .ref_of(pair.left)
+            .map(|reference| reference.to_string())
+            .unwrap_or_else(|| pair.left.to_string());
+        let right = workspace
+            .ref_of(pair.right)
+            .map(|reference| reference.to_string())
+            .unwrap_or_else(|| pair.right.to_string());
+        println!(
+            "{:<14} {left:<8} {right:<8} {}",
+            pair.kind.as_str(),
+            pair.evidence
+        );
+    }
     Ok(())
 }
 
@@ -1082,6 +1179,36 @@ mod tests {
     #[test]
     fn clap_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn parses_geojson_and_cooccur_and_export_format() {
+        let geojson = Cli::try_parse_from(["os-int", "geojson", "Case", "-o", "out.geojson"])
+            .expect("geojson");
+        assert!(matches!(geojson.command, Some(Command::Geojson { .. })));
+        let cooccur =
+            Cli::try_parse_from(["os-int", "cooccur", "Case", "--window", "12"]).expect("cooccur");
+        assert!(matches!(
+            cooccur.command,
+            Some(Command::Cooccur {
+                window: Some(12),
+                ..
+            })
+        ));
+        let export = Cli::try_parse_from([
+            "os-int",
+            "export",
+            "Case",
+            "--format",
+            "geojson",
+            "-o",
+            "out.geojson",
+        ])
+        .expect("export");
+        match export.command {
+            Some(Command::Export { format, .. }) => assert_eq!(format, "geojson"),
+            other => panic!("expected export {other:?}"),
+        }
     }
 
     #[test]

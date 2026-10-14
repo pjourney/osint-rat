@@ -66,6 +66,7 @@ pub struct CollectorSettings {
     pub max_subdomains: u32,
     pub max_username_profiles: u32,
     pub max_ingest_bytes: u64,
+    pub geo_db_path: Option<PathBuf>,
 }
 
 impl CollectorSettings {
@@ -78,6 +79,7 @@ impl CollectorSettings {
             max_subdomains: config.collectors.max_subdomains,
             max_username_profiles: config.collectors.max_username_profiles,
             max_ingest_bytes: config.collectors.max_ingest_bytes,
+            geo_db_path: config.collectors.geo_db_path.clone(),
         }
     }
 }

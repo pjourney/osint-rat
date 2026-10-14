@@ -52,11 +52,12 @@ A useful order:
 
 | Module | Responsibility |
 | --- | --- |
-| `model/` | Domain types: `Investigation`, `Page`, `Source`, `Finding`, `Entity`, `Relationship`, `Resolution`, `Note`, `Artifact`, `TimelineEvent`, `JobRecord`, `AgentRun`, `Proposal`, `Playbook`. Object/link/Action registries and Object View data in `ontology`. Search Around and graph visibility in `graph`. Resolution bags and suggestion rules in `resolution`. Short references (`S-12`, `E-4`, `V-1`, …). No UI or storage code. |
-| `storage/` | `Store` wraps a SQLite connection: migrations, CRUD, applying collector output transactionally, loading a full `Workspace`. Graph query (`Store::search_around`) runs the same hop expansion as `model::search_around` on a loaded snapshot. Merge/unresolve lives in `storage/resolution.rs`. Playbook runs and automations (`playbook_runs`, `automations`) are local tables, not archived. |
+| `model/` | Domain types: `Investigation`, `Page`, `Source`, `Finding`, `Entity`, `Relationship`, `Resolution`, `Note`, `Artifact`, `TimelineEvent`, `Event`, `JobRecord`, `AgentRun`, `Proposal`, `Playbook`. Object/link/Action registries and Object View data in `ontology`. Search Around and graph visibility in `graph`. Resolution bags and suggestion rules in `resolution`. Overlay timeline, co-occurrence, and GeoJSON in `timeline` / `cooccur` / `geo`. Short references (`S-12`, `E-4`, `C-1`, `V-1`, …). No UI or storage code. |
+| `storage/` | `Store` wraps a SQLite connection: migrations, CRUD, applying collector output transactionally, loading a full `Workspace`. Graph query (`Store::search_around`) runs the same hop expansion as `model::search_around` on a loaded snapshot. Merge/unresolve lives in `storage/resolution.rs`. Playbook runs and automations (`playbook_runs`, `automations`) are local tables, not archived. `V5` adds `events` / `event_entities`. |
 | `files.rs` | Investigation directory layout and content-addressed snapshot storage. |
 | `collectors/` | `Collector` trait plus built-ins: DNS, RDAP, HTTP, TLS, certificate transparency, IP intelligence, repository, file, email, username, subdomain, optional API wrappers, and `[[collectors.external]]` sidecars. `diagnose` turns observations into structured readings. Collectors return a `CollectionOutput` and never touch the database. |
-| `ingest/` | STIX 2.1, MISP, CSV/JSON observables, and Evidence Batch parsing. Untrusted files are size-capped; malformed input is an error, not a panic. |
+| `ingest/` | STIX 2.1, MISP, CSV/JSON observables, and Evidence Batch parsing. Untrusted files are size-capped; malformed input is an error, not a panic. Timestamps and coordinates are parsed without panicking. |
+| `geo/` | Optional local geo database (JSON records or MMDB). Lookups stay on disk. Missing files return `None`. |
 | `playbook/` | YAML playbooks and watch-set automations. Parse without panicking. Gather (collect/tools) runs on a job thread; commit applies every batch in one SQLite transaction. Active tools, nested playbooks, and silent finding writes are refused. |
 | `tools/` | External tool registry: `PATH` detection, built-in and user-defined tool definitions, argument templates. |
 | `exec/` | The single place where subprocesses are spawned: no shell, explicit argv, timeouts, bounded output, process-group kill, cancellation, argument redaction for display and logs. |
@@ -64,9 +65,9 @@ A useful order:
 | `jobs/` | `JobManager`: spawns tasks with cancellation tokens, a concurrency limit, and a bounded event channel. |
 | `report/` | Markdown and JSON report generation. Renderers implement a small trait so HTML or PDF can be added later. |
 | `exchange/` | Versioned, path-independent import and export of investigations. |
-| `app/` | `App` owns config, store, workspace, job manager, and all UI state (including `GraphState`). Keys map to `Action`s; `App::dispatch` performs state transitions and side effects. Per-investigation `ui_state` restores the last view, page, and agent thread after restart. Long notes open `$EDITOR` / `$VISUAL` without a shell. |
+| `app/` | `App` owns config, store, workspace, job manager, and all UI state (including `GraphState` and `TimelineState`). Keys map to `Action`s; `App::dispatch` performs state transitions and side effects. Per-investigation `ui_state` restores the last view, page, and agent thread after restart. Long notes open `$EDITOR` / `$VISUAL` without a shell. |
 | `tui/` | Terminal setup and restore, the async event loop, theme, keymap, widgets, screens, and overlays. Rendering is a pure function of `App`. |
-| `cli/` | Clap definitions and non-TUI commands (`list`, `new`, `open`, `export`, `import`, `collect`, `ingest`, `playbook`, `watch`, `report`, `doctor`, `config`). |
+| `cli/` | Clap definitions and non-TUI commands (`list`, `new`, `open`, `export`, `import`, `collect`, `ingest`, `playbook`, `watch`, `report`, `geojson`, `cooccur`, `doctor`, `config`). |
 
 ## Where to make a change
 
@@ -85,6 +86,8 @@ A useful order:
 | Change a key binding | `tui/keymap.rs`, including `HELP_TEXT`, and the keyboard tables in the user guide |
 | Change a screen | `tui/screens.rs`. Put the state change in `app/`, not in the widget. Object View is `View::Object`. Graph is `View::Graph` |
 | Change Search Around or graph caps | `model/graph.rs` (pure query), then `storage/graph.rs` (`Store::search_around`), then `app/graph.rs` and `tui/screens.rs` |
+| Change Events, overlay timeline, or co-occurrence | `model/event.rs`, `model/timeline.rs`, `model/cooccur.rs`, `storage/events.rs`, then Timeline screen / `os-int cooccur` |
+| Change geo fields or GeoJSON | `model/geo.rs`, `src/geo/`, IP/RDAP collectors, `os-int export --format geojson` |
 | Change merge, unresolve, or suggestion rules | `model/resolution.rs` (bags + scoring), `storage/resolution.rs`, then `app/resolution.rs` and Object View |
 | Add a palette command | `app/commands.rs`, then handle the id in `App::run_command` |
 | Add a report section | `report/`. Keep AI-written text labelled as inference |

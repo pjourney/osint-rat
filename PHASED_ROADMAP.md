@@ -20,8 +20,8 @@
 | 2 | Graph & Search Around | Done ([#6](https://github.com/pjourney/osint-rat/pull/6)) |
 | 3 | Entity resolution | Done ([#7](https://github.com/pjourney/osint-rat/pull/7)) |
 | 4 | Ingest plane & connectors | Done ([#8](https://github.com/pjourney/osint-rat/pull/8)) |
-| 5 | Playbooks & automations | In progress ([#9](https://github.com/pjourney/osint-rat/pull/9)) |
-| 6 | Temporal & geospatial | Not started |
+| 5 | Playbooks & automations | Done ([#9](https://github.com/pjourney/osint-rat/pull/9)) |
+| 6 | Temporal & geospatial | In progress ([#10](https://github.com/pjourney/osint-rat/pull/10)) |
 | 7 | Team, markings & audit | Not started |
 | 8 | Scale, API & STIX | Not started |
 | 9 | Distribution, demos & open platform | Not started |
@@ -246,11 +246,11 @@ Time and place as first-class investigative dimensions (enterprise investigation
 
 ### Success criteria
 
-- [ ] Timeline shows events from collection + imported events; filter by entity works.
-- [ ] Co-occurrence query returns expected pairs on a fixture.
-- [ ] GeoJSON export validates and includes ≥1 point/polygon/property from a fixture IP/ASN case.
-- [ ] Optional geo DB missing → graceful degrade (no crash).
-- [ ] Tests + CI green; docs updated.
+- [x] Timeline shows events from collection + imported events; filter by entity works.
+- [x] Co-occurrence query returns expected pairs on a fixture.
+- [x] GeoJSON export validates and includes ≥1 point/polygon/property from a fixture IP/ASN case.
+- [x] Optional geo DB missing → graceful degrade (no crash).
+- [x] Tests + CI green; docs updated.
 
 ### How to complete
 

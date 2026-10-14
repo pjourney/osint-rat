@@ -25,10 +25,11 @@ pub enum RefKind {
     AgentRun,
     Proposal,
     Resolution,
+    Event,
 }
 
 impl RefKind {
-    pub const ALL: [RefKind; 12] = [
+    pub const ALL: [RefKind; 13] = [
         RefKind::Page,
         RefKind::Source,
         RefKind::Finding,
@@ -41,6 +42,7 @@ impl RefKind {
         RefKind::AgentRun,
         RefKind::Proposal,
         RefKind::Resolution,
+        RefKind::Event,
     ];
 
     pub fn prefix(self) -> &'static str {
@@ -57,6 +59,7 @@ impl RefKind {
             RefKind::AgentRun => "Q",
             RefKind::Proposal => "X",
             RefKind::Resolution => "V",
+            RefKind::Event => "C",
         }
     }
 
@@ -75,6 +78,7 @@ impl RefKind {
             RefKind::AgentRun => "AGENT-RUN",
             RefKind::Proposal => "PROPOSAL",
             RefKind::Resolution => "RESOLUTION",
+            RefKind::Event => "CASE-EVENT",
         }
     }
 
@@ -145,7 +149,7 @@ impl FromStr for ShortRef {
 }
 
 static REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b([PSFENRATJQXV])-(\d{1,7})\b").expect("reference pattern is valid")
+    Regex::new(r"(?i)\b([PSFENRATJQXVC])-(\d{1,7})\b").expect("reference pattern is valid")
 });
 
 /// Finds every short reference cited in free text, in order of first appearance, without

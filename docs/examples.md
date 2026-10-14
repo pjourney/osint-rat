@@ -31,7 +31,7 @@ Inside the workbench:
 | `4` | Findings. `[COL]` marks a collected diagnostic |
 | `5` | Entities such as the domain, its addresses, and its nameservers. `Enter` opens Object View |
 | `g` | Graph of those entities. `s` Search Around two hops (addresses, nameservers, then ASNs) |
-| `6` | Timeline, including registration dates and later observation changes |
+| `6` | Timeline overlay: collection log + imported Events. `[` `]` `f` filter by entity; `l` nearby |
 | `8` | Jobs, if a collector is still running or a previous one failed |
 | `/` | Search. Try `example.com` or a short id such as `E-1` |
 
@@ -174,7 +174,15 @@ os-int-learn report "Example Corp" --format json -o /tmp/example-corp.json
 os-int-learn export "Example Corp" -o /tmp/example-corp-export
 ```
 
-The export directory contains `investigation.osint.json` and a `files/` tree. On another machine, or in another data directory:
+The export directory contains `investigation.osint.json` (format version 3) and a `files/` tree. GeoJSON and co-occurrence are separate:
+
+```bash
+os-int-learn export "Example Corp" --format geojson -o /tmp/example-corp.geojson
+os-int-learn geojson "Example Corp" -o /tmp/example-corp.geojson
+os-int-learn cooccur "Example Corp"
+```
+
+On another machine, or in another data directory:
 
 ```bash
 os-int --data-dir /tmp/os-int-other import /tmp/example-corp-export

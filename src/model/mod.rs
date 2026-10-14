@@ -11,8 +11,11 @@ pub mod agent;
 pub mod artifact;
 pub mod batch;
 pub mod common;
+pub mod cooccur;
 pub mod entity;
+pub mod event;
 pub mod finding;
+pub mod geo;
 pub mod graph;
 pub mod ids;
 pub mod investigation;
@@ -25,6 +28,7 @@ pub mod relationship;
 pub mod resolution;
 pub mod source;
 pub mod target;
+pub mod time;
 pub mod timeline;
 pub mod workspace;
 
@@ -35,8 +39,19 @@ pub use batch::{
     NewSource, NewTimelineEvent, SourceKey,
 };
 pub use common::{Confidence, Fields, Provenance, Timestamp, now};
+pub use cooccur::{
+    CoOccurrence, CoOccurrenceKind, CoOccurrenceQuery, DEFAULT_WINDOW, co_occur, event_involves,
+    intervals_overlap,
+};
 pub use entity::{Entity, EntityKind};
+pub use event::{Event, NewEvent};
 pub use finding::Finding;
+pub use geo::{
+    GeoDerivation, GeoJsonFeatureCollection, GeoLocation, GeoPoint, MAX_LATITUDE, MAX_LONGITUDE,
+    MIN_LATITUDE, MIN_LONGITUDE, annotate_geo_fields, country_centroid, entity_kinds_with_geo,
+    geojson_collection, nearby_entities, normalize_country, parse_ip, parse_latitude,
+    parse_latitude_json, parse_longitude, parse_longitude_json, point_from_fields,
+};
 pub use graph::{
     DEFAULT_EDGE_CAP, DEFAULT_GRAPH_HOPS, DEFAULT_NODE_CAP, DEFAULT_SEARCH_HOPS, FacetAxis,
     FacetChip, GraphEdge, GraphFacets, GraphFilters, GraphNode, MAX_SEARCH_HOPS, SearchAroundQuery,
@@ -67,5 +82,6 @@ pub use resolution::{
 };
 pub use source::{Source, SourceKind};
 pub use target::{Target, TargetError, TargetKind, is_subdomain_of};
-pub use timeline::{TimelineEvent, TimelineKind};
+pub use time::parse_timestamp_untrusted;
+pub use timeline::{TimelineEvent, TimelineKind, TimelineRow, TimelineRowOrigin, overlay_timeline};
 pub use workspace::{InvestigationData, PageEntityLink, Workspace};

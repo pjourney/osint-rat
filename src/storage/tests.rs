@@ -210,6 +210,13 @@ fn a_changed_observation_is_recorded_on_the_timeline() {
             .any(|event| event.kind == TimelineKind::Changed
                 && event.title.contains("DNS records for example.com"))
     );
+    assert!(
+        data.events.iter().any(|event| {
+            event.kind == TimelineKind::Changed
+                && event.fields.get("change_intelligence") == Some("observation_hash")
+        }),
+        "observation-hash changes must become Event objects"
+    );
     let repeated = store
         .apply_batch(context, &dns_batch("hash-2"))
         .expect("repeat");
@@ -241,6 +248,13 @@ fn collected_diagnostics_are_upserted_and_cleared() {
     assert_eq!(data.findings.len(), 1);
     assert_eq!(data.findings[0].provenance, Provenance::Collected);
     assert_eq!(data.findings[0].source_ids, created.source_ids);
+    assert!(
+        data.events.iter().any(|event| {
+            event.kind == TimelineKind::Finding
+                && event.fields.get("change_intelligence") == Some("diagnostic_open")
+        }),
+        "diagnostic open must become an Event candidate"
+    );
 
     let mut revised = EvidenceBatch::new();
     let mut source = NewSource::collected(SourceKind::Dns, "dns", "DNS records for example.com");
@@ -268,6 +282,13 @@ fn collected_diagnostics_are_upserted_and_cleared() {
     assert_eq!(resolved.resolved_findings, 1);
     let data = store.load_investigation(investigation.id).expect("loads");
     assert!(data.findings.is_empty());
+    assert!(
+        data.events.iter().any(|event| {
+            event.kind == TimelineKind::Finding
+                && event.fields.get("change_intelligence") == Some("diagnostic_clear")
+        }),
+        "diagnostic clear must become an Event candidate"
+    );
 }
 
 #[test]

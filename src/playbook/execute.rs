@@ -102,11 +102,7 @@ pub async fn gather(
                 job.progress(format!("collect {collector}"));
                 match entry.collect(seed, collector_context).await {
                     Ok(output) => take_collection(&mut batches, &mut warnings, output),
-                    Err(error) => {
-                        return Err(PlaybookError::new(format!(
-                            "collector {collector} failed: {error}"
-                        )));
-                    }
+                    Err(error) => return Err(collect_failure(collector, error)),
                 }
             }
             PlaybookStep::RunTool { tool } => {
@@ -224,6 +220,14 @@ fn dry_run_output(
     }
 }
 
+fn collect_failure(collector: &str, error: String) -> PlaybookError {
+    if error == "cancelled" {
+        PlaybookError::new("cancelled")
+    } else {
+        PlaybookError::new(format!("collector {collector} failed: {error}"))
+    }
+}
+
 fn take_collection(
     batches: &mut Vec<EvidenceBatch>,
     warnings: &mut Vec<String>,
@@ -317,7 +321,13 @@ fn finish(
     let should_propose = outcome.digest_changed || outcome.summary.changed_observations > 0;
     let mut proposals = if should_propose {
         if options.automation {
-            change_proposals(playbook, &outcome.summary, &batches, outcome.digest_changed)
+            change_proposals(
+                playbook,
+                &outcome.summary,
+                &batches,
+                outcome.digest_changed,
+                &digest,
+            )
         } else {
             let mut proposals = template_proposals(playbook);
             run_search_and_resolve(
@@ -1014,6 +1024,15 @@ resolved_findings:
 "#;
         let actual = crate::playbook::parse_playbook_yaml(input).expect_err("resolved");
         assert!(actual.message.contains("resolved_findings"));
+    }
+
+    #[test]
+    fn collector_cancel_is_cancellation_not_failure() {
+        let cancelled = super::collect_failure("dns", "cancelled".into());
+        assert_eq!(cancelled.message, "cancelled");
+        let failed = super::collect_failure("dns", "timeout".into());
+        assert_eq!(failed.message, "collector dns failed: timeout");
+        assert_ne!(failed.message, "cancelled");
     }
 
     #[test]

@@ -29,6 +29,7 @@ pub enum PropertyType {
     Timestamp,
     Asn,
     Fingerprint,
+    Coordinate,
 }
 
 impl PropertyType {
@@ -43,6 +44,7 @@ impl PropertyType {
             PropertyType::Timestamp => "timestamp",
             PropertyType::Asn => "asn",
             PropertyType::Fingerprint => "fingerprint",
+            PropertyType::Coordinate => "coordinate",
         }
     }
 }
@@ -250,6 +252,62 @@ const NETWORK: PropertyGroup = PropertyGroup {
             kind: PropertyType::Hostname,
             required: false,
             description: "Reverse DNS names.",
+        },
+        PropertySpec {
+            key: "latitude",
+            label: "Latitude",
+            kind: PropertyType::Coordinate,
+            required: false,
+            description: "WGS-84 latitude when a local geo database or registry provided it.",
+        },
+        PropertySpec {
+            key: "longitude",
+            label: "Longitude",
+            kind: PropertyType::Coordinate,
+            required: false,
+            description: "WGS-84 longitude when a local geo database or registry provided it.",
+        },
+        PropertySpec {
+            key: "geo_source",
+            label: "Geo source",
+            kind: PropertyType::String,
+            required: false,
+            description: "How coordinates were derived: collected, geo_db, or country_centroid.",
+        },
+    ],
+};
+
+const GEO: PropertyGroup = PropertyGroup {
+    id: "geo",
+    label: "Location",
+    properties: &[
+        PropertySpec {
+            key: "country",
+            label: "Country",
+            kind: PropertyType::String,
+            required: false,
+            description: "ISO country from registry, RDAP, or a local geo database.",
+        },
+        PropertySpec {
+            key: "latitude",
+            label: "Latitude",
+            kind: PropertyType::Coordinate,
+            required: false,
+            description: "WGS-84 latitude.",
+        },
+        PropertySpec {
+            key: "longitude",
+            label: "Longitude",
+            kind: PropertyType::Coordinate,
+            required: false,
+            description: "WGS-84 longitude.",
+        },
+        PropertySpec {
+            key: "geo_source",
+            label: "Geo source",
+            kind: PropertyType::String,
+            required: false,
+            description: "How coordinates were derived.",
         },
     ],
 };
@@ -601,7 +659,7 @@ pub const OBJECT_TYPES: &[ObjectType] = &[
         "An organization, registrar, or operator.",
         Some("organization"),
         Some("organization"),
-        &[IDENTITY, PAGE]
+        &[IDENTITY, PAGE, GEO]
     ),
     object_type!(
         "location",
@@ -609,7 +667,7 @@ pub const OBJECT_TYPES: &[ObjectType] = &[
         "A place name.",
         Some("location"),
         None,
-        &[IDENTITY]
+        &[IDENTITY, GEO]
     ),
     object_type!(
         "phone",

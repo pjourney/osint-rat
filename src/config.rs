@@ -193,6 +193,8 @@ pub struct CollectorConfig {
     pub external: Vec<ExternalCollectorConfig>,
     /// Optional URLScan / OTX wrappers. Off until enabled with a key (OTX) or `enabled`.
     pub api: Vec<ApiConnectorConfig>,
+    /// Optional local geo database (JSON records or an MMDB file). Never fetched from the network.
+    pub geo_db_path: Option<PathBuf>,
 }
 
 impl Default for CollectorConfig {
@@ -207,6 +209,7 @@ impl Default for CollectorConfig {
             max_ingest_bytes: DEFAULT_MAX_INGEST_BYTES,
             external: Vec::new(),
             api: Vec::new(),
+            geo_db_path: None,
         }
     }
 }
@@ -380,6 +383,9 @@ repository_history_depth = 200
 max_subdomains = 80
 max_username_profiles = 8
 max_ingest_bytes = 20971520
+# Optional local geo database. JSON `{ "records": [{ "network", "country", "latitude", "longitude" }] }`
+# or an MMDB file. Lookups stay on disk; missing files degrade without crashing.
+# geo_db_path = "/var/lib/os-int/GeoLite2-City.mmdb"
 
 # Sidecar that prints Evidence Batch JSON on stdout. See docs/connectors.md.
 # [[collectors.external]]
@@ -508,6 +514,14 @@ impl Config {
                     collector.id
                 ));
             }
+        }
+        if let Some(path) = &self.collectors.geo_db_path
+            && !path.exists()
+        {
+            warnings.push(format!(
+                "collectors.geo_db_path {} is missing; geo lookups will be skipped",
+                path.display()
+            ));
         }
         for connector in &self.collectors.api {
             if !connector.api_key.trim().is_empty() {

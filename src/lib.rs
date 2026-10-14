@@ -29,6 +29,7 @@
 //! | [`report`] | Markdown and JSON reports. |
 //! | [`exchange`] | Versioned import and export. |
 //! | [`ingest`] | STIX, MISP, CSV/JSON, and Evidence Batch file ingest. |
+//! | [`geo`] | Local geo lookups (JSON or MMDB). No network. Missing files degrade. |
 //! | [`playbook`] | YAML playbooks and watch-set automations. Collectors still return batches. |
 //! | [`config`] | `config.toml`. Missing keys use the defaults in this module. |
 //! | [`paths`] | Platform config and data directories. |
@@ -45,6 +46,7 @@ pub mod doctor;
 pub mod exchange;
 pub mod exec;
 pub mod files;
+pub mod geo;
 pub mod ingest;
 pub mod jobs;
 pub mod logging;

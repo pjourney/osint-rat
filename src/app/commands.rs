@@ -131,7 +131,12 @@ pub const COMMANDS: &[Command] = &[
     Command {
         id: "open_timeline",
         title: "Open Timeline",
-        hint: "",
+        hint: "6",
+    },
+    Command {
+        id: "toggle_nearby",
+        title: "Nearby (country / prefix)",
+        hint: "l",
     },
     Command {
         id: "open_jobs",

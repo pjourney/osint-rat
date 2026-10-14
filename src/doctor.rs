@@ -97,6 +97,15 @@ pub fn run(
     };
     checks.push(ok("Network", network));
     checks.push(ok("Logs", paths.log_dir().display().to_string()));
+    match &config.collectors.geo_db_path {
+        Some(path) if path.exists() => checks.push(ok("Geo DB", path.display().to_string())),
+        Some(path) => checks.push(Check {
+            name: "Geo DB".into(),
+            status: CheckStatus::Missing,
+            detail: format!("{} not found; lookups skipped", path.display()),
+        }),
+        None => checks.push(ok("Geo DB", "not configured (optional local JSON or MMDB)")),
+    }
     checks
 }
 

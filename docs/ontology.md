@@ -85,7 +85,7 @@ Implemented agent Actions include playbook kinds. AI and automations only propos
 | `RUN_PLAYBOOK` | yes | Bundled ids only (`domain-infra`, `mail-policy`, `cert-estate`, `repo-surface`). Nested playbooks and file paths are refused. Active tools are refused |
 | `ASSERT_FINDING_TEMPLATE` | yes | Pending until accept. Playbook-originated accepts use `analyst` provenance; agent-originated accepts keep `agent` |
 
-Accept and reject record `decided_at` and `decided_by` (the local user name from `$USER` / `$USERNAME`, or `local`). Pending rows leave both empty. `decided_by` is an optional archive field. Resolution bags required a format bump: `FORMAT_VERSION` is **2**.
+Accept and reject record `decided_at` and `decided_by` (the local user name from `$USER` / `$USERNAME`, or `local`). Pending rows leave both empty. `decided_by` is an optional archive field. Resolution bags required format version **2**. First-class Events required format version **3**.
 
 ## Entity resolution
 
@@ -98,6 +98,14 @@ A **resolution bag** is a canonical entity plus the constituents absorbed into i
 - Graph and Search Around collapse constituents onto the canonical (one node). Object View lists constituents and the union of sources, links, and findings.
 
 Safe merge practices: [user guide](guide.md#entity-resolution).
+
+## Events, time, and place
+
+A first-class **Event** (`C-n`) is an instant (`ended_at` absent) or an interval. Entities link through `event_entities`. The Timeline screen overlays collection log rows (`T-n`) and Events; filter with `[` `]` `f`, nearby with `l`. Co-occurrence (`os-int cooccur`) finds pairs that share an Event, a source, or a time window (default 24 hours). Overlay and co-occurrence follow resolution bags (`member_ids_of`).
+
+Geo properties (`country`, `latitude`, `longitude`, `prefix`, `geo_source`) live on the entity field bag. `geo_source` is `collected` (RDAP / Cymru), `geo_db` (optional local JSON or MMDB), or `country_centroid` (derived fallback). Built-ins never phone home for geo. `os-int export --format geojson` writes Point and envelope Polygon features plus properties. Missing geo databases degrade; they do not crash.
+
+Change intelligence: an observation-hash flip writes a `changed` log row and an Event (`change_intelligence=observation_hash`). Opening or clearing a collected diagnostic promotes an Event (`diagnostic_open` / `diagnostic_clear`). Agent-suggested findings still require accept.
 
 ## Graph and Search Around
 
@@ -124,4 +132,5 @@ The screen shows:
 - [User guide — Object View](guide.md#object-view)
 - [User guide — Graph and Search Around](guide.md#graph-and-search-around)
 - [User guide — Entity resolution](guide.md#entity-resolution)
+- [User guide — Timeline and geospatial](guide.md#timeline-and-geospatial)
 - [Playbooks](playbooks.md)

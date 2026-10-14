@@ -9,6 +9,7 @@ This is the complete guide to using os-int: the workbench, the collectors, the a
 - [The workbench](#the-workbench)
 - [Building a case](#building-a-case)
 - [Graph and Search Around](#graph-and-search-around)
+- [Timeline and geospatial](#timeline-and-geospatial)
 - [Entity resolution](#entity-resolution)
 - [Collectors](#collectors)
 - [Ingest](#ingest)
@@ -70,6 +71,7 @@ A **finding** is a claim. It should cite the sources that support it. Confidence
 | `E` | Entity | `J` | Job |
 | `R` | Relationship | `Q` | Agent run |
 | `V` | Resolution | `X` | Proposal |
+| `C` | Event (instant or interval) | | |
 
 `S-12` means "source number 12 in this investigation." The UUID remains the primary key.
 
@@ -175,6 +177,7 @@ Press `p` or `Ctrl+P`, then type to filter.
 | Generate Report | Markdown or JSON |
 | Add Finding / Add Note | Analyst-authored records |
 | Open Entities, Sources, Findings, Timeline, Jobs, Tools, Artifacts, Agent History | Jump to that screen |
+| Nearby (country / prefix) | Timeline / Entities: list co-located entities (`l`) |
 | Object View | Typed properties, catalogued links, sources, and findings for the selected entity or page (`v`) |
 | Graph | Link-analysis canvas of entities and relationships (`g`) |
 | Search Around | Expand 1–N hops from the selection and merge into Graph (`s`) |
@@ -233,6 +236,27 @@ Graph is a terminal link-analysis canvas (TUI-first; there is no embedded webvie
 Empty investigations do not crash: Graph shows an empty neighborhood and a collect hint.
 
 Resolved constituents are hidden: the graph shows **one node** for the canonical. Search Around from a constituent seed starts at the canonical.
+
+## Timeline and geospatial
+
+Time and place are first-class. The Timeline screen overlays **collection log rows** (`T-n`) and **Event objects** (`C-n`). An Event is an instant when `ended_at` is absent, otherwise an interval. STIX `first_observed` / `last_observed` and Evidence Batch `events` import as Events. Observation-hash changes and diagnostic flips also promote Events (`change_intelligence` on the field bag). Agent-suggested findings still require accept.
+
+- Press `6` or the palette command **Open Timeline**.
+- `[` / `]` move the entity-filter cursor. `f` filters the overlay to that entity (resolution bags included). `x` clears the filter.
+- `Enter` on a row with a linked entity opens Object View. `Esc` returns to the same Timeline selection.
+- `l` on Timeline or Entities lists **nearby** entities that share a `country` or `prefix`. `Esc` restores the previous list and selection. Empty data does not crash.
+
+Co-occurrence (`os-int cooccur`) prints pairs that share an Event, a cited source, or a time window (default 24 hours).
+
+Geo fields (`country`, `latitude`, `longitude`, `prefix`, `geo_source`) come from RDAP, Team Cymru, an optional local geo database, or a country centroid. `geo_source` records how coordinates were derived (`collected`, `geo_db`, `country_centroid`). Built-ins never fetch a geo service. Set `collectors.geo_db_path` to a JSON records file or an MMDB. A missing file is reported and skipped.
+
+```bash
+os-int geojson "Example Corp" -o ./example.geojson
+os-int export "Example Corp" --format geojson -o ./example.geojson
+os-int cooccur "Example Corp" --window 24
+```
+
+GeoJSON is a FeatureCollection of Points and envelope Polygons plus properties (`kind`, `value`, `country`, `prefix`, `geo_source`, `canonical_id`). It is not the investigation archive.
 
 ## Entity resolution
 
@@ -320,6 +344,7 @@ Sidecars that print Evidence Batch JSON are `[[collectors.external]]`. Optional 
 os-int ingest tests/fixtures/ingest/stix-bundle.json --format stix --investigation "Example Corp"
 os-int ingest tests/fixtures/ingest/misp-event.json --format misp
 os-int ingest tests/fixtures/ingest/observables.csv --format csv
+os-int ingest tests/fixtures/ingest/events-batch.json --format batch
 ```
 
 `--format` is guessed from the file name when omitted. `--map kind=type,value=indicator` and `--kind domain` cover bulk CSV/JSON. Esc on the ingest form restores the entity selection; Enter applies and keeps that selection (canonical id after a merge). An empty path or a parse error leaves the form open. Caps, encoding, and the sidecar protocol: [connectors.md](connectors.md).
@@ -501,7 +526,7 @@ os-int import ./example-corp
 os-int import ./example-corp --rename
 ```
 
-The directory contains `investigation.osint.json` (format `os-int-investigation`, version 2) plus a `files/` tree of the investigation's snapshots, notes artifacts, and reports. Paths inside the manifest are relative. Version-1 archives still import (empty `data.resolutions`). Import refuses an archive whose investigation id already exists, unless you pass `--rename`, which assigns a new investigation id, remaps every record UUID (including resolution bags), and copies the files under the new id. The JSON fields, ingest batch, and version-bump rules are in [Ontology Exchange Format](ontology-exchange.md).
+The directory contains `investigation.osint.json` (format `os-int-investigation`, version 3) plus a `files/` tree of the investigation's snapshots, notes artifacts, and reports. Paths inside the manifest are relative. Version-1 and version-2 archives still import (empty `data.resolutions` / `data.events`). Import refuses an archive whose investigation id already exists, unless you pass `--rename`, which assigns a new investigation id, remaps every record UUID (including resolution bags and Events), and copies the files under the new id. `--format geojson` writes a FeatureCollection instead of an archive. The JSON fields, ingest batch, and version-bump rules are in [Ontology Exchange Format](ontology-exchange.md).
 
 Without `-o`, export uses `<sanitized-name>-<uuid>` in the current directory.
 
@@ -533,7 +558,9 @@ os-int [OPTIONS] [COMMAND]
 | `playbook run <id-or-file> --investigation <name> --target <seed>` | Run a playbook (`--dry-run` plans only) |
 | `watch --playbook <id-or-file> --investigation <name>` | Re-run collect steps (`--dry-run`, `--once`, `--interval`) |
 | `report <name> [--format markdown\|json] [-o <file>]` | Write a report |
-| `export <name> [-o <dir>]` | Write a portable directory |
+| `export <name> [-o <dir>] [--format archive\|geojson]` | Write a portable directory, or GeoJSON |
+| `geojson <name> [-o <file>]` | Write a GeoJSON FeatureCollection |
+| `cooccur <name> [--window <hours>]` | Print pairs that share an Event, source, or time window |
 | `import <path> [--rename]` | Import an export directory |
 | `doctor` | Check the database, config, network, logs, and common programs |
 | `config` | Print the resolved config, data, database, and log paths |
@@ -587,6 +614,7 @@ repository_history_depth = 200
 max_subdomains = 80
 max_username_profiles = 8
 max_ingest_bytes = 20971520
+# geo_db_path = "/var/lib/os-int/city.json"
 
 [tools]
 # disabled = ["dig"]
@@ -618,6 +646,7 @@ max_ingest_bytes = 20971520
 | `collectors.max_subdomains` | `80` | Hostnames promoted during subdomain expansion |
 | `collectors.max_username_profiles` | `8` | Public profile URL checks in the username pack |
 | `collectors.max_ingest_bytes` | `20971520` | Largest STIX / MISP / CSV / batch file `os-int ingest` will read (20 MiB) |
+| `collectors.geo_db_path` | unset | Optional local JSON or MMDB for IP coordinates. Missing files degrade; no network |
 | `collectors.external` | empty | Sidecars that print Evidence Batch JSON. See [connectors.md](connectors.md) |
 | `collectors.api` | empty | Optional URLScan / OTX wrappers. Off until enabled |
 | `tools.disabled` | empty | Built-in tool names to hide |
@@ -665,6 +694,10 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `[` `]` | Graph | Move the facet cursor |
 | `f` | Graph | Apply or toggle the highlighted facet |
 | `x` | Graph | Clear facet filters |
+| `[` `]` | Timeline | Move the entity-filter cursor |
+| `f` | Timeline | Filter overlay by the highlighted entity |
+| `x` | Timeline | Clear the entity filter |
+| `l` | Timeline, Entities | Nearby (same country or prefix) |
 | `Space` | Entities | Mark or unmark for merge |
 | `m` | Entities | Propose merge of marked entities |
 | `u` | Object View, Entities | Propose unresolve |

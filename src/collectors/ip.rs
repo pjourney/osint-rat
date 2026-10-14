@@ -108,9 +108,14 @@ async fn collect(target: &Target, context: &CollectorContext) -> CollectResult {
     for warning in &observation.warnings {
         context.job.log(format!("warning: {warning}"));
     }
+    let geo = crate::geo::lookup_ip(context.settings.geo_db_path.as_deref(), *ip);
+    let mut warnings = observation.warnings.clone();
+    if let Some(warning) = geo.warning {
+        warnings.push(warning);
+    }
     Ok(CollectionOutput {
-        warnings: observation.warnings.clone(),
-        batch: build_batch(&observation),
+        warnings,
+        batch: finish_batch(&observation, geo.location.as_ref()),
     })
 }
 
@@ -236,6 +241,13 @@ pub fn parse_cymru_asn(record: &str) -> Option<CymruAsn> {
 
 /// Builds the evidence batch. Pure and unit-tested.
 pub fn build_batch(observation: &IpObservation) -> EvidenceBatch {
+    finish_batch(observation, None)
+}
+
+fn finish_batch(
+    observation: &IpObservation,
+    geo: Option<&crate::model::GeoLocation>,
+) -> EvidenceBatch {
     let mut batch = EvidenceBatch::new();
     let (content, fields) = describe(observation);
     let mut source = NewSource::collected(
@@ -254,6 +266,7 @@ pub fn build_batch(observation: &IpObservation) -> EvidenceBatch {
     }
     if let Some(origin) = &observation.origin {
         let asn = EntityKey::new(EntityKind::Asn, &format!("AS{}", origin.asn));
+        batch.relate(&ip, relation::ANNOUNCED_BY, &asn, Some(key));
         if let Some(description) = &observation.asn {
             batch.label(&asn, description.name.clone());
             batch.annotate(
@@ -263,7 +276,14 @@ pub fn build_batch(observation: &IpObservation) -> EvidenceBatch {
             );
         }
         batch.annotate(&ip, "prefix", origin.prefix.clone());
-        batch.relate(&ip, relation::ANNOUNCED_BY, &asn, Some(key));
+        if let Some(country) = origin
+            .country
+            .as_deref()
+            .and_then(crate::model::normalize_country)
+        {
+            batch.annotate(&ip, "country", country);
+        }
+        batch.annotate(&asn, "prefix", origin.prefix.clone());
         if let Some(allocated) = origin
             .allocated
             .as_deref()
@@ -278,12 +298,82 @@ pub fn build_batch(observation: &IpObservation) -> EvidenceBatch {
                     origin.registry.as_deref().unwrap_or("unknown registry")
                 ),
                 Some(key),
-                Some(ip),
+                Some(ip.clone()),
             );
         }
     }
+    apply_geo(&mut batch, &ip, observation, geo);
     batch.summary = summarize(observation);
     batch
+}
+
+fn apply_geo(
+    batch: &mut EvidenceBatch,
+    ip: &EntityKey,
+    observation: &IpObservation,
+    geo: Option<&crate::model::GeoLocation>,
+) {
+    if let Some(location) = geo
+        && let Some(entity) = batch.entities.iter_mut().find(|entity| entity.key == *ip)
+    {
+        crate::model::annotate_geo_fields(
+            &mut entity.fields,
+            location,
+            crate::model::Provenance::Collected,
+        );
+    }
+    let country = batch
+        .entities
+        .iter()
+        .find(|entity| entity.key == *ip)
+        .and_then(|entity| entity.fields.get("country").map(ToString::to_string))
+        .or_else(|| {
+            observation
+                .origin
+                .as_ref()
+                .and_then(|origin| origin.country.clone())
+        });
+    let has_point = batch
+        .entities
+        .iter()
+        .find(|entity| entity.key == *ip)
+        .and_then(|entity| crate::model::point_from_fields(&entity.fields))
+        .is_some();
+    if !has_point
+        && let Some(country) = country.as_deref().and_then(crate::model::normalize_country)
+        && let Some(point) = crate::model::country_centroid(&country)
+    {
+        batch.annotate(ip, "latitude", format!("{:.6}", point.latitude));
+        batch.annotate(ip, "longitude", format!("{:.6}", point.longitude));
+        batch.annotate(ip, "geo_source", "country_centroid");
+    }
+    if let Some(origin) = &observation.origin {
+        let asn = crate::model::EntityKey::new(
+            crate::model::EntityKind::Asn,
+            &format!("AS{}", origin.asn),
+        );
+        let country = observation
+            .asn
+            .as_ref()
+            .and_then(|description| description.country.clone())
+            .or_else(|| origin.country.clone())
+            .as_deref()
+            .and_then(crate::model::normalize_country);
+        if let Some(country) = country {
+            batch.annotate(&asn, "country", country.clone());
+            let has_point = batch
+                .entities
+                .iter()
+                .find(|entity| entity.key == asn)
+                .and_then(|entity| crate::model::point_from_fields(&entity.fields))
+                .is_some();
+            if !has_point && let Some(point) = crate::model::country_centroid(&country) {
+                batch.annotate(&asn, "latitude", format!("{:.6}", point.latitude));
+                batch.annotate(&asn, "longitude", format!("{:.6}", point.longitude));
+                batch.annotate(&asn, "geo_source", "country_centroid");
+            }
+        }
+    }
 }
 
 fn describe(observation: &IpObservation) -> (String, Fields) {
@@ -401,5 +491,20 @@ mod tests {
         }));
         assert_eq!(actual.timeline.len(), 1);
         assert!(actual.summary.contains("CLOUDFLARENET"));
+        let ip = actual
+            .entities
+            .iter()
+            .find(|entity| entity.key.kind == EntityKind::Ip)
+            .expect("ip");
+        assert_eq!(ip.fields.get("country"), Some("AU"));
+        assert_eq!(ip.fields.get("geo_source"), Some("country_centroid"));
+        assert!(ip.fields.get("latitude").is_some());
+        let asn = actual
+            .entities
+            .iter()
+            .find(|entity| entity.key.kind == EntityKind::Asn)
+            .expect("asn");
+        assert_eq!(asn.fields.get("country"), Some("US"));
+        assert_eq!(asn.fields.get("prefix"), Some("1.1.1.0/24"));
     }
 }

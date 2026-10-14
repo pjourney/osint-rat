@@ -119,6 +119,13 @@ fn map_normal_key(key: KeyEvent, view: View, ctrl: bool) -> Option<Action> {
         KeyCode::Char('[') if view == View::Graph => Some(Action::GraphFacetMove(-1)),
         KeyCode::Char(']') if view == View::Graph => Some(Action::GraphFacetMove(1)),
         KeyCode::Char('x') if view == View::Graph => Some(Action::GraphClearFilters),
+        KeyCode::Char('[') if view == View::Timeline => Some(Action::TimelineFacetMove(-1)),
+        KeyCode::Char(']') if view == View::Timeline => Some(Action::TimelineFacetMove(1)),
+        KeyCode::Char('f') if view == View::Timeline => Some(Action::TimelineApplyFilter),
+        KeyCode::Char('x') if view == View::Timeline => Some(Action::TimelineClearFilter),
+        KeyCode::Char('l') if matches!(view, View::Timeline | View::Entities) => {
+            Some(Action::ToggleNearby)
+        }
         KeyCode::Char(' ') if view == View::Entities => Some(Action::ToggleMergeMark),
         KeyCode::Char('m') if view == View::Entities => Some(Action::ProposeMerge),
         KeyCode::Char('u') if matches!(view, View::Entities | View::Object) => {
@@ -162,6 +169,10 @@ os-int keyboard shortcuts
   [ / ]        Graph: move facet cursor
   f            Graph: apply (or toggle) the highlighted facet
   x            Graph: clear facet filters
+  [ / ]        Timeline: move entity-filter cursor
+  f            Timeline: filter overlay by highlighted entity
+  x            Timeline: clear entity filter
+  l            Timeline / Entities: nearby (same country or prefix)
   Space        Entities: mark / unmark for merge
   m            Entities: propose merge of marked rows
   u            Object View / Entities: unresolve the current bag
@@ -179,6 +190,10 @@ appear under Other.
 Enter on Graph opens Object View for the selected node.
 Search Around merges new hops into the canvas. Caps require
 confirm before rendering a large neighborhood.
+
+Timeline overlays collection log rows and first-class Events.
+Filter by entity with [ ] then f. l lists nearby by country
+or prefix. Esc restores the previous list and selection.
 
 Mark two or more entities (Space) and press m to merge.
 Suggestions never auto-merge. Object View lists constituents;
@@ -285,6 +300,32 @@ mod tests {
         assert!(map_key(press(KeyCode::Char('x')), &overlay, View::Findings, false).is_none());
         assert!(map_key(press(KeyCode::Char('+')), &overlay, View::Entities, false).is_none());
         assert!(matches!(
+            map_key(press(KeyCode::Char('[')), &overlay, View::Timeline, false),
+            Some(Action::TimelineFacetMove(-1))
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char(']')), &overlay, View::Timeline, false),
+            Some(Action::TimelineFacetMove(1))
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('f')), &overlay, View::Timeline, false),
+            Some(Action::TimelineApplyFilter)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('x')), &overlay, View::Timeline, false),
+            Some(Action::TimelineClearFilter)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('l')), &overlay, View::Timeline, false),
+            Some(Action::ToggleNearby)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('l')), &overlay, View::Entities, false),
+            Some(Action::ToggleNearby)
+        ));
+        assert!(map_key(press(KeyCode::Char('l')), &overlay, View::Overview, false).is_none());
+        assert!(map_key(press(KeyCode::Char('f')), &overlay, View::Entities, false).is_none());
+        assert!(matches!(
             map_key(press(KeyCode::Char(' ')), &overlay, View::Entities, false),
             Some(Action::ToggleMergeMark)
         ));
@@ -330,7 +371,7 @@ mod tests {
         let ingest = map_key(press(KeyCode::Char('i')), &overlay, View::Entities, false);
         assert!(matches!(ingest, Some(Action::Command("ingest"))));
         let occupied: &[char] = &[
-            'q', 'a', 'p', 'n', 'e', 'r', 'v', 'g', 's', 'm', 'u', 'j', 'k', '/', '?', 'b',
+            'q', 'a', 'p', 'n', 'e', 'r', 'v', 'g', 's', 'm', 'u', 'j', 'k', '/', '?', 'b', 'l',
         ];
         assert!(!occupied.contains(&'i'));
         for ch in occupied {
@@ -352,7 +393,7 @@ mod tests {
         let playbook = map_key(press(KeyCode::Char('b')), &overlay, View::Entities, false);
         assert!(matches!(playbook, Some(Action::Command("run_playbook"))));
         let occupied: &[char] = &[
-            'q', 'a', 'p', 'n', 'e', 'r', 'v', 'g', 's', 'm', 'u', 'j', 'k', '/', '?', 'i',
+            'q', 'a', 'p', 'n', 'e', 'r', 'v', 'g', 's', 'm', 'u', 'j', 'k', '/', '?', 'i', 'l',
         ];
         assert!(!occupied.contains(&'b'));
         for ch in occupied {
@@ -369,6 +410,29 @@ mod tests {
         assert!(matches!(
             map_key(press(KeyCode::Char('b')), &overlay, View::Entities, true),
             Some(Action::InsertChar('b'))
+        ));
+    }
+
+    #[test]
+    fn nearby_key_is_unique_in_normal_mode() {
+        let overlay = Overlay::None;
+        let nearby = map_key(press(KeyCode::Char('l')), &overlay, View::Entities, false);
+        assert!(matches!(nearby, Some(Action::ToggleNearby)));
+        let occupied: &[char] = &[
+            'q', 'a', 'p', 'n', 'e', 'r', 'v', 'g', 's', 'm', 'u', 'j', 'k', '/', '?', 'i', 'b',
+        ];
+        assert!(!occupied.contains(&'l'));
+        for ch in occupied {
+            let action = map_key(press(KeyCode::Char(*ch)), &overlay, View::Entities, false);
+            assert!(action.is_some(), "expected {ch} to stay bound");
+            assert!(
+                !matches!(action, Some(Action::ToggleNearby)),
+                "{ch} must not also map to nearby"
+            );
+        }
+        assert!(matches!(
+            map_key(press(KeyCode::Char('l')), &overlay, View::Entities, true),
+            Some(Action::InsertChar('l'))
         ));
     }
 

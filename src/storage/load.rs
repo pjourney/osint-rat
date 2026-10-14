@@ -9,6 +9,7 @@ use super::activity::{
     insert_agent_run_record, insert_job_record, insert_proposal_record, list_agent_runs, list_jobs,
     list_proposals,
 };
+use super::events::{insert_event_record, list_events};
 use super::evidence::{
     insert_artifact_record, insert_finding_record, insert_source_record, insert_timeline_record,
     list_artifacts, list_findings, list_sources, list_timeline,
@@ -41,6 +42,7 @@ impl Store {
             proposals: list_proposals(connection, investigation_id)?,
             page_entities: list_page_entities(connection, investigation_id)?,
             resolutions: list_resolutions(connection, investigation_id)?,
+            events: list_events(connection, investigation_id)?,
         })
     }
 
@@ -151,6 +153,9 @@ impl Store {
         }
         for resolution in &data.resolutions {
             insert_resolution_record(&transaction, resolution)?;
+        }
+        for event in &data.events {
+            insert_event_record(&transaction, event)?;
         }
         transaction.commit()?;
         Ok(())
