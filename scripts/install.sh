@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-liner installer for tagged os-int releases (Linux and macOS).
 # Pin the script URL and OS_INT_VERSION to the same tag, not main:
-#   OS_INT_VERSION=v1.0.0 curl -fsSL https://raw.githubusercontent.com/pjourney/osint-rat/v1.0.0/scripts/install.sh | bash
+#   OS_INT_VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/pjourney/osint-rat/v0.1.0/scripts/install.sh | bash
 set -euo pipefail
 
 REPO="${OS_INT_REPO:-pjourney/osint-rat}"

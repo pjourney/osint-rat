@@ -82,7 +82,7 @@ Custom tools and sidecars marked `active` are refused. You are responsible for c
 Linux and macOS, from a **published** tagged GitHub Release (checksum-verified into `~/.local/bin`). Pin both the script URL and `OS_INT_VERSION` to the same tag, not `main`:
 
 ```bash
-OS_INT_VERSION=v1.0.0 curl -fsSL https://raw.githubusercontent.com/pjourney/osint-rat/v1.0.0/scripts/install.sh | bash
+OS_INT_VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/pjourney/osint-rat/v0.1.0/scripts/install.sh | bash
 ```
 
 Until the crate is on crates.io:
