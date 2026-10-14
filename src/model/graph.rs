@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use super::common::{Provenance, Timestamp};
 use super::entity::{Entity, EntityKind};
-use super::ontology::{OTHER_LINK_GROUP, link_group_label};
+use super::ontology::{OTHER_LINK_GROUP, inverse_of, link_group_label};
 use super::relationship::{Relationship, normalize_relationship_kind};
 use super::workspace::InvestigationData;
 
@@ -210,7 +210,8 @@ pub fn search_around(data: &InvestigationData, query: &SearchAroundQuery) -> Sea
     }
     let allowed = Allowed::from_query(query);
     let adjacency = build_adjacency(data, &allowed);
-    let (hop_of, edges) = walk_hops(&seeds, hops, &adjacency, &entities, &allowed);
+    let hop_of = walk_hops(&seeds, hops, &adjacency, &entities, &allowed);
+    let edges = induced_edges(data, &allowed, &hop_of);
     let uncapped_node_count = hop_of.len();
     let uncapped_edge_count = edges.len();
     let (nodes, truncated_nodes) = cap_nodes(hop_of, &entities, &seeds, node_cap);
@@ -309,29 +310,41 @@ pub fn apply_graph_filters(
     filters: &GraphFilters,
 ) -> VisibleGraph {
     let entities = entity_index(data);
-    let nodes: Vec<GraphNode> = result
+    let candidates: Vec<GraphNode> = result
         .nodes
         .iter()
         .filter(|node| node_matches_filters(entities.get(&node.id).copied(), filters))
         .cloned()
         .collect();
-    let kept: HashSet<Uuid> = nodes.iter().map(|node| node.id).collect();
-    let link_filter = filters
+    let candidate_ids: HashSet<Uuid> = candidates.iter().map(|node| node.id).collect();
+    let link_kinds = filters
         .link_type
         .as_deref()
-        .map(normalize_relationship_kind);
+        .map(|kind| expand_link_kinds(std::iter::once(kind)));
     let edges: Vec<GraphEdge> = result
         .edges
         .iter()
         .filter(|edge| {
-            kept.contains(&edge.from_id)
-                && kept.contains(&edge.to_id)
-                && link_filter
-                    .as_deref()
-                    .is_none_or(|kind| normalize_relationship_kind(&edge.kind) == kind)
+            candidate_ids.contains(&edge.from_id)
+                && candidate_ids.contains(&edge.to_id)
+                && link_kinds
+                    .as_ref()
+                    .is_none_or(|kinds| kinds.contains(&normalize_relationship_kind(&edge.kind)))
         })
         .cloned()
         .collect();
+    let nodes = if link_kinds.is_some() {
+        let incident: HashSet<Uuid> = edges
+            .iter()
+            .flat_map(|edge| [edge.from_id, edge.to_id])
+            .collect();
+        candidates
+            .into_iter()
+            .filter(|node| incident.contains(&node.id))
+            .collect()
+    } else {
+        candidates
+    };
     VisibleGraph { nodes, edges }
 }
 
@@ -430,12 +443,7 @@ struct Allowed {
 impl Allowed {
     fn from_query(query: &SearchAroundQuery) -> Self {
         Self {
-            link_types: query
-                .link_types
-                .iter()
-                .map(|kind| normalize_relationship_kind(kind))
-                .filter(|kind| !kind.is_empty())
-                .collect(),
+            link_types: expand_link_kinds(query.link_types.iter()),
             entity_kinds: query.entity_kinds.iter().cloned().collect(),
             provenances: query.provenances.iter().copied().collect(),
             since: query.since,
@@ -515,16 +523,29 @@ fn build_adjacency<'a>(
     adjacency
 }
 
+fn expand_link_kinds<S: AsRef<str>>(kinds: impl IntoIterator<Item = S>) -> HashSet<String> {
+    let mut expanded = HashSet::new();
+    for kind in kinds {
+        let kind = normalize_relationship_kind(kind.as_ref());
+        if kind.is_empty() {
+            continue;
+        }
+        if let Some(inverse) = inverse_of(&kind) {
+            expanded.insert(inverse.to_string());
+        }
+        expanded.insert(kind);
+    }
+    expanded
+}
+
 fn walk_hops(
     seeds: &[Uuid],
     hops: u32,
     adjacency: &HashMap<Uuid, Vec<(&Relationship, Uuid)>>,
     entities: &HashMap<Uuid, &Entity>,
     allowed: &Allowed,
-) -> (HashMap<Uuid, u32>, Vec<GraphEdge>) {
+) -> HashMap<Uuid, u32> {
     let mut hop_of: HashMap<Uuid, u32> = seeds.iter().copied().map(|id| (id, 0)).collect();
-    let mut edges: Vec<GraphEdge> = Vec::new();
-    let mut seen_edges: HashSet<Uuid> = HashSet::new();
     let mut frontier: Vec<Uuid> = seeds.to_vec();
     let seed_set: HashSet<Uuid> = seeds.iter().copied().collect();
     for hop in 1..=hops {
@@ -533,21 +554,12 @@ fn walk_hops(
             let Some(neighbors) = adjacency.get(node) else {
                 continue;
             };
-            for (relationship, neighbor) in neighbors {
+            for (_relationship, neighbor) in neighbors {
                 let Some(entity) = entities.get(neighbor) else {
                     continue;
                 };
                 if !allowed.neighbor(entity, seed_set.contains(neighbor)) {
                     continue;
-                }
-                if seen_edges.insert(relationship.id) {
-                    edges.push(GraphEdge {
-                        id: relationship.id,
-                        from_id: relationship.from_id,
-                        to_id: relationship.to_id,
-                        kind: relationship.kind.clone(),
-                        discovered_at_hop: hop,
-                    });
                 }
                 if hop_of.contains_key(neighbor) {
                     continue;
@@ -561,7 +573,36 @@ fn walk_hops(
         }
         frontier = next;
     }
-    (hop_of, edges)
+    hop_of
+}
+
+/// Every allowed edge whose endpoints were reached — the induced subgraph, including
+/// same-hop sibling links that BFS never traversed as a discovery edge.
+fn induced_edges(
+    data: &InvestigationData,
+    allowed: &Allowed,
+    hop_of: &HashMap<Uuid, u32>,
+) -> Vec<GraphEdge> {
+    let mut edges = Vec::new();
+    for relationship in &data.relationships {
+        if !allowed.edge(relationship) {
+            continue;
+        }
+        let Some(&from_hop) = hop_of.get(&relationship.from_id) else {
+            continue;
+        };
+        let Some(&to_hop) = hop_of.get(&relationship.to_id) else {
+            continue;
+        };
+        edges.push(GraphEdge {
+            id: relationship.id,
+            from_id: relationship.from_id,
+            to_id: relationship.to_id,
+            kind: relationship.kind.clone(),
+            discovered_at_hop: from_hop.max(to_hop),
+        });
+    }
+    edges
 }
 
 fn cap_nodes(
@@ -654,7 +695,6 @@ mod tests {
     use crate::model::{
         Confidence, Entity, Fields, Investigation, InvestigationData, Provenance, Relationship, now,
     };
-    use chrono::TimeZone;
 
     fn investigation() -> Investigation {
         Investigation {
@@ -841,19 +881,20 @@ mod tests {
         assert_eq!(by_prov.edges.len(), 1);
         assert!(by_prov.node_ids().any(|id| id == ns_ip.id));
         assert!(!by_prov.node_ids().any(|id| id == domain.id));
-        let t_mid = chrono::Utc
-            .with_ymd_and_hms(2099, 1, 1, 0, 0, 0)
-            .single()
-            .expect("timestamp");
+        let t0 = data.relationships[0].created_at;
+        let t1 = data.relationships[2].created_at;
         query = SearchAroundQuery::new(vec![domain.id], 2);
-        query.until = Some(t_mid);
-        let by_time = search_around(&data, &query);
-        assert!(!by_time.nodes.is_empty());
-        query.since = Some(t_mid);
+        query.until = Some(t0);
+        let early = search_around(&data, &query);
+        assert!(early.node_ids().any(|id| id == ip.id));
+        assert!(early.node_ids().any(|id| id == nameserver.id));
+        assert!(!early.node_ids().any(|id| id == asn.id));
+        query = SearchAroundQuery::new(vec![ip.id], 1);
+        query.since = Some(t1);
         query.until = None;
-        let none = search_around(&data, &query);
-        assert_eq!(none.nodes.len(), 1);
-        assert_eq!(none.edges.len(), 0);
+        let late = search_around(&data, &query);
+        assert!(late.node_ids().any(|id| id == asn.id));
+        assert!(!late.node_ids().any(|id| id == domain.id));
     }
 
     #[test]
@@ -918,12 +959,14 @@ mod tests {
         assert_eq!(only_announced.edges.len(), 1);
         assert_eq!(only_announced.edges[0].kind, "announced_by");
         assert!(only_announced.nodes.iter().any(|node| node.id == asn.id));
+        assert!(only_announced.nodes.iter().any(|node| node.id == ip.id));
         assert!(
-            only_announced
+            !only_announced
                 .nodes
                 .iter()
                 .any(|node| node.id == nameserver.id)
         );
+        assert!(!only_announced.nodes.iter().any(|node| node.id == domain.id));
         let chips = facet_chips(&facets);
         assert!(chips.iter().any(|chip| chip.axis == FacetAxis::Kind));
         assert!(chips.iter().any(|chip| chip.axis == FacetAxis::Link));
@@ -959,5 +1002,141 @@ mod tests {
         let result = search_around(&data, &SearchAroundQuery::new(vec![domain.id], 99));
         assert_eq!(result.hops_used, MAX_SEARCH_HOPS);
         assert_eq!(result.nodes.len(), 5);
+    }
+
+    #[test]
+    fn one_hop_includes_sibling_edges_between_neighbors() {
+        let domain = entity(EntityKind::Domain, "example.com", 1, Provenance::Collected);
+        let ip = entity(EntityKind::Ip, "192.0.2.10", 2, Provenance::Collected);
+        let nameserver = entity(
+            EntityKind::Hostname,
+            "ns1.example.net",
+            3,
+            Provenance::Collected,
+        );
+        let t0 = now();
+        let data = InvestigationData {
+            investigation: investigation(),
+            pages: Vec::new(),
+            sources: Vec::new(),
+            findings: Vec::new(),
+            relationships: vec![
+                edge(&domain, "resolves_to", &ip, 1, t0, Provenance::Collected),
+                edge(
+                    &domain,
+                    "uses_nameserver",
+                    &nameserver,
+                    2,
+                    t0,
+                    Provenance::Collected,
+                ),
+                edge(
+                    &ip,
+                    "associated_with",
+                    &nameserver,
+                    3,
+                    t0,
+                    Provenance::Collected,
+                ),
+            ],
+            entities: vec![domain.clone(), ip.clone(), nameserver.clone()],
+            notes: Vec::new(),
+            artifacts: Vec::new(),
+            timeline: Vec::new(),
+            jobs: Vec::new(),
+            agent_runs: Vec::new(),
+            proposals: Vec::new(),
+            page_entities: Vec::new(),
+        };
+        let one = search_around(&data, &SearchAroundQuery::new(vec![domain.id], 1));
+        assert_eq!(one.nodes.len(), 3);
+        assert!(
+            one.edges.iter().any(|edge| edge.kind == "associated_with"
+                && ((edge.from_id == ip.id && edge.to_id == nameserver.id)
+                    || (edge.from_id == nameserver.id && edge.to_id == ip.id))),
+            "same-hop sibling edge must appear in the induced 1-hop subgraph"
+        );
+    }
+
+    #[test]
+    fn cycle_is_reachable_and_induced_includes_every_cycle_edge() {
+        let alpha = entity(EntityKind::Domain, "a.example", 1, Provenance::Collected);
+        let beta = entity(EntityKind::Domain, "b.example", 2, Provenance::Collected);
+        let gamma = entity(EntityKind::Domain, "c.example", 3, Provenance::Collected);
+        let t0 = now();
+        let data = InvestigationData {
+            investigation: investigation(),
+            pages: Vec::new(),
+            sources: Vec::new(),
+            findings: Vec::new(),
+            relationships: vec![
+                edge(&alpha, "mentions", &beta, 1, t0, Provenance::Collected),
+                edge(&beta, "mentions", &gamma, 2, t0, Provenance::Collected),
+                edge(&gamma, "mentions", &alpha, 3, t0, Provenance::Collected),
+            ],
+            entities: vec![alpha.clone(), beta.clone(), gamma.clone()],
+            notes: Vec::new(),
+            artifacts: Vec::new(),
+            timeline: Vec::new(),
+            jobs: Vec::new(),
+            agent_runs: Vec::new(),
+            proposals: Vec::new(),
+            page_entities: Vec::new(),
+        };
+        let one = search_around(&data, &SearchAroundQuery::new(vec![alpha.id], 1));
+        assert_eq!(one.nodes.len(), 3);
+        assert_eq!(one.edges.len(), 3);
+        let two = search_around(&data, &SearchAroundQuery::new(vec![alpha.id], 2));
+        assert_eq!(two.nodes.len(), 3);
+        assert_eq!(two.edges.len(), 3);
+    }
+
+    #[test]
+    fn link_type_filter_includes_catalog_inverse() {
+        let domain = entity(EntityKind::Domain, "example.com", 1, Provenance::Collected);
+        let ip = entity(EntityKind::Ip, "192.0.2.10", 2, Provenance::Collected);
+        let host = entity(
+            EntityKind::Hostname,
+            "www.example.com",
+            3,
+            Provenance::Collected,
+        );
+        let t0 = now();
+        let data = InvestigationData {
+            investigation: investigation(),
+            pages: Vec::new(),
+            sources: Vec::new(),
+            findings: Vec::new(),
+            relationships: vec![
+                edge(&domain, "resolves_to", &ip, 1, t0, Provenance::Collected),
+                edge(&ip, "reverse_dns", &host, 2, t0, Provenance::Collected),
+            ],
+            entities: vec![domain.clone(), ip.clone(), host.clone()],
+            notes: Vec::new(),
+            artifacts: Vec::new(),
+            timeline: Vec::new(),
+            jobs: Vec::new(),
+            agent_runs: Vec::new(),
+            proposals: Vec::new(),
+            page_entities: Vec::new(),
+        };
+        let mut query = SearchAroundQuery::new(vec![domain.id], 2);
+        query.link_types = vec!["resolves_to".into()];
+        let result = search_around(&data, &query);
+        assert!(result.node_ids().any(|id| id == ip.id));
+        assert!(
+            result.node_ids().any(|id| id == host.id),
+            "reverse_dns is the catalog inverse of resolves_to"
+        );
+        let filtered = apply_graph_filters(
+            &data,
+            &result,
+            &GraphFilters {
+                link_type: Some("resolves_to".into()),
+                ..GraphFilters::default()
+            },
+        );
+        assert!(filtered.edges.iter().any(|edge| edge.kind == "reverse_dns"));
+        assert!(filtered.nodes.iter().any(|node| node.id == host.id));
     }
 }

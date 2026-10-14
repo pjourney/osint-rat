@@ -215,7 +215,7 @@ Graph is a terminal link-analysis canvas (TUI-first; there is no embedded webvie
 
 - Press `g`, pick **Graph** in Navigate, or run the palette command **Graph**. The seed is the current entity (Entities highlight, Object View, or the page's primary entity). If none is focused, the first entity is used. Opening Graph expands **1 hop**.
 - Press `s` or the palette command **Search Around** to expand **2 hops** from the current selection. On an open Graph, those hops **merge** into the canvas. From any other screen, Search Around opens Graph at 2 hops.
-- `+` / `-` change hop depth and re-query from the current seeds (0–8).
+- `+` / `-` change hop depth and re-query from the original seed (0–8). `hops` follows the last result's `hops_used`.
 - The **facet strip** counts the unfiltered set by entity kind, top link types, and provenance. `[` / `]` move the cursor. `f` applies (or toggles) that facet; the visible set updates immediately. `x` clears filters.
 - Render caps are **200 nodes** and **400 edges**. Crossing either threshold warns and asks for confirm before the first 200 / 400 are drawn. A capped result is labelled in the status line.
 - `Enter` opens Object View for the selected node. `Esc` returns to the screen that opened Graph. The Entities table is unchanged: `Enter` there still opens Object View.

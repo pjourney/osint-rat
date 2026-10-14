@@ -115,11 +115,11 @@ Deliver a commercial link-analysis graph surface: explore the ontology visually 
 
 ### Success criteria
 
-- [ ] From a domain investigation with real relationships, user can open Graph, see connected infra, and Search Around ≥2 hops without crashing.
-- [ ] Caps enforced; facet filter changes visible set.
-- [ ] Keyboard + palette documented; `?` help updated.
-- [ ] Search Around pure logic unit-tested (hop counts, filters, caps).
-- [ ] No regression in table Entities view; CI green.
+- [x] From a domain investigation with real relationships, user can open Graph, see connected infra, and Search Around ≥2 hops without crashing.
+- [x] Caps enforced; facet filter changes visible set.
+- [x] Keyboard + palette documented; `?` help updated.
+- [x] Search Around pure logic unit-tested (hop counts, filters, caps).
+- [x] No regression in table Entities view; CI green.
 
 ### How to complete
 

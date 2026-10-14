@@ -392,6 +392,22 @@ impl App {
                 self.entity_id = Some(entity_id);
             }
         }
+        if let Some(hops) = self.store.get_state(&scope, "graph_hops")?
+            && let Ok(hops) = hops.parse::<u32>()
+        {
+            self.graph.hops = hops.min(crate::model::MAX_SEARCH_HOPS);
+        }
+        if let Some(seeds) = self.store.get_state(&scope, "graph_seeds")? {
+            self.graph.seed_ids = seeds
+                .split(',')
+                .filter_map(|part| Uuid::parse_str(part.trim()).ok())
+                .filter(|id| {
+                    self.workspace
+                        .as_ref()
+                        .is_some_and(|workspace| workspace.entity(*id).is_some())
+                })
+                .collect();
+        }
         if let Some(view) = self.store.get_state(&scope, "view")?
             && let Some(view) = View::parse(&view)
             && view != View::Welcome
@@ -452,6 +468,16 @@ impl App {
                 .map(|entity_id| entity_id.to_string())
                 .unwrap_or_default(),
         )?;
+        self.store
+            .set_state(&scope, "graph_hops", &self.graph.hops.to_string())?;
+        let seeds = self
+            .graph
+            .seed_ids
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        self.store.set_state(&scope, "graph_seeds", &seeds)?;
         if let Some(thread) = self.agent_thread {
             self.store
                 .set_state(&scope, "agent_thread", &thread.to_string())?;
@@ -582,11 +608,16 @@ impl App {
                     self.view = View::Welcome;
                 }
             }
+            Overlay::Confirm { command, .. } => {
+                if command == "graph_confirm_cap" {
+                    self.graph.pending = None;
+                }
+                self.overlay = Overlay::None;
+            }
             Overlay::Form(_)
             | Overlay::Palette { .. }
             | Overlay::Search { .. }
             | Overlay::AgentPrompt { .. }
-            | Overlay::Confirm { .. }
             | Overlay::Help
             | Overlay::Text { .. }
             | Overlay::Doctor
@@ -1895,8 +1926,11 @@ impl App {
                     .visible_graph()
                     .nodes
                     .get(self.graph.selected)
-                    .map(|node| node.id)
-                    .or(self.entity_id);
+                    .map(|node| node.id);
+                if self.entity_id.is_none() {
+                    self.status = "No node selected.".into();
+                    return;
+                }
             }
             View::Object => {}
             View::Pages
@@ -2882,6 +2916,78 @@ mod tests {
     }
 
     #[test]
+    fn closing_graph_restores_entities_selection_to_focused_entity() {
+        let (_directory, mut app) = test_app();
+        seed_infra(&mut app);
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = Pane::Main;
+        let (ip_id, ip_index) = {
+            let workspace = app.workspace.as_ref().expect("workspace");
+            workspace
+                .data
+                .entities
+                .iter()
+                .enumerate()
+                .find(|(_, entity)| entity.kind == crate::model::EntityKind::Ip)
+                .map(|(index, entity)| (entity.id, index))
+                .expect("ip")
+        };
+        assert_ne!(ip_index, 0);
+        app.selected = ip_index;
+        app.dispatch(Action::OpenGraph).expect("graph");
+        assert_eq!(app.view, View::Graph);
+        app.dispatch(Action::Back).expect("close graph");
+        assert_eq!(app.view, View::Entities);
+        assert_eq!(app.selected, ip_index);
+        assert_eq!(app.entity_id, Some(ip_id));
+        app.dispatch(Action::Select).expect("object view");
+        assert_eq!(app.view, View::Object);
+        assert_eq!(
+            app.current_object_view().expect("object").title,
+            "192.0.2.10"
+        );
+    }
+
+    #[test]
+    fn empty_visible_graph_does_not_open_stale_object_view() {
+        let (_directory, mut app) = test_app();
+        seed_infra(&mut app);
+        app.dispatch(Action::OpenGraph).expect("graph");
+        let ip_id = app
+            .workspace
+            .as_ref()
+            .expect("workspace")
+            .data
+            .entities
+            .iter()
+            .find(|entity| entity.kind == crate::model::EntityKind::Ip)
+            .map(|entity| entity.id)
+            .expect("ip");
+        let chips = app.graph_facet_chips();
+        app.graph.facet_index = chips
+            .iter()
+            .position(|chip| chip.key == "ip")
+            .expect("ip facet");
+        app.dispatch(Action::GraphApplyFacet).expect("facet");
+        assert_eq!(app.entity_id, Some(ip_id));
+        assert_eq!(app.pane, Pane::Main);
+        app.dispatch(Action::GraphHops(-1)).expect("zero hops");
+        assert_eq!(app.graph.hops, 0);
+        assert!(app.graph.filters.kind.is_none());
+        assert_ne!(app.entity_id, Some(ip_id));
+        app.graph.filters.kind = Some("person".into());
+        app.refresh_graph_selection();
+        assert!(app.visible_graph().is_empty());
+        assert!(app.entity_id.is_none());
+        app.dispatch(Action::Select).expect("enter");
+        assert_eq!(app.view, View::Graph);
+        assert_eq!(app.status, "No node selected.");
+        app.dispatch(Action::OpenObjectView).expect("v");
+        assert_eq!(app.view, View::Graph);
+        assert_eq!(app.status, "No node selected.");
+    }
+
+    #[test]
     fn graph_facet_filter_changes_visible_set() {
         let (_directory, mut app) = test_app();
         seed_infra(&mut app);
@@ -2912,26 +3018,110 @@ mod tests {
     fn graph_caps_require_confirm_and_then_render() {
         let (_directory, mut app) = test_app();
         seed_infra(&mut app);
+        app.graph.node_cap = 2;
         app.dispatch(Action::OpenGraph).expect("graph");
-        let mut query = crate::model::SearchAroundQuery::new(app.graph.result.seed_ids.clone(), 2);
-        query.node_cap = 2;
-        let result =
-            crate::model::search_around(&app.workspace.as_ref().expect("workspace").data, &query);
-        assert!(result.requires_confirm());
-        app.graph.pending = Some(crate::app::graph::PendingGraphOp {
-            result: result.clone(),
-            hops: 2,
-        });
-        app.overlay = Overlay::Confirm {
-            title: "Large graph".into(),
-            message: "confirm".into(),
-            command: "graph_confirm_cap".into(),
-        };
+        assert!(
+            matches!(app.overlay, Overlay::Confirm { ref command, .. } if command == "graph_confirm_cap")
+        );
+        assert!(app.graph.pending.is_some());
         app.dispatch(Action::Select).expect("confirm");
         assert_eq!(app.view, View::Graph);
         assert_eq!(app.graph.result.nodes.len(), 2);
         assert!(app.graph.result.truncated);
         assert!(app.graph.pending.is_none());
+    }
+
+    #[test]
+    fn escaping_cap_dialog_clears_pending() {
+        let (_directory, mut app) = test_app();
+        seed_infra(&mut app);
+        app.graph.node_cap = 2;
+        app.dispatch(Action::OpenGraph).expect("graph");
+        assert!(app.graph.pending.is_some());
+        app.dispatch(Action::Cancel).expect("esc");
+        assert!(app.graph.pending.is_none());
+        assert_eq!(app.overlay, Overlay::None);
+        assert_ne!(app.view, View::Graph);
+    }
+
+    #[test]
+    fn restoring_graph_keeps_search_around_hops_and_seeds() {
+        let (directory, mut app) = test_app();
+        seed_infra(&mut app);
+        app.dispatch(Action::OpenGraph).expect("graph");
+        app.dispatch(Action::SearchAround).expect("two hops");
+        assert_eq!(app.graph.hops, 2);
+        let asn_id = app
+            .workspace
+            .as_ref()
+            .expect("workspace")
+            .data
+            .entities
+            .iter()
+            .find(|entity| entity.kind == crate::model::EntityKind::Asn)
+            .map(|entity| entity.id)
+            .expect("asn");
+        assert!(app.graph.result.node_ids().any(|id| id == asn_id));
+        let seeds = app.graph.seed_ids.clone();
+        app.dispatch(Action::Quit).expect("save session");
+        let paths = AppPaths::new(
+            directory.path().join("config.toml"),
+            directory.path().join("data"),
+        );
+        let store = Store::open(&paths.database()).expect("reopen");
+        let mut restarted = App::new(Config::default(), paths, store);
+        restarted.open_last_or_welcome().expect("restore");
+        assert_eq!(restarted.view, View::Graph);
+        assert_eq!(restarted.graph.hops, 2);
+        assert_eq!(restarted.graph.seed_ids, seeds);
+        assert!(restarted.graph.result.node_ids().any(|id| id == asn_id));
+    }
+
+    #[test]
+    fn changing_hops_requeries_from_original_seed() {
+        let (_directory, mut app) = test_app();
+        seed_infra(&mut app);
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = Pane::Main;
+        app.selected = 0;
+        app.dispatch(Action::OpenGraph).expect("graph");
+        assert_eq!(app.graph.hops, 1);
+        let domain_id = app.graph.seed_ids[0];
+        let (ip_id, asn_id) = {
+            let workspace = app.workspace.as_ref().expect("workspace");
+            let ip = workspace
+                .data
+                .entities
+                .iter()
+                .find(|entity| entity.kind == crate::model::EntityKind::Ip)
+                .map(|entity| entity.id)
+                .expect("ip");
+            let asn = workspace
+                .data
+                .entities
+                .iter()
+                .find(|entity| entity.kind == crate::model::EntityKind::Asn)
+                .map(|entity| entity.id)
+                .expect("asn");
+            (ip, asn)
+        };
+        assert!(!app.graph.result.node_ids().any(|id| id == asn_id));
+        let ip_index = app
+            .visible_graph()
+            .nodes
+            .iter()
+            .position(|node| node.id == ip_id)
+            .expect("ip on graph");
+        app.graph.selected = ip_index;
+        app.dispatch(Action::GraphHops(1)).expect("more hops");
+        assert_eq!(app.graph.hops, app.graph.result.hops_used);
+        assert_eq!(app.graph.hops, 2);
+        assert_eq!(app.graph.seed_ids, vec![domain_id]);
+        assert!(app.graph.result.node_ids().any(|id| id == asn_id));
+        app.dispatch(Action::GraphHops(-1)).expect("fewer hops");
+        assert_eq!(app.graph.hops, 1);
+        assert_eq!(app.graph.seed_ids, vec![domain_id]);
+        assert!(!app.graph.result.node_ids().any(|id| id == asn_id));
     }
 
     #[test]

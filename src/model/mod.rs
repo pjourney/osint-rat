@@ -36,10 +36,10 @@ pub use common::{Confidence, Fields, Provenance, Timestamp, now};
 pub use entity::{Entity, EntityKind};
 pub use finding::Finding;
 pub use graph::{
-    DEFAULT_GRAPH_HOPS, DEFAULT_NODE_CAP, DEFAULT_SEARCH_HOPS, FacetAxis, FacetChip, GraphEdge,
-    GraphFacets, GraphFilters, GraphNode, MAX_SEARCH_HOPS, SearchAroundQuery, SearchAroundResult,
-    VisibleGraph, apply_graph_filters, facet_chips, graph_facets, layout_columns,
-    merge_search_results, offset_hops, search_around,
+    DEFAULT_EDGE_CAP, DEFAULT_GRAPH_HOPS, DEFAULT_NODE_CAP, DEFAULT_SEARCH_HOPS, FacetAxis,
+    FacetChip, GraphEdge, GraphFacets, GraphFilters, GraphNode, MAX_SEARCH_HOPS, SearchAroundQuery,
+    SearchAroundResult, VisibleGraph, apply_graph_filters, facet_chips, graph_facets,
+    layout_columns, merge_search_results, offset_hops, search_around,
 };
 pub use ids::{RefKind, ShortRef, find_refs, parse_ref_list};
 pub use investigation::{Investigation, InvestigationSummary};

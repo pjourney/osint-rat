@@ -9,19 +9,19 @@ It orchestrates information, tools, sources, and agents. Built-in collectors cov
 ```text
 ┌ os-int · Example Corp ───────────────────────────────────────── Claude ● ┐
 │ Navigate │ P-1  example.com                         │ example.com        │
-│          │ Domain                                   │                    │
-│ Overview │                                          │ Entities           │
-│ Pages    │ Target   example.com                     │  E-1  Domain       │
-│ Sources  │                                          │  E-4  IP           │
-│ Findings │ Entities on this page                    │                    │
-│ Entities │   E-1  Domain   example.com              │ Findings           │
+│ Overview │ Domain                                   │                    │
+│ Pages    │                                          │ Entities           │
+│ Sources  │ Target   example.com                     │  E-1  Domain       │
+│ Findings │                                          │  E-4  IP           │
+│ Entities │ Entities on this page                    │                    │
+│ Graph    │   E-1  Domain   example.com              │ Findings           │
 │ Timeline │   E-4  IP       93.184.216.34            │  F-1  [COL] HTTPS  │
 │ Notes    │                                          │                    │
 │ Agent    │ Findings                                 │                    │
 │ Jobs     │   F-1  [COL]  HTTPS redirects to apex    │                    │
 │ Settings │                                          │                    │
 ├──────────┴──────────────────────────────────────────┴────────────────────┤
-│ [a] Ask   [/] Search   [p] Palette   [r] Collect   [?] Help               │
+│ [a] Ask   [/] Search   [p] Palette   [g] Graph   [?] Help                 │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -40,7 +40,7 @@ It orchestrates information, tools, sources, and agents. Built-in collectors cov
 
 **This is** a local-first investigation ontology for OSINT and cyber cases. You fuse public sources into objects and links, keep provenance on every record, and stay in control of every Action—including those a local AI agent proposes. Collectors are plugins. The graph and the resolution engine are the product. Delivery is gated by phase: [vision](VISION.md), [roadmap](PHASED_ROADMAP.md).
 
-**This is not** a recon CLI, a collector-count contest, or an active-probing toolkit. Built-in collectors stay passive. There is no silent AI writeback, no automatic identity merge, and no cloud requirement. The bar is an enterprise-class investigative loop (ontology, fusion, resolution, Search Around, playbooks, governed Actions)—not module-count parity. Those later pieces land only when their phase criteria pass; this README does not claim they already ship.
+**This is not** a recon CLI, a collector-count contest, or an active-probing toolkit. Built-in collectors stay passive. There is no silent AI writeback, no automatic identity merge, and no cloud requirement. The bar is an enterprise-class investigative loop (ontology, fusion, resolution, Search Around, playbooks, governed Actions)—not module-count parity. Graph and Search Around ship now. Entity resolution, playbooks, and the remaining phases land only when their criteria pass.
 
 The [Boundaries](#boundaries) section is the operational rule for what built-in collectors may do. It is not relaxed by the vision.
 
@@ -178,12 +178,16 @@ The screen has a navigation column, a main pane, and (on a wide terminal) a deta
 | `v` | Object View: highlighted entity, or the current page |
 | `g` | Graph: entities as nodes, relationships as edges |
 | `s` | Search Around from the current selection |
+| `+` / `-` | Graph: more / fewer hops (re-query from the original seed) |
+| `[` / `]` | Graph: move the facet cursor |
+| `f` | Graph: apply or toggle the highlighted facet |
+| `x` | Graph: clear facet filters |
 | `c` | Cancel the selected job (Jobs screen) |
 | `?` | Help |
 | `1`–`6` | Overview, Pages, Sources, Findings, Entities, Timeline |
 | `7` `8` `9` `0` | Agent, Jobs, Tools, Settings |
 
-Notes and Artifacts are in the navigation column. On the welcome screen, `o` opens an existing investigation and `d` runs doctor. While an agent proposal is open: `A`, `y`, or `Enter` accepts it; `R` or `n` rejects it; `Esc` dismisses the list.
+Graph, Notes, and Artifacts are in the navigation column. On the welcome screen, `o` opens an existing investigation and `d` runs doctor. While an agent proposal is open: `A`, `y`, or `Enter` accepts it; `R` or `n` rejects it; `Esc` dismisses the list.
 
 The full palette (new page, one collector, add a finding, generate a report, and the rest) is listed in the [user guide](docs/guide.md#command-palette).
 

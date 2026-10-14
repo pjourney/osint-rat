@@ -228,11 +228,32 @@ mod tests {
             map_key(press(KeyCode::Char('+')), &overlay, View::Graph, false),
             Some(Action::GraphHops(1))
         ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('-')), &overlay, View::Graph, false),
+            Some(Action::GraphHops(-1))
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('[')), &overlay, View::Graph, false),
+            Some(Action::GraphFacetMove(-1))
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char(']')), &overlay, View::Graph, false),
+            Some(Action::GraphFacetMove(1))
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('x')), &overlay, View::Graph, false),
+            Some(Action::GraphClearFilters)
+        ));
         assert!(map_key(press(KeyCode::Char('f')), &overlay, View::Overview, false).is_none());
         assert!(matches!(
             map_key(press(KeyCode::Char('f')), &overlay, View::Graph, false),
             Some(Action::GraphApplyFacet)
         ));
+        assert!(map_key(press(KeyCode::Char('-')), &overlay, View::Entities, false).is_none());
+        assert!(map_key(press(KeyCode::Char('[')), &overlay, View::Overview, false).is_none());
+        assert!(map_key(press(KeyCode::Char(']')), &overlay, View::Pages, false).is_none());
+        assert!(map_key(press(KeyCode::Char('x')), &overlay, View::Findings, false).is_none());
+        assert!(map_key(press(KeyCode::Char('+')), &overlay, View::Entities, false).is_none());
     }
 
     #[test]
