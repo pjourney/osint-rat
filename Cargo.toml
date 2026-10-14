@@ -11,11 +11,12 @@ keywords = ["osint", "tui", "ratatui", "investigation", "security"]
 categories = ["command-line-utilities"]
 
 [package.metadata.binstall]
-pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.tar.gz"
 bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 
 [package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.zip"
 pkg-fmt = "zip"
 
 [lib]

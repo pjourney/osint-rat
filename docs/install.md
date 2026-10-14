@@ -4,17 +4,15 @@ os-int is a local binary. There is no cloud account. After install, run `os-int 
 
 ## Sixty-second path (Linux and macOS)
 
-A tagged GitHub Release is the supported one-liner. It verifies a SHA-256 checksum and installs `os-int` into `~/.local/bin` (override with `OS_INT_INSTALL_DIR`).
+A **published** tagged GitHub Release is the supported one-liner. It verifies a SHA-256 checksum and installs `os-int` into `~/.local/bin` (override with `OS_INT_INSTALL_DIR`).
+
+Pin both the script URL and `OS_INT_VERSION` to the same tag. Do not fetch `install.sh` from `main`; a newer script on `main` may not match the tagged archive layout.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pjourney/osint-rat/main/scripts/install.sh | bash
+OS_INT_VERSION=v1.0.0 curl -fsSL https://raw.githubusercontent.com/pjourney/osint-rat/v1.0.0/scripts/install.sh | bash
 ```
 
-Pin a tag:
-
-```bash
-OS_INT_VERSION=v1.0.0 curl -fsSL https://raw.githubusercontent.com/pjourney/osint-rat/main/scripts/install.sh | bash
-```
+`OS_INT_VERSION=latest` (the script default) calls GitHub `/releases/latest`. **Draft releases are not latest.** The Release workflow attaches binaries to a draft GitHub Release; `/releases/latest` stays empty until a maintainer publishes that draft. Pin a tag after publish, or install from source until then.
 
 If `~/.local/bin` is not on your `PATH`, add it, then:
 
@@ -25,13 +23,13 @@ os-int doctor
 
 ### cargo-binstall
 
-When a matching GitHub Release exists (crate version = tag without `v`):
+The crate is not on crates.io yet. Fetch GitHub Release artifacts from this repository:
 
 ```bash
-cargo binstall os-int
+cargo binstall --git https://github.com/pjourney/osint-rat
 ```
 
-`Cargo.toml` carries `[package.metadata.binstall]` so the binary is fetched from GitHub Releases, not built from source.
+`Cargo.toml` carries `[package.metadata.binstall]` with hardcoded `.tar.gz` / `.zip` URLs so the binary is fetched from GitHub Releases, not built from source. `cargo binstall os-int` (crates.io lookup) will fail until a crate is published; that publish is deferred.
 
 ### Homebrew
 
@@ -44,11 +42,11 @@ A formula is not published from this repository. If you maintain a tap, the rele
 | `os-int-x86_64-apple-darwin.tar.gz` | macOS Intel |
 | `os-int-x86_64-pc-windows-msvc.zip` | Windows x64 |
 
-A tap recipe would `url` one of those tarballs, `sha256` the matching `.sha256` file, and install the nested binary (`os-int-<target>/os-int`). Do not publish a tap from a phase pull request; tag `v1.0.0` on `main` first. Linux aarch64 has no prebuilt archive; use the source install below.
+A tap recipe would `url` one of those tarballs, `sha256` the matching `.sha256` file, and install the nested binary (`os-int-<target>/os-int`). Do not publish a tap from a phase pull request; tag `v1.0.0` on `main` first, then publish the draft GitHub Release. Linux aarch64 has no prebuilt archive; use the source install below.
 
 ## Windows
 
-Download `os-int-x86_64-pc-windows-msvc.zip` from [GitHub Releases](https://github.com/pjourney/osint-rat/releases), verify the `.sha256` file, and put `os-int.exe` on your `PATH`. PowerShell:
+Download `os-int-x86_64-pc-windows-msvc.zip` from a **published** [GitHub Release](https://github.com/pjourney/osint-rat/releases), verify the `.sha256` file, and put `os-int.exe` on your `PATH`. The zip nests `os-int-x86_64-pc-windows-msvc/os-int.exe`. PowerShell:
 
 ```powershell
 Get-FileHash os-int-x86_64-pc-windows-msvc.zip -Algorithm SHA256
@@ -72,7 +70,7 @@ Or:
 cargo install --git https://github.com/pjourney/osint-rat
 ```
 
-Use this path when no tagged release exists yet.
+Use this path when no published tagged release exists yet.
 
 ## Next
 

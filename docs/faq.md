@@ -4,7 +4,7 @@ Short answers to the questions that come up while installing and using os-int. T
 
 ## How do I install without compiling Rust?
 
-On Linux and macOS, run the [install one-liner](install.md) after a tagged GitHub Release, or `cargo binstall os-int`. Windows uses the release zip plus its `.sha256` file. From source: `cargo install --git https://github.com/pjourney/osint-rat` (Rust 1.88+). Then import [`examples/demo-case/`](../examples/demo-case/) before collecting anything.
+On Linux and macOS, run the [install one-liner](install.md) after a **published** tagged GitHub Release (pin `install.sh` and `OS_INT_VERSION` to the tag, not `main`), or `cargo binstall --git https://github.com/pjourney/osint-rat` until the crate is on crates.io. Windows uses the release zip plus its `.sha256` file. From source: `cargo install --git https://github.com/pjourney/osint-rat` (Rust 1.88+). Then import [`examples/demo-case/`](../examples/demo-case/) before collecting anything. Draft GitHub Releases are not `/releases/latest`.
 
 ## What is a page, and what is an entity?
 

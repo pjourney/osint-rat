@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One-liner installer for tagged os-int releases (Linux and macOS).
-# Usage: curl -fsSL https://raw.githubusercontent.com/pjourney/osint-rat/main/scripts/install.sh | bash
+# Pin the script URL and OS_INT_VERSION to the same tag, not main:
+#   OS_INT_VERSION=v1.0.0 curl -fsSL https://raw.githubusercontent.com/pjourney/osint-rat/v1.0.0/scripts/install.sh | bash
 set -euo pipefail
 
 REPO="${OS_INT_REPO:-pjourney/osint-rat}"
@@ -14,10 +15,6 @@ say() {
 die() {
   say "$*"
   exit 1
-}
-
-need() {
-  command -v "$1" >/dev/null 2>&1 || die "missing required program: $1"
 }
 
 target_triple() {
@@ -37,31 +34,35 @@ target_triple() {
 }
 
 checksum_ok() {
-  local archive="$1"
-  local sums="$2"
+  local sums="$1"
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum -c "$sums" --ignore-missing
+    sha256sum --strict -c "$sums"
     return
   fi
   if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 -c "$sums" --ignore-missing
+    shasum -a 256 -c "$sums"
     return
   fi
-  die "need sha256sum or shasum to verify ${archive}"
+  die "need sha256sum or shasum to verify checksums"
+}
+
+fetch() {
+  local url="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -A "os-int-install" "$url"
+    return
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    wget -qO- --user-agent="os-int-install" "$url"
+    return
+  fi
+  die "need curl or wget"
 }
 
 download() {
   local url="$1"
   local dest="$2"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o "$dest"
-    return
-  fi
-  if command -v wget >/dev/null 2>&1; then
-    wget -qO "$dest" "$url"
-    return
-  fi
-  die "need curl or wget"
+  fetch "$url" >"$dest"
 }
 
 release_tag() {
@@ -69,10 +70,9 @@ release_tag() {
     echo "$VERSION"
     return
   fi
-  need curl
   local tag
-  tag="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
-  [ -n "$tag" ] || die "no GitHub release found. Install from source: cargo install --git https://github.com/${REPO}"
+  tag="$(fetch "https://api.github.com/repos/${REPO}/releases/latest" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+  [ -n "$tag" ] || die "no published GitHub release found (/releases/latest ignores drafts). Install from source: cargo install --git https://github.com/${REPO}"
   echo "$tag"
 }
 
@@ -90,7 +90,7 @@ main() {
   download "https://github.com/${REPO}/releases/download/${tag}/${sums}" "${work}/${sums}"
   (
     cd "$work"
-    checksum_ok "$archive" "$sums"
+    checksum_ok "$sums"
     tar -xzf "$archive"
   )
   mkdir -p "$INSTALL_DIR"

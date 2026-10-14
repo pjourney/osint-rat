@@ -173,7 +173,10 @@ fn install_and_release_docs_cover_one_liners() {
     assert!(install.contains("pjourney/osint-rat"));
     assert!(install.contains("x86_64-unknown-linux-gnu"));
     assert!(install.contains("aarch64-apple-darwin"));
-    assert!(install.contains("sha256"));
+    assert!(install.contains("sha256sum --strict -c"));
+    assert!(!install.contains("--ignore-missing"));
+    assert!(install.contains("wget"));
+    assert!(install.contains("/releases/latest"));
     let release =
         std::fs::read_to_string(root.join(".github/workflows/release.yml")).expect("release");
     assert!(release.contains("x86_64-unknown-linux-gnu"));
@@ -183,12 +186,108 @@ fn install_and_release_docs_cover_one_liners() {
             || release.contains("Get-FileHash")
             || release.contains("shasum")
     );
+    assert!(
+        release.contains(r#"Compress-Archive -Path "dist/$name""#),
+        "Windows zip must nest os-int-<target>/os-int.exe"
+    );
+    assert!(!release.contains(r#"Compress-Archive -Path "dist/$name/*""#));
+    assert!(release.contains("needs: build"));
+    assert!(release.contains("contents: write"));
+    assert!(release.contains("merge-multiple: true"));
+    assert_actions_pinned(&release);
     let ci = std::fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci");
     assert!(ci.contains("cargo audit") || ci.contains("audit-check"));
+    assert_actions_pinned(&ci);
     let dependabot =
         std::fs::read_to_string(root.join(".github/dependabot.yml")).expect("dependabot");
     assert!(dependabot.contains("cargo"));
+    assert!(
+        !dependabot.contains("dependencies"),
+        "Dependabot must not apply a labels: dependencies key that does not exist on the repo"
+    );
     let cargo = std::fs::read_to_string(root.join("Cargo.toml")).expect("cargo");
     assert!(cargo.contains("[package.metadata.binstall]"));
     assert!(cargo.contains("{ name }-{ target }/{ bin }{ binary-ext }"));
+    let default_url = interpolate_binstall_pkg_url(
+        &toml_table_string(&cargo, "package.metadata.binstall", "pkg-url"),
+        "x86_64-unknown-linux-gnu",
+    );
+    assert!(
+        default_url.ends_with(".tar.gz") || default_url.ends_with(".zip"),
+        "interpolated binstall URL must end in .tar.gz or .zip, got {default_url}"
+    );
+    let windows_url = interpolate_binstall_pkg_url(
+        &toml_table_string(
+            &cargo,
+            "package.metadata.binstall.overrides.x86_64-pc-windows-msvc",
+            "pkg-url",
+        ),
+        "x86_64-pc-windows-msvc",
+    );
+    assert!(
+        windows_url.ends_with(".zip"),
+        "Windows binstall URL must end in .zip, got {windows_url}"
+    );
+    let readme = std::fs::read_to_string(root.join("README.md")).expect("readme");
+    assert!(readme.contains("/v1.0.0/scripts/install.sh"));
+    assert!(!readme.contains("/main/scripts/install.sh"));
+    assert!(readme.contains("cargo binstall --git https://github.com/pjourney/osint-rat"));
+    assert!(readme.contains("192.0.2.1"));
+    assert!(!readme.contains("93.184.216.34"));
+    let docs_install = std::fs::read_to_string(root.join("docs/install.md")).expect("install.md");
+    assert!(docs_install.contains("/v1.0.0/scripts/install.sh"));
+    assert!(!docs_install.contains("/main/scripts/install.sh"));
+    assert!(docs_install.contains("Draft releases are not latest"));
+    assert!(docs_install.contains("cargo binstall --git https://github.com/pjourney/osint-rat"));
+    let deferred = std::fs::read_to_string(root.join("docs/deferred.md")).expect("deferred");
+    assert!(deferred.contains("RUSTSEC-2024-0449"));
+    assert!(deferred.contains("unsafe-libyaml"));
+}
+
+fn interpolate_binstall_pkg_url(template: &str, target: &str) -> String {
+    template
+        .replace("{ repo }", "https://github.com/pjourney/osint-rat")
+        .replace("{ version }", "1.0.0")
+        .replace("{ name }", "os-int")
+        .replace("{ target }", target)
+        .replace("{ archive-suffix }", ".tgz")
+}
+
+fn toml_table_string(toml: &str, table: &str, key: &str) -> String {
+    let header = format!("[{table}]");
+    let mut in_table = false;
+    for line in toml.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_table = line == header;
+            continue;
+        }
+        if in_table {
+            let prefix = format!("{key} = ");
+            if let Some(rest) = line.strip_prefix(&prefix) {
+                return rest.trim_matches('"').to_string();
+            }
+        }
+    }
+    panic!("missing {key} in [{table}]");
+}
+
+fn assert_actions_pinned(workflow: &str) {
+    for line in workflow.lines() {
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix("uses: ") else {
+            continue;
+        };
+        let action = rest.split('#').next().expect("uses value").trim();
+        let sha = action.rsplit('@').next().expect("action ref");
+        assert_eq!(
+            sha.len(),
+            40,
+            "GitHub Action must be pinned to a 40-character commit SHA: {action}"
+        );
+        assert!(
+            sha.chars().all(|c| c.is_ascii_hexdigit()),
+            "GitHub Action pin is not hex: {action}"
+        );
+    }
 }

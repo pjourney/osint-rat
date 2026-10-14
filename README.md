@@ -21,7 +21,7 @@ Fuse public sources into objects and links, resolve identities, Search Around th
 │ Findings │                                          │  E-4  IP           │
 │ Entities │ Entities on this page                    │                    │
 │ Graph    │   E-1  Domain   example.com              │ Findings           │
-│ Timeline │   E-4  IP       93.184.216.34            │  F-1  [COL] HTTPS  │
+│ Timeline │   E-4  IP       192.0.2.1                │  F-1  [COL] HTTPS  │
 │ Notes    │                                          │                    │
 │ Agent    │ Findings                                 │                    │
 │ Jobs     │   F-1  [COL]  HTTPS redirects to apex    │                    │
@@ -79,16 +79,16 @@ Custom tools and sidecars marked `active` are refused. You are responsible for c
 
 ## Install
 
-Linux and macOS, from a tagged GitHub Release (checksum-verified into `~/.local/bin`):
+Linux and macOS, from a **published** tagged GitHub Release (checksum-verified into `~/.local/bin`). Pin both the script URL and `OS_INT_VERSION` to the same tag, not `main`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pjourney/osint-rat/main/scripts/install.sh | bash
+OS_INT_VERSION=v1.0.0 curl -fsSL https://raw.githubusercontent.com/pjourney/osint-rat/v1.0.0/scripts/install.sh | bash
 ```
 
-Or, when a matching release exists:
+Until the crate is on crates.io:
 
 ```bash
-cargo binstall os-int
+cargo binstall --git https://github.com/pjourney/osint-rat
 ```
 
 Windows: download the `os-int-x86_64-pc-windows-msvc.zip` asset from [Releases](https://github.com/pjourney/osint-rat/releases) and verify the `.sha256` file. Details, Homebrew tap notes, and source builds: [docs/install.md](docs/install.md).
@@ -168,7 +168,7 @@ Anything an analyst already has can become cited objects without forking Rust. S
 Investigation
   └── Pages          one subject each (domain, IP, URL, file, …)
         ├── Sources        raw observations, with provenance
-        ├── Entities       normalized identifiers (example.com, 93.184.216.34)
+        ├── Entities       normalized identifiers (example.com, 192.0.2.1)
         ├── Relationships  typed links from the link-type catalog (resolves_to, redirects_to, …)
         ├── Findings       claims, each citing the sources that support them
         ├── Notes          your writing, or a note accepted from an agent

@@ -26,7 +26,13 @@ Phase 7 ships markings, audit, roles, and shared-directory locking with last-wri
 
 **Title:** Publish a Homebrew tap and crates.io os-int crate
 
-Release artifacts and `cargo-binstall` metadata ship in Phase 9. Publishing a tap or a crates.io package is a maintainer action after `v1.0.0` is tagged on `main`. Do not publish from a phase pull request.
+Release artifacts and `cargo-binstall` metadata ship in Phase 9. Until crates.io, install with `cargo binstall --git https://github.com/pjourney/osint-rat`. Publishing a tap or a crates.io package is a maintainer action after `v1.0.0` is tagged on `main` and the draft GitHub Release is published. Do not publish from a phase pull request.
+
+## serde_yaml / unsafe-libyaml (RUSTSEC-2024-0449)
+
+**Title:** Replace serde_yaml so cargo audit has no allowed unmaintained warning
+
+Playbook YAML parsing uses `serde_yaml` 0.9, which depends on `unsafe-libyaml`. That crate is unmaintained ([RUSTSEC-2024-0449](https://rustsec.org/advisories/RUSTSEC-2024-0449)). `cargo audit` currently reports it as an allowed warning, not a vulnerability in os-int itself. Migrating the YAML parser is follow-up after v1.
 
 ## Session telemetry
 
