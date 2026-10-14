@@ -263,19 +263,17 @@ mod tests {
         let (data, alpha, beta, gamma) = fixture();
         let actual = co_occur(&data, &CoOccurrenceQuery::default());
         assert!(
-            actual.iter().any(|pair| {
-                pair.kind == CoOccurrenceKind::SharedEvent
-                    && pair.left == alpha
-                    && pair.right == beta
-            }),
+            actual
+                .iter()
+                .any(|pair| pair.kind == CoOccurrenceKind::SharedEvent
+                    && same_pair(pair, alpha, beta)),
             "shared event {actual:?}"
         );
         assert!(
-            actual.iter().any(|pair| {
-                pair.kind == CoOccurrenceKind::SharedSource
-                    && pair.left == alpha
-                    && pair.right == gamma
-            }),
+            actual
+                .iter()
+                .any(|pair| pair.kind == CoOccurrenceKind::SharedSource
+                    && same_pair(pair, alpha, gamma)),
             "shared source {actual:?}"
         );
         assert!(
@@ -291,12 +289,11 @@ mod tests {
                 window: None,
             },
         );
-        assert!(
-            filtered
-                .iter()
-                .all(|pair| pair.left == alpha && pair.right == beta
-                    || pair.left == beta && pair.right == alpha)
-        );
+        assert!(filtered.iter().all(|pair| same_pair(pair, alpha, beta)));
+    }
+
+    fn same_pair(pair: &CoOccurrence, left: Uuid, right: Uuid) -> bool {
+        (pair.left == left && pair.right == right) || (pair.left == right && pair.right == left)
     }
 
     #[test]
