@@ -1029,6 +1029,11 @@ fn settings(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
         Line::from(""),
         Line::from(Span::styled("Interface", theme.header)),
         Line::from(format!("  theme       {}", app.config.ui.theme)),
+        Line::from(format!("  color       {}", app.config.ui.color)),
+        Line::from(format!(
+            "  ascii       {}",
+            if app.config.ui.ascii { "yes" } else { "no" }
+        )),
         Line::from(format!(
             "  editor      {}",
             app.config

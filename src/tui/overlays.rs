@@ -12,14 +12,14 @@ use crate::doctor::CheckStatus;
 use crate::model::ProposalStatus;
 use crate::sanitize::sanitize_line;
 
-use super::keymap::HELP_TEXT;
+use super::keymap::help_text;
 use super::theme::Theme;
 use super::widgets::{centered, input_line, list_from, pane_block, truncate};
 
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     match &app.overlay {
         Overlay::None => {}
-        Overlay::Help => text_modal(frame, area, "Help", HELP_TEXT, app.scroll, theme),
+        Overlay::Help => text_modal(frame, area, "Help", &help_text(), app.scroll, theme),
         Overlay::Doctor => doctor(frame, area, app, theme),
         Overlay::Text {
             title,
@@ -57,9 +57,9 @@ fn doctor(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     ];
     for check in app.doctor_checks() {
         let style = match check.status {
-            CheckStatus::Ok => theme.success,
+            CheckStatus::Ok => theme.ok,
             CheckStatus::Missing => theme.muted,
-            CheckStatus::Warn => theme.warning,
+            CheckStatus::Warn => theme.warn,
         };
         lines.push(Line::from(vec![
             Span::raw(format!("{:<14} ", check.name)),

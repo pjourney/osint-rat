@@ -249,6 +249,7 @@ os-int team add "Example Corp" bob --role analyst
 os-int audit "Example Corp"
 os-int doctor
 os-int config
+os-int theme preview --all                  # cockpit palettes, no TUI
 ```
 
 `report --format json` writes JSON. Any other format value writes Markdown. Without `-o`, the file is saved inside the investigation directory and the path is printed.
@@ -261,7 +262,9 @@ Every setting is optional. Delete a line to fall back to the built-in default. T
 
 ```toml
 [ui]
-theme = "default"          # default, high-contrast, or monochrome
+theme = "auto"             # auto, dark, light, mono, phosphor, amber
+# color = "auto"           # auto, truecolor, 256, 16, none
+# ascii = false            # true → C X A * instead of ● ◇ ✎ ◆
 # editor = "nvim"          # otherwise $VISUAL, then $EDITOR, then vi
 
 [agent]

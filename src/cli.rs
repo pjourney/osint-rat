@@ -292,6 +292,11 @@ pub enum Command {
         #[arg(long)]
         sizes: Option<String>,
     },
+    /// Preview cockpit themes without opening the workbench.
+    Theme {
+        #[command(subcommand)]
+        command: ThemeCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -360,6 +365,18 @@ pub enum TeamCommand {
     Remove {
         investigation: String,
         user_id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ThemeCommand {
+    /// Print role swatches, a sample strip, and colour-blind ΔE.
+    Preview {
+        /// Theme name (`dark`, `light`, `mono`, `phosphor`, `amber`). Default: configured / auto.
+        name: Option<String>,
+        /// Stack all five built-in themes.
+        #[arg(long)]
+        all: bool,
     },
 }
 
@@ -581,6 +598,31 @@ pub async fn run_with(cli: Cli) -> Result<()> {
             allow_non_loopback,
         }) => serve_command(&cli, bind.as_deref(), token.as_deref(), allow_non_loopback).await,
         Some(Command::Bench { ref sizes }) => bench_command(&cli, sizes.as_deref()),
+        Some(Command::Theme { ref command }) => theme_command(&cli, command),
+    }
+}
+
+fn theme_command(cli: &Cli, command: &ThemeCommand) -> Result<()> {
+    match command {
+        ThemeCommand::Preview { name, all } => {
+            let config = load_config_only(cli)?;
+            let env = crate::tui::TerminalEnv::from_process();
+            print!(
+                "{}",
+                crate::tui::render_preview(&config, &env, name.as_deref(), *all)
+            );
+            Ok(())
+        }
+    }
+}
+
+/// Theme preview must not open the database or write a default config.
+fn load_config_only(cli: &Cli) -> Result<Config> {
+    let path = AppPaths::resolve_config_file(cli.config.as_deref())?;
+    if path.exists() {
+        Config::load(&path)
+    } else {
+        Ok(Config::default())
     }
 }
 
@@ -1844,6 +1886,28 @@ mod tests {
                 allow_non_loopback, ..
             }) => assert!(!allow_non_loopback),
             other => panic!("expected serve {other:?}"),
+        }
+        let preview =
+            Cli::try_parse_from(["os-int", "theme", "preview", "--all"]).expect("preview");
+        match preview.command {
+            Some(Command::Theme {
+                command: ThemeCommand::Preview { all, name },
+            }) => {
+                assert!(all);
+                assert!(name.is_none());
+            }
+            other => panic!("expected theme preview {other:?}"),
+        }
+        let named =
+            Cli::try_parse_from(["os-int", "theme", "preview", "phosphor"]).expect("named theme");
+        match named.command {
+            Some(Command::Theme {
+                command: ThemeCommand::Preview { name, all },
+            }) => {
+                assert_eq!(name.as_deref(), Some("phosphor"));
+                assert!(!all);
+            }
+            other => panic!("expected theme preview {other:?}"),
         }
         let exposed = Cli::try_parse_from([
             "os-int",

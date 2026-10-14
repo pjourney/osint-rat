@@ -1,10 +1,15 @@
 //! Terminal event loop and rendering. Drawing is a pure function of `App`.
 
+mod glyphs;
 mod keymap;
 mod overlays;
+mod preview;
 mod screens;
 mod theme;
 mod widgets;
+
+pub use preview::render_preview;
+pub use theme::{ColorDepth, ColorMode, TerminalEnv, Theme, ThemeName};
 
 use std::time::Duration;
 
@@ -13,13 +18,12 @@ use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Paragraph};
 use ratatui::{DefaultTerminal, Frame};
+use unicode_width::UnicodeWidthStr;
 
 use crate::app::{Action, App, View};
 use crate::sanitize::sanitize_line;
-
-use self::theme::Theme;
 
 /// Runs the TUI until the user quits. Always restores the terminal, including on error.
 pub async fn run(app: &mut App) -> Result<()> {
@@ -166,6 +170,9 @@ fn run_external_editor(terminal: &mut DefaultTerminal, app: &mut App) -> Result<
 pub fn draw(frame: &mut Frame, app: &App) {
     let theme = Theme::from_config(&app.config);
     let area = frame.area();
+    if theme.paints_background {
+        frame.render_widget(Block::default().style(theme.bg), area);
+    }
     let rows = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(5),
@@ -202,17 +209,25 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
         .unwrap_or("unmarked");
     let title = format!(" os-int ─ Investigation: {investigation}  [{marking}] ");
     let right = format!(" {agent} ");
-    let spacer = " ".repeat(
-        area.width
-            .saturating_sub((title.len() + right.len()) as u16) as usize,
-    );
+    let title_width = UnicodeWidthStr::width(title.as_str());
+    let right_width = UnicodeWidthStr::width(right.as_str());
+    let available = area.width as usize;
+    let (title, title_width) = if title_width + right_width > available {
+        let keep = available.saturating_sub(right_width.saturating_add(1));
+        let truncated = truncate_width(&title, keep);
+        let width = UnicodeWidthStr::width(truncated.as_str());
+        (truncated, width)
+    } else {
+        (title, title_width)
+    };
+    let spacer = " ".repeat(available.saturating_sub(title_width.saturating_add(right_width)));
     let line = Line::from(vec![
         Span::styled(title, theme.title),
         Span::raw(spacer),
         Span::styled(
             right,
             if app.agent.available {
-                theme.agent
+                theme.ai
             } else {
                 theme.muted
             },
@@ -221,12 +236,31 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
     frame.render_widget(Paragraph::new(line), area);
 }
 
+fn truncate_width(text: &str, max_width: usize) -> String {
+    if UnicodeWidthStr::width(text) <= max_width {
+        return text.to_string();
+    }
+    let mut output = String::new();
+    let mut width = 0usize;
+    let limit = max_width.saturating_sub(1);
+    for ch in text.chars() {
+        let ch_width = UnicodeWidthStr::width(ch.encode_utf8(&mut [0; 4]));
+        if width + ch_width > limit {
+            break;
+        }
+        output.push(ch);
+        width += ch_width;
+    }
+    output.push('…');
+    output
+}
+
 fn draw_status(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme: &Theme) {
     let jobs = app.job_status_line();
     let style = if app.last_error.is_some() {
-        theme.error
+        theme.err
     } else {
-        theme.status
+        theme.fg
     };
     let text = format!(" {}    {jobs}", sanitize_line(&app.status));
     frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
@@ -368,5 +402,17 @@ mod tests {
             .expect("draw entities");
         let entities = visible_text(&terminal);
         assert!(entities.contains("example.com"), "{entities}");
+    }
+
+    #[test]
+    fn header_spacer_uses_display_width_not_bytes() {
+        let title = " os-int ─ Investigation: café  [TLP:AMBER] ";
+        let right = " claude ● ";
+        assert!(title.len() > UnicodeWidthStr::width(title));
+        let title_width = UnicodeWidthStr::width(title);
+        let right_width = UnicodeWidthStr::width(right);
+        let available = 80usize;
+        let spacer = available.saturating_sub(title_width.saturating_add(right_width));
+        assert_eq!(title_width + spacer + right_width, 80);
     }
 }

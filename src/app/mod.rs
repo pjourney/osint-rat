@@ -1050,7 +1050,7 @@ impl App {
                     field(
                         "Theme",
                         &self.config.ui.theme,
-                        "default / high-contrast / monochrome",
+                        "auto / dark / light / mono / phosphor / amber",
                     ),
                 ],
             );

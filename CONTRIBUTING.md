@@ -62,7 +62,8 @@ To publish an external collector or playbook, copy [`examples/community/`](examp
 | A built-in external tool | `src/tools/registry.rs` |
 | Process spawning, timeouts, redaction | `src/exec/` |
 | Agent profiles, context fences, proposal parsing | `src/agent/` |
-| Key bindings and the in-app help text | `src/tui/keymap.rs` |
+| Key bindings, hint bar, and generated help | `src/app/commands.rs` (registry) and `src/tui/keymap.rs` (overlay / editing) |
+| Colour roles, themes, glyphs | `src/tui/theme.rs`, `src/tui/glyphs.rs`. `Color::` stays in `theme.rs`. |
 | Screen layout | `src/tui/screens.rs` |
 | State transitions | `src/app/` |
 | Reports and import/export | `src/report/`, `src/exchange/` |

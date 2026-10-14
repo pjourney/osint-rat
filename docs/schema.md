@@ -57,7 +57,7 @@ Collectors, file ingest, and external sidecars do not write these tables. They r
 
 ## Provenance and confidence
 
-`provenance` is one of `collected`, `external`, `analyst`, `agent`. `confidence` is one of `unknown`, `low`, `medium`, `high`, `confirmed`. Both are stored as those words. The workbench shows provenance as `[COL]`, `[EXT]`, `[ANL]`, and `[AI]`.
+`provenance` is one of `collected`, `external`, `analyst`, `agent`. `confidence` is one of `unknown`, `low`, `medium`, `high`, `confirmed`. Both are stored as those words. The workbench shows provenance as a glyph plus badge (`● COL`, `◇ EXT`, `✎ ANL`, `◆ AI`; ASCII: `C X A *`).
 
 ## Graph queries
 

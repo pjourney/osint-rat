@@ -56,8 +56,12 @@ pub struct Config {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
-    /// `default`, `high-contrast`, or `monochrome`.
+    /// `auto`, `dark`, `light`, `mono`, `phosphor`, or `amber`. `auto` picks dark or light.
     pub theme: String,
+    /// `auto`, `truecolor`, `256`, `16`, or `none`. Overrides terminal detection.
+    pub color: String,
+    /// Use ASCII glyphs instead of Unicode (`●◇✎◆` become `C X A *`).
+    pub ascii: bool,
     /// Redraw interval while background jobs are running.
     pub tick_rate_ms: u64,
     /// Command used for long-form editing (falls back to `$VISUAL`, `$EDITOR`, then `vi`).
@@ -67,7 +71,9 @@ pub struct UiConfig {
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
-            theme: "default".into(),
+            theme: "auto".into(),
+            color: "auto".into(),
+            ascii: false,
             tick_rate_ms: DEFAULT_TICK_RATE_MS,
             editor: None,
         }
@@ -356,8 +362,15 @@ pub const DEFAULT_CONFIG_TOML: &str = r#"# os-int configuration
 # Full reference: https://github.com/pjourney/osint-rat/blob/main/docs/guide.md#configuration
 
 [ui]
-# "default", "high-contrast", or "monochrome"
-theme = "default"
+# auto | dark | light | mono | phosphor | amber
+# auto picks Cockpit Dark or Cockpit Light from COLORFGBG. NO_COLOR forces Mono.
+# Phosphor and Amber are opt-in signature themes; auto never selects them.
+theme = "auto"
+# auto | truecolor | 256 | 16 | none
+# Detection order: COLORTERM, then TERM, then NO_COLOR. This key overrides.
+color = "auto"
+# ASCII glyphs (C X A *) instead of Unicode (● ◇ ✎ ◆).
+ascii = false
 # Redraw interval (ms) while background jobs are running. The UI is otherwise event-driven.
 tick_rate_ms = 250
 # Editor for long-form notes (falls back to $VISUAL, $EDITOR, then vi).
@@ -528,11 +541,38 @@ impl Config {
         let mut warnings = Vec::new();
         if !matches!(
             self.ui.theme.as_str(),
-            "default" | "high-contrast" | "monochrome"
+            "auto"
+                | "dark"
+                | "light"
+                | "mono"
+                | "monochrome"
+                | "phosphor"
+                | "amber"
+                | "cockpit-dark"
+                | "cockpit-light"
+        ) {
+            warnings.push(format!("unknown theme {:?}; using \"auto\"", self.ui.theme));
+        }
+        if !matches!(
+            self.ui.color.as_str(),
+            "auto"
+                | "truecolor"
+                | "truecolour"
+                | "24bit"
+                | "256"
+                | "256color"
+                | "256colour"
+                | "16"
+                | "16color"
+                | "16colour"
+                | "ansi"
+                | "none"
+                | "off"
+                | "mono"
         ) {
             warnings.push(format!(
-                "unknown theme {:?}; using \"default\"",
-                self.ui.theme
+                "unknown ui.color {:?}; using \"auto\"",
+                self.ui.color
             ));
         }
         if self.network.request_timeout_seconds == 0 {
@@ -606,7 +646,7 @@ mod tests {
         assert_eq!(actual.agent.program.as_deref(), Some("claude"));
         assert_eq!(actual.network.request_timeout_seconds, 5);
         assert_eq!(actual.network.max_redirects, DEFAULT_MAX_REDIRECTS);
-        assert_eq!(actual.ui.theme, "default");
+        assert_eq!(actual.ui.theme, "auto");
     }
 
     #[test]

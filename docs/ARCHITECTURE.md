@@ -67,8 +67,8 @@ A useful order:
 | `exchange/` | Versioned, path-independent import and export of investigations. |
 | `demo/` | Bundled Example Corp investigation snapshot (`examples/demo-case/`). |
 | `app/` | `App` owns config, store, workspace, job manager, and all UI state (including `GraphState` and `TimelineState`). Keys map to `Action`s; `App::dispatch` performs state transitions and side effects. Per-investigation `ui_state` restores the last view, page, and agent thread after restart. Long notes open `$EDITOR` / `$VISUAL` without a shell. |
-| `tui/` | Terminal setup and restore, the async event loop, theme, keymap, widgets, screens, and overlays. Rendering is a pure function of `App`. |
-| `cli/` | Clap definitions and non-TUI commands (`list`, `new`, `open`, `export`, `import`, `collect`, `ingest`, `playbook`, `watch`, `report`, `geojson`, `cooccur`, `marking`, `team`, `audit`, `get`, `objects`, `search-around`, `resolve`, `serve`, `bench`, `doctor`, `config`). |
+| `tui/` | Terminal setup and restore, the async event loop, cockpit themes (roles in `theme.rs` only), glyphs, keymap, widgets, screens, and overlays. Rendering is a pure function of `App`. `os-int theme preview` lives here. |
+| `cli/` | Clap definitions and non-TUI commands (`list`, `new`, `open`, `export`, `import`, `collect`, `ingest`, `playbook`, `watch`, `report`, `geojson`, `cooccur`, `marking`, `team`, `audit`, `get`, `objects`, `search-around`, `resolve`, `serve`, `bench`, `theme preview`, `doctor`, `config`). |
 | `api/` | Localhost ontology HTTP API (`os-int serve`). Token auth. Read + Action propose. OpenAPI at `/openapi.json`. |
 | `query/` | Scriptable list/get/search-around/resolve helpers shared by the CLI and the API. |
 
@@ -86,7 +86,7 @@ A useful order:
 | Change how processes are spawned | `exec/` only. Callers pass an argv. They do not build shell strings |
 | Change what the agent is allowed to propose | `model/agent.rs` (`AgentAction`), the Action catalog in `model/ontology.rs`, and the instructions in `agent/context.rs`. `RUN_PLAYBOOK` may only name a bundled id |
 | Change an object type, property schema, or link verb | `model/ontology.rs` and [ontology.md](ontology.md). Prefer a JSON property bag field over a new column |
-| Change a key binding | `tui/keymap.rs`, including `HELP_TEXT`, and the keyboard tables in the user guide |
+| Change a key binding | `app/commands.rs` (the registry that drives the keymap, hint bar, palette, and generated help), then `tui/keymap.rs` for overlay/editing, and the keyboard tables in the user guide |
 | Change a screen | `tui/screens.rs`. Put the state change in `app/`, not in the widget. Object View is `View::Object`. Graph is `View::Graph` |
 | Change Search Around or graph caps | `model/graph.rs` (pure query), then `storage/graph.rs` (`Store::search_around`), then `app/graph.rs` and `tui/screens.rs` |
 | Change Events, overlay timeline, or co-occurrence | `model/event.rs`, `model/timeline.rs`, `model/cooccur.rs`, `storage/events.rs`, then Timeline screen / `os-int cooccur` |
@@ -99,7 +99,8 @@ A useful order:
 | Change release artifacts or the install one-liner | `.github/workflows/release.yml`, `scripts/install.sh`, [install.md](install.md) |
 | Change geo fields or GeoJSON | `model/geo.rs`, `src/geo/`, IP/RDAP collectors, `os-int export --format geojson` |
 | Change merge, unresolve, or suggestion rules | `model/resolution.rs` (bags + scoring), `storage/resolution.rs`, then `app/resolution.rs` and Object View |
-| Add a palette command | `app/commands.rs`, then handle the id in `App::run_command` |
+| Add a palette command | `app/commands.rs` (`in_palette: true`), then handle the id in `App::run_command` |
+| Change a colour or theme | `tui/theme.rs` only (`Color::` is forbidden elsewhere). Preview with `os-int theme preview`. WCAG and colour-blind floors are tests in that file. |
 | Add a report section | `report/`. Keep AI-written text labelled as inference |
 | Change the on-disk export | `exchange/`. Follow the bump rules in [ontology-exchange.md](ontology-exchange.md#format_version-bump-rules). Bump `FORMAT_VERSION` if older archives would no longer import, or if a new collection must survive round-trip |
 

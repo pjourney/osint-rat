@@ -1,7 +1,8 @@
-//! Maps terminal key events to `Action`s.
+//! Maps terminal key events to `Action`s. Documented bindings live in the command registry.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+use crate::app::commands::{map_registered_key, tab_action};
 use crate::app::{Action, Overlay, View};
 
 /// Converts a key press into an action. `Repeat` is treated like `Press` so held arrows scroll.
@@ -22,7 +23,10 @@ pub fn map_key(key: KeyEvent, overlay: &Overlay, view: View, editing: bool) -> O
     if !matches!(overlay, Overlay::None) {
         return map_overlay_key(key);
     }
-    map_normal_key(key, view, ctrl)
+    if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) && !ctrl {
+        return Some(tab_action(key.modifiers));
+    }
+    map_registered_key(key.code, view, ctrl, overlay)
 }
 
 fn map_proposal_key(key: KeyEvent) -> Option<Action> {
@@ -77,151 +81,9 @@ fn map_overlay_key(key: KeyEvent) -> Option<Action> {
     }
 }
 
-fn map_normal_key(key: KeyEvent, view: View, ctrl: bool) -> Option<Action> {
-    if ctrl {
-        return match key.code {
-            KeyCode::Char('p') => Some(Action::Palette),
-            KeyCode::Char('f') => Some(Action::Search),
-            _ => None,
-        };
-    }
-    match key.code {
-        KeyCode::Char('q') => Some(Action::Quit),
-        KeyCode::Esc => Some(Action::Back),
-        KeyCode::Tab => Some(if key.modifiers.contains(KeyModifiers::SHIFT) {
-            Action::PrevPane
-        } else {
-            Action::NextPane
-        }),
-        KeyCode::BackTab => Some(Action::PrevPane),
-        KeyCode::Up | KeyCode::Char('k') => Some(Action::Move(-1)),
-        KeyCode::Down | KeyCode::Char('j') => Some(Action::Move(1)),
-        KeyCode::PageUp => Some(Action::Move(-10)),
-        KeyCode::PageDown => Some(Action::Move(10)),
-        KeyCode::Enter => Some(Action::Select),
-        KeyCode::Char('/') => Some(Action::Search),
-        KeyCode::Char('?') => Some(Action::Help),
-        KeyCode::Char('a') => Some(Action::AskAgent),
-        KeyCode::Char('p') => Some(Action::Palette),
-        KeyCode::Char('n') => Some(Action::NewItem),
-        KeyCode::Char('e') => Some(Action::Edit),
-        KeyCode::Char('r') => Some(Action::Refresh),
-        KeyCode::Char('i') => Some(Action::Command("ingest")),
-        KeyCode::Char('b') => Some(Action::Command("run_playbook")),
-        KeyCode::Char('v') => Some(Action::OpenObjectView),
-        KeyCode::Char('g') => Some(Action::OpenGraph),
-        KeyCode::Char('s') => Some(Action::SearchAround),
-        KeyCode::Char('+') | KeyCode::Char('=') if view == View::Graph => {
-            Some(Action::GraphHops(1))
-        }
-        KeyCode::Char('-') if view == View::Graph => Some(Action::GraphHops(-1)),
-        KeyCode::Char('f') if view == View::Graph => Some(Action::GraphApplyFacet),
-        KeyCode::Char('[') if view == View::Graph => Some(Action::GraphFacetMove(-1)),
-        KeyCode::Char(']') if view == View::Graph => Some(Action::GraphFacetMove(1)),
-        KeyCode::Char('x') if view == View::Graph => Some(Action::GraphClearFilters),
-        KeyCode::Char('[') if view == View::Timeline => Some(Action::TimelineFacetMove(-1)),
-        KeyCode::Char(']') if view == View::Timeline => Some(Action::TimelineFacetMove(1)),
-        KeyCode::Char('f') if view == View::Timeline => Some(Action::TimelineApplyFilter),
-        KeyCode::Char('x') if view == View::Timeline => Some(Action::TimelineClearFilter),
-        KeyCode::Char('l') if matches!(view, View::Timeline | View::Entities) => {
-            Some(Action::ToggleNearby)
-        }
-        KeyCode::Char(' ') if view == View::Entities => Some(Action::ToggleMergeMark),
-        KeyCode::Char('m') if view == View::Entities => Some(Action::ProposeMerge),
-        KeyCode::Char('u') if matches!(view, View::Entities | View::Object) => {
-            Some(Action::Unresolve)
-        }
-        KeyCode::Char('o') if view == View::Welcome => Some(Action::Command("open_investigation")),
-        KeyCode::Char('d') if view == View::Welcome => Some(Action::Command("doctor")),
-        KeyCode::Char('c') if view == View::Jobs => Some(Action::Command("cancel_job")),
-        KeyCode::Char('1') => Some(Action::OpenOverview),
-        KeyCode::Char('2') => Some(Action::OpenPages),
-        KeyCode::Char('3') => Some(Action::OpenSources),
-        KeyCode::Char('4') => Some(Action::OpenFindings),
-        KeyCode::Char('5') => Some(Action::OpenEntities),
-        KeyCode::Char('6') => Some(Action::OpenTimeline),
-        KeyCode::Char('7') => Some(Action::OpenAgent),
-        KeyCode::Char('8') => Some(Action::OpenJobs),
-        KeyCode::Char('9') => Some(Action::OpenTools),
-        KeyCode::Char('0') => Some(Action::OpenSettings),
-        _ => None,
-    }
+pub fn help_text() -> String {
+    crate::app::commands::help_text()
 }
-
-pub const HELP_TEXT: &str = "\
-os-int keyboard shortcuts
-
-  q            Quit (or close an overlay)
-  Esc          Back / close overlay
-  Ctrl+C       Quit from anywhere
-  Tab          Next pane          Shift+Tab  previous pane
-  j / k        Move selection     Enter      open / select
-  /  Ctrl+F    Search             p  Ctrl+P  command palette
-  a            Ask agent          n          new investigation, page, or finding
-  e            Edit notes in $EDITOR (Overview) or open Settings
-  r            Run default collectors for this page
-  i            Ingest STIX / MISP / CSV / JSON / Evidence Batch
-  b            Run playbook (bundled YAML or a file)
-  v            Object View for the selected entity or page
-  g            Graph (entities as nodes, relationships as edges)
-  s            Search Around from the selection (default 2 hops)
-  + / -        Graph: more / fewer hops
-  [ / ]        Graph: move facet cursor
-  f            Graph: apply (or toggle) the highlighted facet
-  x            Graph: clear facet filters
-  [ / ]        Timeline: move entity-filter cursor
-  f            Timeline: filter overlay by highlighted entity
-  x            Timeline: clear entity filter
-  l            Timeline / Entities: nearby (same country or prefix)
-  Space        Entities: mark / unmark for merge
-  m            Entities: propose merge of marked rows
-  u            Object View / Entities: unresolve the current bag
-  c            Cancel the selected job (Jobs view)
-  ?            This help
-
-  1 Overview  2 Pages  3 Sources  4 Findings  5 Entities
-  6 Timeline  7 Agent  8 Jobs     9 Tools     0 Settings
-  Graph and Audit are in the Navigate column (g or palette).
-
-Enter on Entities opens Object View (properties, catalogued
-links, sources, findings). Esc returns. Unknown link verbs
-appear under Other.
-
-Enter on Graph opens Object View for the selected node.
-Search Around merges new hops into the canvas. Caps require
-confirm before rendering a large neighborhood.
-
-Timeline overlays collection log rows and first-class Events.
-Filter by entity with [ ] then f. l lists nearby by country
-or prefix. Esc restores the previous list and selection.
-
-Mark two or more entities (Space) and press m to merge.
-Suggestions never auto-merge. Object View lists constituents;
-u unresolves. Esc cancels a confirm without applying.
-
-Overview shows the TLP marking. Palette: Set marking, Open Audit,
-Add team member. Export includes the audit slice.
-
-Notes and Artifacts are in the Navigate column. On the welcome
-screen, o opens a case and d runs doctor.
-
-Agent proposals: Enter accepts, R rejects, Esc dismisses the list.
-
-Badges: [COL] collected  [EXT] original material
-        [ANL] you wrote  [AI]  agent inference
-
-A domain page collects DNS, RDAP, HTTP, TLS, certificate
-transparency, and subdomain expansion. An IP page collects RDAP
-and IP intelligence. An email page collects DNS, CT, and the
-email identity pack. A username page collects public profiles.
-Press p and type dns, rdap, http, tls, ct, ip, email, username,
-or subdomain for one collector. i ingests a STIX/MISP/CSV file.
-Press b (or palette Run playbook) for domain-infra and other playbooks.
-Watch and Playbook prompt are palette commands. Automations propose.
-
-Collected material is untrusted evidence. Accepting an AI finding
-keeps the AI badge. os-int observes public information.
-";
 
 #[cfg(test)]
 mod tests {

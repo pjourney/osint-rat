@@ -171,7 +171,7 @@ Method: Machado-2009 simulation (severity 1.0), then CIELAB ΔE between every pa
 | Theme | Deutan | Protan | Tritan | Pairs still close | Why it's acceptable |
 |---|---|---|---|---|---|
 | Dark | min 5 (ai/accent) | min 4 (ext/accent) | min 7 (col/accent) | accent vs a provenance colour | accent never sits on a provenance glyph; it's used on the focus bar and key hints only |
-| Light | min 4 (ext/ai) | min 10 (ext/ai) | min 5 (ok/col) | ext/ai; ok/col | ◇ vs ◆ glyphs + ai italic; ok only appears in Jobs, col only in provenance columns |
+| Light | min 4 (ext/ai) | min 10 (ext/ai) | min 8 (col/accent) | ext/ai; ok/col (ΔE 10); accent vs col | ◇ vs ◆ glyphs + ai italic; ok only appears in Jobs, col only in provenance columns; accent never sits on a provenance glyph |
 
 **Critical pairs, worst case across deutan/protan/tritan:** ok/err Dark 19, Light 15; warn/err Dark 37, Light 35. These are the pairs that must never be confused, and they no longer can be.
 CI recomputes this table from `theme.rs` (a small test using the same matrices) and fails if a critical pair drops below 15.

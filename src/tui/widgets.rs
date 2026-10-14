@@ -7,6 +7,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem};
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::Input;
+use crate::app::commands::hint_commands;
 use crate::model::Provenance;
 use crate::sanitize::sanitize_line;
 
@@ -21,16 +22,12 @@ pub fn centered(area: Rect, width: u16, height: u16) -> Rect {
 }
 
 pub fn pane_block<'a>(title: &'a str, focused: bool, theme: &Theme) -> Block<'a> {
-    let border = if focused {
-        theme.focused_border
-    } else {
-        theme.unfocused_border
-    };
+    let border = if focused { theme.accent } else { theme.rule };
     Block::default()
         .borders(Borders::ALL)
         .title(title)
         .border_style(border)
-        .title_style(if focused { theme.header } else { theme.muted })
+        .title_style(if focused { theme.accent } else { theme.muted })
 }
 
 pub fn truncate(text: &str, max_width: usize) -> String {
@@ -90,28 +87,33 @@ pub fn list_from<'a>(items: Vec<String>, selected: usize, theme: &Theme) -> List
 
 pub fn provenance_span(provenance: Provenance, theme: &Theme) -> Span<'static> {
     let style = match provenance {
-        Provenance::Agent => theme.badge_ai,
-        Provenance::Collected => theme.badge_col,
-        Provenance::Analyst | Provenance::External => theme.badge_anl,
+        Provenance::Agent => theme.ai,
+        Provenance::Collected => theme.col,
+        Provenance::External => theme.ext,
+        Provenance::Analyst => theme.anl,
     };
-    Span::styled(format!("[{}]", provenance.badge()), style)
+    let glyph = theme.glyphs.provenance(provenance);
+    Span::styled(format!("{glyph} {}", provenance.badge()), style)
 }
 
 pub fn hint_line(theme: &Theme) -> Line<'static> {
-    Line::from(vec![
-        Span::styled("[a]", theme.header),
-        Span::raw(" Ask  "),
-        Span::styled("[/]", theme.header),
-        Span::raw(" Search  "),
-        Span::styled("[p]", theme.header),
-        Span::raw(" Palette  "),
-        Span::styled("[r]", theme.header),
-        Span::raw(" Collect  "),
-        Span::styled("[g]", theme.header),
-        Span::raw(" Graph  "),
-        Span::styled("[s]", theme.header),
-        Span::raw(" Around  "),
-        Span::styled("[?]", theme.header),
-        Span::raw(" Help"),
-    ])
+    let mut spans = Vec::new();
+    for (index, command) in hint_commands().into_iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::raw("  "));
+        }
+        spans.push(Span::styled(format!("[{}]", command.hint), theme.accent));
+        spans.push(Span::raw(format!(" {}", short_hint_label(command.title))));
+    }
+    Line::from(spans)
+}
+
+fn short_hint_label(title: &str) -> String {
+    match title {
+        "Ask Agent" => "Ask".into(),
+        "Command palette" => "Palette".into(),
+        "Run Collectors" => "Collect".into(),
+        "Search Around" => "Around".into(),
+        other => other.to_string(),
+    }
 }
