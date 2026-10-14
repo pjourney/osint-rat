@@ -752,3 +752,532 @@ fn search_around_sqlite_fixture_matches_hop_counts_and_caps() {
     assert!(limited.requires_confirm());
     assert_eq!(limited.uncapped_node_count, 5);
 }
+
+#[test]
+fn resolve_merges_sources_and_unresolve_restores_without_orphans() {
+    let (mut store, investigation) = store_with_investigation();
+    store
+        .apply_batch(
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            &dns_batch("hash-resolve"),
+        )
+        .expect("batch");
+    let host = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Hostname,
+            "example.com",
+            Provenance::Collected,
+            None,
+        )
+        .expect("host");
+    let before = store.load_investigation(investigation.id).expect("load");
+    let domain = before
+        .entities
+        .iter()
+        .find(|entity| entity.kind == EntityKind::Domain)
+        .expect("domain")
+        .clone();
+    let host_entity = before
+        .entities
+        .iter()
+        .find(|entity| entity.id == host)
+        .expect("host row")
+        .clone();
+    store
+        .create_finding(NewFinding {
+            investigation_id: investigation.id,
+            page_id: None,
+            title: "Host observed".into(),
+            details: String::new(),
+            confidence: Confidence::Medium,
+            provenance: Provenance::Analyst,
+            source_ids: host_entity.source_ids.clone(),
+        })
+        .expect("finding");
+    let resolution = store
+        .resolve_entities(
+            investigation.id,
+            &[domain.id, host],
+            domain.id,
+            "same canonical host",
+            "tester",
+        )
+        .expect("merge");
+    let merged = store.load_investigation(investigation.id).expect("merged");
+    let workspace = Workspace::new(merged.clone());
+    assert_eq!(
+        workspace.visible_entities().len(),
+        merged.entities.len() - 1
+    );
+    assert!(merged.is_absorbed(host));
+    assert_eq!(merged.canonical_id(host), domain.id);
+    let view = crate::model::ObjectView::for_entity(
+        &workspace,
+        workspace.entity(domain.id).expect("canonical"),
+    );
+    assert!(
+        view.constituents
+            .iter()
+            .any(|constituent| constituent.value == "example.com")
+    );
+    let graph = store
+        .search_around(
+            investigation.id,
+            &SearchAroundQuery::new(vec![domain.id], 2),
+        )
+        .expect("graph");
+    assert!(!graph.node_ids().any(|id| id == host));
+    assert!(graph.node_ids().any(|id| id == domain.id));
+    assert!(
+        merged
+            .timeline
+            .iter()
+            .any(|event| event.kind == TimelineKind::EntitiesResolved)
+    );
+    let suggestions = crate::model::suggest_resolutions(&merged);
+    assert!(
+        suggestions
+            .iter()
+            .all(|item| !item.entity_ids.contains(&domain.id) || !item.entity_ids.contains(&host)),
+        "auto-merge must not occur; resolved pairs stay out of suggestions: {suggestions:?}"
+    );
+    store
+        .unresolve_entities(resolution.id, "tester")
+        .expect("split");
+    let restored = store
+        .load_investigation(investigation.id)
+        .expect("restored");
+    assert!(!restored.is_absorbed(host));
+    assert_eq!(store.integrity_check().expect("integrity"), "ok");
+    assert!(store.foreign_key_violations().expect("fk").is_empty());
+    assert!(
+        restored
+            .timeline
+            .iter()
+            .any(|event| event.kind == TimelineKind::EntitiesUnresolved)
+    );
+    let restored_workspace = Workspace::new(restored.clone());
+    assert_eq!(
+        restored_workspace.visible_entities().len(),
+        restored.entities.len()
+    );
+}
+
+#[test]
+fn suggestions_appear_for_known_duplicates_without_merging() {
+    let (mut store, investigation) = store_with_investigation();
+    store
+        .add_entity(
+            investigation.id,
+            EntityKind::Username,
+            "octocat",
+            Provenance::Analyst,
+            None,
+        )
+        .expect("user");
+    store
+        .add_entity(
+            investigation.id,
+            EntityKind::Url,
+            "https://github.com/octocat",
+            Provenance::External,
+            None,
+        )
+        .expect("url");
+    let data = store.load_investigation(investigation.id).expect("load");
+    let suggestions = crate::model::suggest_resolutions(&data);
+    assert!(
+        suggestions
+            .iter()
+            .any(|item| item.rule == crate::model::SuggestionRule::UsernameProfileUrl),
+        "{suggestions:?}"
+    );
+    assert!(data.resolutions.is_empty());
+    assert_eq!(data.entities.len(), 2);
+}
+
+#[test]
+fn unresolve_keeps_post_merge_property_and_source_edits() {
+    let (mut store, investigation) = store_with_investigation();
+    let domain = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Domain,
+            "example.com",
+            Provenance::Analyst,
+            None,
+        )
+        .expect("domain");
+    let host = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Hostname,
+            "example.com",
+            Provenance::Collected,
+            None,
+        )
+        .expect("host");
+    store
+        .update_entity(host, "Host Label", "")
+        .expect("host label");
+    let mut host_batch = EvidenceBatch::new();
+    let host_key = host_batch.add_source(NewSource::collected(
+        SourceKind::Dns,
+        "dns",
+        "host observation",
+    ));
+    host_batch.entity(EntityKind::Hostname, "example.com", Some(host_key));
+    let host_applied = store
+        .apply_batch(
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            &host_batch,
+        )
+        .expect("host source");
+    let copied_source = host_applied.source_ids[0];
+    let resolution = store
+        .resolve_entities(
+            investigation.id,
+            &[domain, host],
+            domain,
+            "same host",
+            "tester",
+        )
+        .expect("merge");
+    assert!(
+        resolution
+            .property_writes
+            .iter()
+            .any(|write| write.key == crate::model::LABEL_WRITE_KEY
+                && write.previous.is_none()
+                && write.new_value == "Host Label")
+    );
+    assert!(resolution.source_writes.contains(&copied_source));
+    store
+        .update_entity(domain, "Analyst edit", "kept notes")
+        .expect("post-merge label");
+    let mut post_batch = EvidenceBatch::new();
+    let post_key = post_batch.add_source(NewSource::collected(
+        SourceKind::Manual,
+        "analyst",
+        "post-merge note",
+    ));
+    post_batch.entity(EntityKind::Domain, "example.com", Some(post_key));
+    let post_applied = store
+        .apply_batch(
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            &post_batch,
+        )
+        .expect("post-merge source");
+    let post_source = post_applied.source_ids[0];
+    store
+        .unresolve_entities(resolution.id, "tester")
+        .expect("split");
+    let restored = store
+        .load_investigation(investigation.id)
+        .expect("restored");
+    let canonical = restored
+        .entities
+        .iter()
+        .find(|entity| entity.id == domain)
+        .expect("canonical");
+    assert_eq!(canonical.label, "Analyst edit");
+    assert_eq!(canonical.notes, "kept notes");
+    assert!(canonical.source_ids.contains(&post_source));
+    assert!(!canonical.source_ids.contains(&copied_source));
+}
+
+#[test]
+fn resolve_can_stack_an_already_canonical_winner() {
+    let (mut store, investigation) = store_with_investigation();
+    let first = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Domain,
+            "example.com",
+            Provenance::Analyst,
+            None,
+        )
+        .expect("first");
+    let second = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Hostname,
+            "example.com",
+            Provenance::Collected,
+            None,
+        )
+        .expect("second");
+    let third = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Url,
+            "https://example.com",
+            Provenance::External,
+            None,
+        )
+        .expect("third");
+    store
+        .resolve_entities(
+            investigation.id,
+            &[first, second],
+            first,
+            "first bag",
+            "tester",
+        )
+        .expect("first merge");
+    store
+        .resolve_entities(
+            investigation.id,
+            &[first, third],
+            third,
+            "stack winner",
+            "tester",
+        )
+        .expect("stack existing winner");
+    let data = store.load_investigation(investigation.id).expect("load");
+    assert_eq!(data.canonical_id(second), third);
+    assert_eq!(data.canonical_id(first), third);
+    let absorbed = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Email,
+            "ops@example.com",
+            Provenance::Analyst,
+            None,
+        )
+        .expect("extra");
+    let err = store
+        .resolve_entities(
+            investigation.id,
+            &[second, absorbed],
+            absorbed,
+            "should fail",
+            "tester",
+        )
+        .expect_err("constituent of another bag");
+    let message = format!("{err:#}");
+    assert!(
+        message.contains("already absorbed") && message.contains("unresolve"),
+        "{message}"
+    );
+}
+
+struct SharedBagFixture {
+    canonical: Uuid,
+    shared_source: Uuid,
+    original_source: Uuid,
+    bag1: crate::model::Resolution,
+    bag2: crate::model::Resolution,
+}
+
+fn two_bags_sharing_source_and_asn(store: &mut Store, investigation_id: Uuid) -> SharedBagFixture {
+    let canonical = store
+        .add_entity(
+            investigation_id,
+            EntityKind::Domain,
+            "example.com",
+            Provenance::Analyst,
+            None,
+        )
+        .expect("canonical");
+    store
+        .add_entity(
+            investigation_id,
+            EntityKind::Hostname,
+            "ns1.example.net",
+            Provenance::Collected,
+            None,
+        )
+        .expect("ns1");
+    store
+        .add_entity(
+            investigation_id,
+            EntityKind::Hostname,
+            "ns2.example.net",
+            Provenance::Collected,
+            None,
+        )
+        .expect("ns2");
+    let context = ApplyContext {
+        investigation_id,
+        page_id: None,
+        job_id: None,
+    };
+    let mut original = EvidenceBatch::new();
+    let original_key = original.add_source(NewSource::collected(
+        SourceKind::Manual,
+        "analyst",
+        "original on canonical",
+    ));
+    let domain_key = original.entity(EntityKind::Domain, "example.com", Some(original_key));
+    original.annotate(&domain_key, "registrar", "Keep Me");
+    let original_applied = store.apply_batch(context, &original).expect("original");
+    let original_source = original_applied.source_ids[0];
+    let mut shared = EvidenceBatch::new();
+    let shared_key = shared.add_source(NewSource::collected(
+        SourceKind::Dns,
+        "dns",
+        "shared nameserver source",
+    ));
+    let ns1_key = shared.entity(EntityKind::Hostname, "ns1.example.net", Some(shared_key));
+    let ns2_key = shared.entity(EntityKind::Hostname, "ns2.example.net", Some(shared_key));
+    shared.annotate(&ns1_key, "asn", "AS1");
+    shared.annotate(&ns2_key, "asn", "AS1");
+    let shared_applied = store.apply_batch(context, &shared).expect("shared");
+    let shared_source = shared_applied.source_ids[0];
+    let data = store.load_investigation(investigation_id).expect("load");
+    let ns1 = data
+        .entities
+        .iter()
+        .find(|entity| entity.value == "ns1.example.net")
+        .expect("ns1 row")
+        .id;
+    let ns2 = data
+        .entities
+        .iter()
+        .find(|entity| entity.value == "ns2.example.net")
+        .expect("ns2 row")
+        .id;
+    let bag1 = store
+        .resolve_entities(
+            investigation_id,
+            &[canonical, ns1],
+            canonical,
+            "first nameserver",
+            "tester",
+        )
+        .expect("bag1");
+    assert!(bag1.source_writes.contains(&shared_source));
+    assert!(
+        bag1.property_writes
+            .iter()
+            .any(|write| write.key == "asn" && write.new_value == "AS1")
+    );
+    let bag2 = store
+        .resolve_entities(
+            investigation_id,
+            &[canonical, ns2],
+            canonical,
+            "second nameserver",
+            "tester",
+        )
+        .expect("bag2");
+    assert!(
+        bag2.source_writes.is_empty(),
+        "already-present sources must not be claimed by the second bag: {:?}",
+        bag2.source_writes
+    );
+    assert!(
+        bag2.property_writes.is_empty(),
+        "already-present fields must not be claimed by the second bag: {:?}",
+        bag2.property_writes
+    );
+    SharedBagFixture {
+        canonical,
+        shared_source,
+        original_source,
+        bag1,
+        bag2,
+    }
+}
+
+fn canonical_row(store: &Store, investigation_id: Uuid, canonical: Uuid) -> crate::model::Entity {
+    store
+        .load_investigation(investigation_id)
+        .expect("load")
+        .entities
+        .into_iter()
+        .find(|entity| entity.id == canonical)
+        .expect("canonical")
+}
+
+#[test]
+fn shared_source_write_survives_until_last_bag() {
+    let (mut store, investigation) = store_with_investigation();
+    let fixture = two_bags_sharing_source_and_asn(&mut store, investigation.id);
+    store
+        .unresolve_entities(fixture.bag1.id, "tester")
+        .expect("unresolve first bag");
+    let data = store.load_investigation(investigation.id).expect("load");
+    let canonical = data
+        .entities
+        .iter()
+        .find(|entity| entity.id == fixture.canonical)
+        .expect("canonical");
+    assert!(canonical.source_ids.contains(&fixture.shared_source));
+    assert!(canonical.source_ids.contains(&fixture.original_source));
+    assert!(
+        data.is_absorbed(
+            data.entities
+                .iter()
+                .find(|entity| entity.value == "ns2.example.net")
+                .expect("ns2")
+                .id
+        )
+    );
+}
+
+#[test]
+fn shared_property_write_survives_until_last_bag() {
+    let (mut store, investigation) = store_with_investigation();
+    let fixture = two_bags_sharing_source_and_asn(&mut store, investigation.id);
+    store
+        .unresolve_entities(fixture.bag1.id, "tester")
+        .expect("unresolve first bag");
+    let canonical = canonical_row(&store, investigation.id, fixture.canonical);
+    assert_eq!(canonical.fields.get("asn"), Some("AS1"));
+    assert_eq!(canonical.fields.get("registrar"), Some("Keep Me"));
+}
+
+#[test]
+fn unresolve_last_bag_removes_shared_writes_and_keeps_originals() {
+    let (mut store, investigation) = store_with_investigation();
+    let fixture = two_bags_sharing_source_and_asn(&mut store, investigation.id);
+    store
+        .unresolve_entities(fixture.bag1.id, "tester")
+        .expect("unresolve first");
+    store
+        .unresolve_entities(fixture.bag2.id, "tester")
+        .expect("unresolve last");
+    let data = store.load_investigation(investigation.id).expect("load");
+    let canonical = data
+        .entities
+        .iter()
+        .find(|entity| entity.id == fixture.canonical)
+        .expect("canonical");
+    assert!(canonical.source_ids.contains(&fixture.original_source));
+    assert!(!canonical.source_ids.contains(&fixture.shared_source));
+    assert_eq!(canonical.fields.get("registrar"), Some("Keep Me"));
+    assert!(canonical.fields.get("asn").is_none());
+    assert!(
+        !data.is_absorbed(
+            data.entities
+                .iter()
+                .find(|entity| entity.value == "ns1.example.net")
+                .expect("ns1")
+                .id
+        )
+    );
+    assert!(
+        !data.is_absorbed(
+            data.entities
+                .iter()
+                .find(|entity| entity.value == "ns2.example.net")
+                .expect("ns2")
+                .id
+        )
+    );
+}

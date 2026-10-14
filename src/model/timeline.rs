@@ -26,6 +26,8 @@ open_enum! {
         UserEvent => ("user", "Analyst event", "manual"),
         Finding => ("finding", "Finding recorded"),
         Investigation => ("investigation", "Investigation activity"),
+        EntitiesResolved => ("entities_resolved", "Entities resolved"),
+        EntitiesUnresolved => ("entities_unresolved", "Entities unresolved"),
     }
 }
 

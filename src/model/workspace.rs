@@ -19,6 +19,7 @@ use super::job::JobRecord;
 use super::note::Note;
 use super::page::Page;
 use super::relationship::Relationship;
+use super::resolution::Resolution;
 use super::source::Source;
 use super::timeline::TimelineEvent;
 
@@ -45,6 +46,9 @@ pub struct InvestigationData {
     pub agent_runs: Vec<AgentRun>,
     pub proposals: Vec<Proposal>,
     pub page_entities: Vec<PageEntityLink>,
+    /// Resolution bags. Empty on version-1 archives (`#[serde(default)]`).
+    #[serde(default)]
+    pub resolutions: Vec<Resolution>,
 }
 
 impl InvestigationData {
@@ -63,6 +67,7 @@ impl InvestigationData {
             agent_runs: Vec::new(),
             proposals: Vec::new(),
             page_entities: Vec::new(),
+            resolutions: Vec::new(),
         }
     }
 }
@@ -252,6 +257,35 @@ impl Workspace {
             .collect()
     }
 
+    pub fn visible_entities(&self) -> Vec<&Entity> {
+        self.data
+            .entities
+            .iter()
+            .filter(|entity| !self.data.is_absorbed(entity.id))
+            .collect()
+    }
+
+    pub fn constituents_of(&self, canonical_id: Uuid) -> Vec<&Entity> {
+        self.data
+            .constituent_ids_of(canonical_id)
+            .into_iter()
+            .filter_map(|id| self.entity(id))
+            .collect()
+    }
+
+    pub fn canonical_id(&self, entity_id: Uuid) -> Uuid {
+        self.data.canonical_id(entity_id)
+    }
+
+    pub fn latest_active_resolution(&self, entity_id: Uuid) -> Option<&Resolution> {
+        self.data
+            .active_resolutions()
+            .filter(|resolution| {
+                resolution.canonical_id == entity_id || resolution.contains(entity_id)
+            })
+            .max_by_key(|resolution| resolution.seq)
+    }
+
     pub fn pending_proposal_count(&self) -> usize {
         self.data
             .proposals
@@ -312,6 +346,9 @@ fn build_index(data: &InvestigationData) -> WorkspaceIndex {
     }
     for proposal in &data.proposals {
         register(proposal.id, RefKind::Proposal, proposal.seq);
+    }
+    for resolution in &data.resolutions {
+        register(resolution.id, RefKind::Resolution, resolution.seq);
     }
     index.pages = position_map(data.pages.iter().map(|page| page.id));
     index.sources = position_map(data.sources.iter().map(|source| source.id));

@@ -2,7 +2,7 @@
 
 os-int keeps structured records in one SQLite file, `os-int.sqlite3`, in the data directory. Raw HTTP bodies, reports, agent context packs, and repository clones live as files under `investigations/<uuid>/` and are referenced by a relative path. `os-int config` prints both locations.
 
-This page is the map of those tables. The column list that ships starts at `V1` in [`src/storage/migrations.rs`](../src/storage/migrations.rs). `V2` adds Action audit (`proposals.decided_by`) and the per-investigation `link_types` catalog. Migrations are append-only: add a new version, and do not edit a migration that has already shipped.
+This page is the map of those tables. The column list that ships starts at `V1` in [`src/storage/migrations.rs`](../src/storage/migrations.rs). `V2` adds Action audit (`proposals.decided_by`) and the per-investigation `link_types` catalog. `V3` adds `resolutions` (canonical + constituents, reversible property/source writes). Migrations are append-only: add a new version, and do not edit a migration that has already shipped.
 
 Every investigation-scoped table has:
 
@@ -35,6 +35,7 @@ Every investigation-scoped table has:
 | `agent_runs` | One question and the agent's response, including the thread id used for follow-ups. |
 | `proposals` | One structured action an agent suggested. `status` stays pending until you accept or reject it. `decided_at` / `decided_by` record who and when (local user for now). |
 | `link_types` | First-seen relationship verbs in an investigation. Built-in catalog metadata is copied; custom snake_case verbs are stored with an empty description. Rebuilt from `relationships` on import. Not part of the archive. |
+| `resolutions` | One merge bag: canonical entity, constituent UUIDs, status (`active` / `unresolved`), actor, reason, property writes, and source citations copied onto the canonical. Constituent entity rows are not deleted. `canonical_id` is a real foreign key. `constituent_ids` is a JSON array of UUIDs, so SQLite / `PRAGMA foreign_key_check` / `os-int doctor` cannot see orphans inside it. |
 | `ui_state` | Small key/value pairs: the last investigation, and per-investigation view, page, entity, and agent thread. `scope` is `global` or an investigation id. |
 
 ## How a collection lands
@@ -59,7 +60,7 @@ Search Around does not add a table. `Store::search_around` loads the investigati
 
 `os-int export` writes `investigation.osint.json` plus a `files/` tree. The JSON document's `data` object is the same shape as `InvestigationData`: the investigation and the rows above, with paths still relative. Import rejects an archive whose investigation id is already present unless you pass `--rename`.
 
-Format name: `os-int-investigation`. Format version: `1` (`exchange::FORMAT_VERSION`). `proposals.decided_by` is optional (`#[serde(default)]`); version-1 archives still import. Field list, EvidenceBatch ingest shape, reserved later-version keys, and bump rules: [Ontology Exchange Format](ontology-exchange.md). Object types and link verbs: [Ontology](ontology.md).
+Format name: `os-int-investigation`. Format version: `2` (`exchange::FORMAT_VERSION`). Version 2 adds `data.resolutions`. `proposals.decided_by` and `resolutions` are optional (`#[serde(default)]`); version-1 archives still import (empty resolution list). Field list, EvidenceBatch ingest shape, reserved later-version keys, and bump rules: [Ontology Exchange Format](ontology-exchange.md). Object types and link verbs: [Ontology](ontology.md).
 
 ## See also
 

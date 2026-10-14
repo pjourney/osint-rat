@@ -5,7 +5,7 @@
 //! properties, inverse verbs, allowed endpoints, and the Action catalog. Unknown verbs
 //! still store; Object View groups them under "Other".
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use super::agent::AgentAction;
 use super::common::Fields;
@@ -13,6 +13,7 @@ use super::entity::{Entity, EntityKind};
 use super::finding::Finding;
 use super::page::{Page, PageKind};
 use super::relationship::{Relationship, kinds, normalize_relationship_kind};
+use super::resolution::Resolution;
 use super::source::Source;
 use super::workspace::Workspace;
 
@@ -983,14 +984,14 @@ pub const ACTION_TYPES: &[ActionType] = &[
     ActionType {
         kind: "PROPOSE_RESOLVE",
         label: "Propose resolve",
-        description: "Reserved. Suggest merging entities that are the same real-world thing.",
-        implemented: false,
+        description: "Suggest merging entities that are the same real-world thing. Accept is required.",
+        implemented: true,
     },
     ActionType {
         kind: "PROPOSE_UNRESOLVE",
         label: "Propose unresolve",
-        description: "Reserved. Suggest splitting a previously resolved entity.",
-        implemented: false,
+        description: "Suggest splitting a previously resolved entity. Accept is required.",
+        implemented: true,
     },
     ActionType {
         kind: "RUN_PLAYBOOK",
@@ -1052,7 +1053,7 @@ pub struct LinkedObject {
     pub entity_kind: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LinkDirection {
     Outgoing,
     Incoming,
@@ -1082,6 +1083,15 @@ pub struct ObjectFinding {
     pub provenance: String,
 }
 
+/// A constituent absorbed into the canonical object.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ObjectConstituent {
+    pub reference: String,
+    pub kind: String,
+    pub value: String,
+    pub label: String,
+}
+
 /// Read model for the Object View screen. Built from a workspace snapshot; no I/O.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ObjectView {
@@ -1093,6 +1103,8 @@ pub struct ObjectView {
     pub links: Vec<LinkGroupView>,
     pub sources: Vec<ObjectSource>,
     pub findings: Vec<ObjectFinding>,
+    pub constituents: Vec<ObjectConstituent>,
+    pub resolution_ref: Option<String>,
 }
 
 impl ObjectView {
@@ -1104,15 +1116,31 @@ impl ObjectView {
         identity.push("label", entity.label.clone());
         identity.push("provenance", entity.provenance.as_str());
         let groups = property_groups(object_type, &identity, &entity.fields);
+        let members = object_member_ids(workspace, entity.id);
+        let mut source_ids = entity.source_ids.clone();
+        for member_id in &members {
+            if let Some(member) = workspace.entity(*member_id) {
+                for source_id in &member.source_ids {
+                    if !source_ids.contains(source_id) {
+                        source_ids.push(*source_id);
+                    }
+                }
+            }
+        }
         Self {
             object_type: object_type.key.to_string(),
             object_label: object_type.label.to_string(),
             title: entity.display_name().to_string(),
             short_ref: entity.short_ref().to_string(),
             groups,
-            links: link_groups(workspace, entity.id),
-            sources: sources_for(workspace, &entity.source_ids),
-            findings: findings_for_entity(workspace, entity),
+            links: link_groups(workspace, &members),
+            sources: sources_for(workspace, &source_ids),
+            findings: findings_for_members(workspace, &members),
+            constituents: constituents_for(workspace, entity.id),
+            resolution_ref: workspace
+                .latest_active_resolution(entity.id)
+                .map(Resolution::short_ref)
+                .map(|reference| reference.to_string()),
         }
     }
 
@@ -1160,6 +1188,8 @@ impl ObjectView {
             links: Vec::new(),
             sources: Vec::new(),
             findings: findings_for_page(workspace, page.id),
+            constituents: Vec::new(),
+            resolution_ref: None,
         }
     }
 }
@@ -1222,12 +1252,37 @@ fn property_groups(
     groups
 }
 
-fn link_groups(workspace: &Workspace, entity_id: uuid::Uuid) -> Vec<LinkGroupView> {
+fn object_member_ids(workspace: &Workspace, entity_id: uuid::Uuid) -> Vec<uuid::Uuid> {
+    let canonical = workspace.canonical_id(entity_id);
+    let mut ids = vec![canonical];
+    ids.extend(workspace.data.constituent_ids_of(canonical));
+    ids
+}
+
+fn constituents_for(workspace: &Workspace, entity_id: uuid::Uuid) -> Vec<ObjectConstituent> {
+    workspace
+        .constituents_of(workspace.canonical_id(entity_id))
+        .into_iter()
+        .map(|entity| ObjectConstituent {
+            reference: entity.short_ref().to_string(),
+            kind: entity.kind.as_str().to_string(),
+            value: entity.value.clone(),
+            label: entity.display_name().to_string(),
+        })
+        .collect()
+}
+
+fn link_groups(workspace: &Workspace, member_ids: &[uuid::Uuid]) -> Vec<LinkGroupView> {
     let mut grouped: BTreeMap<String, LinkGroupView> = BTreeMap::new();
+    let mut seen: HashSet<(LinkDirection, String, uuid::Uuid)> = HashSet::new();
     let push = |grouped: &mut BTreeMap<String, LinkGroupView>,
+                seen: &mut HashSet<(LinkDirection, String, uuid::Uuid)>,
                 relationship: &Relationship,
                 direction: LinkDirection,
                 other: &Entity| {
+        if !seen.insert((direction, relationship.kind.clone(), other.id)) {
+            return;
+        }
         let label = link_group_label(&relationship.kind);
         let catalogued = is_catalogued_link(&relationship.kind);
         let entry = grouped.entry(label.to_string()).or_insert(LinkGroupView {
@@ -1243,14 +1298,37 @@ fn link_groups(workspace: &Workspace, entity_id: uuid::Uuid) -> Vec<LinkGroupVie
             entity_kind: other.kind.as_str().to_string(),
         });
     };
-    for relationship in workspace.outgoing(entity_id) {
-        if let Some(other) = workspace.entity(relationship.to_id) {
-            push(&mut grouped, relationship, LinkDirection::Outgoing, other);
+    let members: std::collections::HashSet<uuid::Uuid> = member_ids.iter().copied().collect();
+    for member_id in member_ids {
+        for relationship in workspace.outgoing(*member_id) {
+            let other_id = workspace.canonical_id(relationship.to_id);
+            if members.contains(&other_id) {
+                continue;
+            }
+            if let Some(other) = workspace.entity(other_id) {
+                push(
+                    &mut grouped,
+                    &mut seen,
+                    relationship,
+                    LinkDirection::Outgoing,
+                    other,
+                );
+            }
         }
-    }
-    for relationship in workspace.incoming(entity_id) {
-        if let Some(other) = workspace.entity(relationship.from_id) {
-            push(&mut grouped, relationship, LinkDirection::Incoming, other);
+        for relationship in workspace.incoming(*member_id) {
+            let other_id = workspace.canonical_id(relationship.from_id);
+            if members.contains(&other_id) {
+                continue;
+            }
+            if let Some(other) = workspace.entity(other_id) {
+                push(
+                    &mut grouped,
+                    &mut seen,
+                    relationship,
+                    LinkDirection::Incoming,
+                    other,
+                );
+            }
         }
     }
     let mut groups: Vec<LinkGroupView> = grouped.into_values().collect();
@@ -1278,11 +1356,16 @@ fn object_source(source: &Source) -> ObjectSource {
     }
 }
 
-fn findings_for_entity(workspace: &Workspace, entity: &Entity) -> Vec<ObjectFinding> {
-    let page_ids: Vec<_> = workspace
-        .pages_for_entity(entity.id)
-        .into_iter()
+fn findings_for_members(workspace: &Workspace, member_ids: &[uuid::Uuid]) -> Vec<ObjectFinding> {
+    let page_ids: Vec<_> = member_ids
+        .iter()
+        .flat_map(|id| workspace.pages_for_entity(*id))
         .map(|page| page.id)
+        .collect();
+    let member_sources: Vec<uuid::Uuid> = member_ids
+        .iter()
+        .filter_map(|id| workspace.entity(*id))
+        .flat_map(|entity| entity.source_ids.iter().copied())
         .collect();
     workspace
         .data
@@ -1295,7 +1378,7 @@ fn findings_for_entity(workspace: &Workspace, entity: &Entity) -> Vec<ObjectFind
                 || finding
                     .source_ids
                     .iter()
-                    .any(|source_id| entity.source_ids.contains(source_id))
+                    .any(|source_id| member_sources.contains(source_id))
         })
         .map(object_finding)
         .collect()
@@ -1395,16 +1478,22 @@ mod tests {
     #[test]
     fn action_catalog_covers_implemented_and_reserved_kinds() {
         assert!(action_type("ADD_FINDING").expect("finding").implemented);
-        assert!(!action_type("PROPOSE_RESOLVE").expect("resolve").implemented);
+        assert!(action_type("PROPOSE_RESOLVE").expect("resolve").implemented);
         assert!(!action_type("RUN_PLAYBOOK").expect("playbook").implemented);
         assert_eq!(
             action_type_for(&AgentAction::AddNote { body: "x".into() }).kind,
             "ADD_NOTE"
         );
         assert!(
-            AgentAction::ProposeResolve {
+            !AgentAction::ProposeResolve {
                 entities: vec!["E-1".into()],
                 reason: String::new(),
+            }
+            .is_reserved()
+        );
+        assert!(
+            AgentAction::RunPlaybook {
+                playbook: "domain-infra".into(),
             }
             .is_reserved()
         );
@@ -1479,5 +1568,84 @@ mod tests {
                 .iter()
                 .any(|group| group.label == OTHER_LINK_GROUP && !group.catalogued)
         );
+    }
+
+    #[test]
+    fn object_view_dedups_collapsed_parallel_links() {
+        let investigation_id = Uuid::new_v4();
+        let mut domain = sample_entity(EntityKind::Domain, "example.com");
+        domain.investigation_id = investigation_id;
+        domain.seq = 1;
+        let mut host = sample_entity(EntityKind::Hostname, "example.com");
+        host.investigation_id = investigation_id;
+        host.seq = 2;
+        let mut ip = sample_entity(EntityKind::Ip, "192.0.2.10");
+        ip.investigation_id = investigation_id;
+        ip.seq = 3;
+        let from_domain = Relationship {
+            id: Uuid::new_v4(),
+            investigation_id,
+            seq: 1,
+            from_id: domain.id,
+            to_id: ip.id,
+            kind: kinds::RESOLVES_TO.to_string(),
+            provenance: Provenance::Collected,
+            confidence: Confidence::High,
+            notes: String::new(),
+            source_ids: Vec::new(),
+            created_at: now(),
+        };
+        let from_host = Relationship {
+            id: Uuid::new_v4(),
+            investigation_id,
+            seq: 2,
+            from_id: host.id,
+            to_id: ip.id,
+            kind: kinds::RESOLVES_TO.to_string(),
+            provenance: Provenance::Collected,
+            confidence: Confidence::High,
+            notes: String::new(),
+            source_ids: Vec::new(),
+            created_at: now(),
+        };
+        let mut data = InvestigationData::empty(Investigation {
+            id: investigation_id,
+            name: "Case".into(),
+            description: String::new(),
+            tags: Vec::new(),
+            created_at: now(),
+            updated_at: now(),
+        });
+        data.entities = vec![domain.clone(), host.clone(), ip.clone()];
+        data.relationships = vec![from_domain, from_host];
+        data.resolutions.push(Resolution {
+            id: Uuid::new_v4(),
+            investigation_id,
+            seq: 1,
+            canonical_id: domain.id,
+            constituent_ids: vec![domain.id, host.id],
+            status: crate::model::ResolutionStatus::Active,
+            reason: "same host".into(),
+            created_by: "local".into(),
+            created_at: now(),
+            unresolved_by: None,
+            unresolved_at: None,
+            property_writes: Vec::new(),
+            source_writes: Vec::new(),
+        });
+        let workspace = Workspace::new(data);
+        let view = ObjectView::for_entity(&workspace, workspace.entity(domain.id).expect("domain"));
+        let resolves: Vec<&LinkedObject> = view
+            .links
+            .iter()
+            .filter(|group| group.label == "Resolves to")
+            .flat_map(|group| group.links.iter())
+            .filter(|link| {
+                link.direction == LinkDirection::Outgoing
+                    && link.relationship_kind == kinds::RESOLVES_TO
+                    && link.entity_kind == "ip"
+            })
+            .collect();
+        assert_eq!(resolves.len(), 1, "{:?}", view.links);
     }
 }

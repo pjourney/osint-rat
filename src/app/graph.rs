@@ -65,6 +65,7 @@ impl App {
     }
 
     pub(crate) fn open_graph(&mut self) {
+        self.merge_marks.clear();
         if self.workspace.is_none() {
             self.status = "Create or open an investigation first.".into();
             return;
@@ -293,7 +294,7 @@ impl App {
             return Some(id);
         }
         if self.view == View::Entities
-            && let Some(entity) = workspace.data.entities.get(self.selected)
+            && let Some(entity) = workspace.visible_entities().get(self.selected)
         {
             return Some(entity.id);
         }
@@ -303,7 +304,11 @@ impl App {
         {
             return Some(entity_id);
         }
-        workspace.data.entities.first().map(|entity| entity.id)
+        workspace
+            .visible_entities()
+            .first()
+            .map(|entity| entity.id)
+            .or_else(|| workspace.data.entities.first().map(|entity| entity.id))
     }
 
     fn visible_graph_entity_id(&self, index: usize) -> Option<uuid::Uuid> {
@@ -381,11 +386,11 @@ impl App {
         };
         let index = match self.view {
             View::Entities => self.entity_id.and_then(|id| {
+                let canonical = workspace.canonical_id(id);
                 workspace
-                    .data
-                    .entities
+                    .visible_entities()
                     .iter()
-                    .position(|entity| entity.id == id)
+                    .position(|entity| entity.id == canonical)
             }),
             View::Pages => self
                 .page_id

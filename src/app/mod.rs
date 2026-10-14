@@ -11,6 +11,7 @@ pub mod action;
 pub mod commands;
 pub mod graph;
 pub mod input;
+pub mod resolution;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -22,6 +23,7 @@ use uuid::Uuid;
 pub use action::Action;
 pub use graph::GraphState;
 pub use input::Input;
+pub use resolution::PendingResolve;
 
 use crate::agent::{AgentContext, AgentRequest, AgentStatus, ContextFocus, run_agent};
 use crate::collectors::tool::run_tool;
@@ -166,6 +168,8 @@ pub enum Overlay {
     Doctor,
     /// Actions proposed by one agent run. Accept and reject apply one at a time.
     Proposals { run_id: Uuid, selected: usize },
+    /// Scored resolution suggestions. Enter proposes; nothing auto-merges.
+    Suggestions { selected: usize },
 }
 
 /// Which form [`Overlay::Form`] is editing. The field list is built to match the kind.
@@ -245,6 +249,9 @@ pub struct App {
     pub agent_thread: Option<Uuid>,
     pub object_return_view: Option<View>,
     pub graph: GraphState,
+    pub merge_marks: Vec<Uuid>,
+    pub pending_resolve: Option<PendingResolve>,
+    pub pending_unresolve: Option<Uuid>,
     pub status: String,
     pub dirty: bool,
     pub should_quit: bool,
@@ -291,6 +298,9 @@ impl App {
             agent_thread: None,
             object_return_view: None,
             graph: GraphState::default(),
+            merge_marks: Vec::new(),
+            pending_resolve: None,
+            pending_unresolve: None,
             status: "Press [?] for help, [p] for commands.".into(),
             dirty: true,
             should_quit: false,
@@ -391,6 +401,12 @@ impl App {
             {
                 self.entity_id = Some(entity_id);
             }
+        }
+        if let Some(id) = self.entity_id {
+            self.entity_id = self
+                .workspace
+                .as_ref()
+                .and_then(|workspace| workspace.entity(id).map(|_| workspace.canonical_id(id)));
         }
         if let Some(hops) = self.store.get_state(&scope, "graph_hops")?
             && let Ok(hops) = hops.parse::<u32>()
@@ -496,6 +512,7 @@ impl App {
         };
         let data = self.store.load_investigation(id)?;
         self.workspace = Some(Workspace::new(data));
+        self.remap_focus_after_resolution();
         self.mark_dirty();
         Ok(())
     }
@@ -556,12 +573,21 @@ impl App {
             Action::OpenAgent => self.switch_view(View::Agent),
             Action::OpenOverview => self.switch_view(View::Overview),
             Action::OpenObjectView => self.open_object_view(),
-            Action::OpenGraph => self.open_graph(),
+            Action::OpenGraph => {
+                self.merge_marks.clear();
+                self.open_graph();
+            }
             Action::SearchAround => self.search_around_from_selection(),
             Action::GraphHops(delta) => self.change_graph_hops(delta),
             Action::GraphFacetMove(delta) => self.move_graph_facet(delta),
             Action::GraphApplyFacet => self.apply_graph_facet(),
             Action::GraphClearFilters => self.clear_graph_filters(),
+            Action::ToggleMergeMark
+            | Action::ProposeMerge
+            | Action::Unresolve
+            | Action::OpenSuggestions => {
+                let _ = self.dispatch_resolution(&action);
+            }
             Action::Command(id) => self.run_command(id)?,
             Action::Submit => self.submit()?,
             Action::Cycle(delta) => self.cycle_form(delta),
@@ -612,6 +638,12 @@ impl App {
                 if command == "graph_confirm_cap" {
                     self.graph.pending = None;
                 }
+                if command == "confirm_resolve" {
+                    self.pending_resolve = None;
+                }
+                if command == "confirm_unresolve" {
+                    self.pending_unresolve = None;
+                }
                 self.overlay = Overlay::None;
             }
             Overlay::Form(_)
@@ -621,7 +653,8 @@ impl App {
             | Overlay::Help
             | Overlay::Text { .. }
             | Overlay::Doctor
-            | Overlay::Proposals { .. } => {
+            | Overlay::Proposals { .. }
+            | Overlay::Suggestions { .. } => {
                 self.overlay = Overlay::None;
             }
         }
@@ -644,6 +677,7 @@ impl App {
             self.status = "Create or open an investigation first.".into();
             return;
         }
+        self.merge_marks.clear();
         if view == View::Graph {
             self.open_graph();
             return;
@@ -673,6 +707,11 @@ impl App {
         } else {
             None
         };
+        let suggestion_count = if matches!(self.overlay, Overlay::Suggestions { .. }) {
+            Some(self.listed_suggestions().len().max(1))
+        } else {
+            None
+        };
         match &mut self.overlay {
             Overlay::Palette { selected, query } => {
                 let count = filtered(&query.value).len().max(1);
@@ -688,6 +727,10 @@ impl App {
             }
             Overlay::Proposals { selected, .. } => {
                 let count = proposal_count.unwrap_or(1);
+                *selected = (*selected as i32 + delta).rem_euclid(count as i32) as usize;
+            }
+            Overlay::Suggestions { selected } => {
+                let count = suggestion_count.unwrap_or(1);
                 *selected = (*selected as i32 + delta).rem_euclid(count as i32) as usize;
             }
             Overlay::Text { scroll, .. } => {
@@ -736,6 +779,7 @@ impl App {
                     self.open_hit(&hit);
                 }
             }
+            Overlay::Suggestions { .. } => self.apply_highlighted_suggestion(),
             Overlay::None if self.view == View::Welcome => match self.selected {
                 0 => self.open_new()?,
                 1 => self.open_open_form(),
@@ -759,6 +803,13 @@ impl App {
     }
 
     fn select_main_item(&mut self) {
+        let listed_entity_id = if self.view == View::Entities {
+            self.listed_entities()
+                .get(self.selected)
+                .map(|entity| entity.id)
+        } else {
+            None
+        };
         let Some(workspace) = self.workspace.as_ref() else {
             return;
         };
@@ -781,8 +832,8 @@ impl App {
                 }
             }
             View::Entities => {
-                if let Some(entity) = workspace.data.entities.get(self.selected) {
-                    self.entity_id = Some(entity.id);
+                if let Some(id) = listed_entity_id {
+                    self.entity_id = Some(id);
                     self.open_object_view();
                 }
             }
@@ -1191,6 +1242,11 @@ impl App {
             "open_object" => self.open_object_view(),
             "open_graph" => self.open_graph(),
             "search_around" => self.search_around_from_selection(),
+            "merge_entities" => self.propose_merge(),
+            "unresolve_entity" => self.propose_unresolve(),
+            "resolution_suggestions" => self.open_suggestions(),
+            "confirm_resolve" => self.confirm_resolve()?,
+            "confirm_unresolve" => self.confirm_unresolve()?,
             "graph_confirm_cap" => self.confirm_graph_cap(),
             "doctor" => self.overlay = Overlay::Doctor,
             "help" => self.overlay = Overlay::Help,
@@ -1799,6 +1855,13 @@ impl App {
                 action.name()
             );
         }
+        if matches!(
+            action,
+            AgentAction::ProposeResolve { .. } | AgentAction::ProposeUnresolve { .. }
+        ) {
+            self.apply_resolve_action(action)?;
+            return Ok(());
+        }
         let workspace = self
             .workspace
             .as_ref()
@@ -1887,10 +1950,10 @@ impl App {
             AgentAction::GenerateReport { format } => {
                 self.generate_report(format.as_deref().unwrap_or("markdown"))?;
             }
-            AgentAction::ProposeResolve { .. }
-            | AgentAction::ProposeUnresolve { .. }
-            | AgentAction::RunPlaybook { .. }
-            | AgentAction::AssertFindingTemplate { .. } => {
+            AgentAction::ProposeResolve { .. } | AgentAction::ProposeUnresolve { .. } => {
+                unreachable!("resolution actions apply before this match")
+            }
+            AgentAction::RunPlaybook { .. } | AgentAction::AssertFindingTemplate { .. } => {
                 unreachable!("reserved actions are refused before apply")
             }
         }
@@ -1898,28 +1961,28 @@ impl App {
     }
 
     fn open_object_view(&mut self) {
-        let Some(workspace) = self.workspace.as_ref() else {
+        if self.workspace.is_none() {
             self.status = "Create or open an investigation first.".into();
             return;
-        };
-        let highlighted_entity = workspace
-            .data
-            .entities
+        }
+        let listed_entity_id = self
+            .listed_entities()
             .get(self.selected)
             .map(|entity| entity.id);
-        let current_page = self
-            .page_id
-            .and_then(|id| workspace.page(id).map(|page| (page.id, page.entity_id)))
-            .or_else(|| {
-                workspace
-                    .data
-                    .pages
-                    .get(self.selected)
-                    .map(|page| (page.id, page.entity_id))
-            });
+        let current_page = self.workspace.as_ref().and_then(|workspace| {
+            self.page_id
+                .and_then(|id| workspace.page(id).map(|page| (page.id, page.entity_id)))
+                .or_else(|| {
+                    workspace
+                        .data
+                        .pages
+                        .get(self.selected)
+                        .map(|page| (page.id, page.entity_id))
+                })
+        });
         match self.view {
             View::Entities => {
-                self.entity_id = highlighted_entity;
+                self.entity_id = listed_entity_id;
             }
             View::Graph => {
                 self.entity_id = self
@@ -1952,6 +2015,12 @@ impl App {
                     self.entity_id = None;
                 }
             }
+        }
+        if let Some(id) = self.entity_id {
+            self.entity_id = self
+                .workspace
+                .as_ref()
+                .and_then(|workspace| workspace.entity(id).map(|_| workspace.canonical_id(id)));
         }
         let has_entity = self
             .entity_id
@@ -3157,7 +3226,12 @@ mod tests {
         let (_directory, mut app) = test_app();
         create_named_investigation(&mut app, "Example Corp");
         let investigation_id = app.workspace.as_ref().expect("workspace").id();
-        let mut run = sample_run(investigation_id, Uuid::new_v4(), Uuid::new_v4(), "Merge?");
+        let mut run = sample_run(
+            investigation_id,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "Playbook?",
+        );
         app.store.insert_agent_run(&mut run).expect("run");
         let proposals = app
             .store
@@ -3165,9 +3239,8 @@ mod tests {
                 investigation_id,
                 run.id,
                 vec![(
-                    AgentAction::ProposeResolve {
-                        entities: vec!["E-1".into(), "E-2".into()],
-                        reason: "same domain".into(),
+                    AgentAction::RunPlaybook {
+                        playbook: "domain-infra".into(),
                     },
                     ProposalStatus::Pending,
                     None,
@@ -3198,6 +3271,347 @@ mod tests {
                 .as_deref()
                 .unwrap_or_default()
                 .contains("reserved")
+        );
+    }
+
+    #[test]
+    fn accepting_propose_resolve_merges_and_unresolve_restores_selection() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Resolve Case");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let domain = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Domain,
+                "example.com",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("domain");
+        let host = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Hostname,
+                "example.com",
+                crate::model::Provenance::Collected,
+                None,
+            )
+            .expect("host");
+        app.reload().expect("reload");
+        let mut run = sample_run(
+            investigation_id,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "Same host?",
+        );
+        app.store.insert_agent_run(&mut run).expect("run");
+        app.store
+            .insert_proposals(
+                investigation_id,
+                run.id,
+                vec![(
+                    AgentAction::ProposeResolve {
+                        entities: vec!["E-1".into(), "E-2".into()],
+                        reason: "same host".into(),
+                    },
+                    ProposalStatus::Pending,
+                    None,
+                )],
+            )
+            .expect("proposals");
+        app.reload().expect("reload");
+        app.overlay = Overlay::Proposals {
+            run_id: run.id,
+            selected: 0,
+        };
+        app.dispatch(Action::Accept).expect("accept");
+        let workspace = app.workspace.as_ref().expect("workspace");
+        assert!(workspace.data.is_absorbed(host));
+        assert_eq!(workspace.canonical_id(host), domain);
+        let view = crate::model::ObjectView::for_entity(
+            workspace,
+            workspace.entity(domain).expect("canonical"),
+        );
+        assert!(!view.constituents.is_empty());
+        app.view = View::Entities;
+        app.entity_id = Some(domain);
+        app.dispatch(Action::Unresolve).expect("propose split");
+        assert!(matches!(app.overlay, Overlay::Confirm { .. }));
+        app.dispatch(Action::Cancel).expect("esc");
+        assert_eq!(app.overlay, Overlay::None);
+        assert!(
+            app.workspace
+                .as_ref()
+                .expect("workspace")
+                .data
+                .is_absorbed(host),
+            "Esc must not unresolve"
+        );
+        app.dispatch(Action::Unresolve).expect("propose again");
+        app.dispatch(Action::Select).expect("confirm");
+        let restored = app.workspace.as_ref().expect("workspace");
+        assert!(!restored.data.is_absorbed(host));
+        assert_eq!(app.entity_id, Some(domain));
+    }
+
+    #[test]
+    fn entity_mark_enter_and_esc_restore_do_not_stale_selection() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Marks");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let domain = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Domain,
+                "example.com",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("domain");
+        let ip = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Ip,
+                "192.0.2.10",
+                crate::model::Provenance::Collected,
+                None,
+            )
+            .expect("ip");
+        app.reload().expect("reload");
+        app.view = View::Entities;
+        app.pane = Pane::Main;
+        app.selected = 0;
+        app.dispatch(Action::ToggleMergeMark).expect("mark first");
+        app.dispatch(Action::Move(1)).expect("down");
+        app.dispatch(Action::ToggleMergeMark).expect("mark second");
+        assert_eq!(app.merge_marks.len(), 2);
+        app.dispatch(Action::ProposeMerge).expect("propose");
+        assert!(matches!(app.overlay, Overlay::Confirm { .. }));
+        app.dispatch(Action::Cancel).expect("esc confirm");
+        assert_eq!(app.overlay, Overlay::None);
+        assert_eq!(app.merge_marks.len(), 2);
+        app.dispatch(Action::ProposeMerge).expect("propose again");
+        app.dispatch(Action::Select).expect("confirm merge");
+        let workspace = app.workspace.as_ref().expect("workspace");
+        assert!(workspace.data.is_absorbed(ip) || workspace.data.is_absorbed(domain));
+        app.view = View::Entities;
+        app.pane = Pane::Main;
+        app.remap_focus_after_resolution();
+        app.dispatch(Action::Select).expect("enter object view");
+        assert_eq!(app.view, View::Object);
+        assert!(app.entity_id.is_some());
+        app.dispatch(Action::Back).expect("esc object view");
+        assert_eq!(app.view, View::Entities);
+        let visible = app.listed_entities();
+        assert!(!visible.is_empty());
+        assert!(app.selected < visible.len());
+        assert!(
+            visible
+                .iter()
+                .any(|entity| Some(entity.id) == app.entity_id)
+        );
+    }
+
+    #[test]
+    fn view_change_clears_marks_and_m_does_not_add_unmarked_highlight() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Mark Leak");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let first = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Domain,
+                "alpha.example",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("first");
+        let second = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Ip,
+                "192.0.2.10",
+                crate::model::Provenance::Collected,
+                None,
+            )
+            .expect("second");
+        let third = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Email,
+                "a@example.com",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("third");
+        app.reload().expect("reload");
+        app.view = View::Entities;
+        app.pane = Pane::Main;
+        app.selected = 1;
+        app.dispatch(Action::ToggleMergeMark).expect("mark second");
+        app.selected = 2;
+        app.dispatch(Action::ToggleMergeMark).expect("mark third");
+        assert_eq!(app.merge_marks, vec![second, third]);
+        app.dispatch(Action::OpenSources).expect("leave entities");
+        assert!(
+            app.merge_marks.is_empty(),
+            "marks must not survive a view change"
+        );
+        app.dispatch(Action::OpenEntities)
+            .expect("back to entities");
+        assert_eq!(app.view, View::Entities);
+        assert_eq!(app.selected, 0);
+        assert!(app.merge_marks.is_empty());
+        app.dispatch(Action::ProposeMerge).expect("m");
+        assert_eq!(app.overlay, Overlay::None);
+        assert!(app.pending_resolve.is_none());
+        assert!(app.status.contains("Mark at least two"));
+        let listed = app.listed_entities();
+        assert_eq!(listed[0].id, first);
+    }
+
+    #[test]
+    fn open_graph_clears_merge_marks() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Graph Marks");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        app.store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Domain,
+                "example.com",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("domain");
+        app.store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Ip,
+                "192.0.2.10",
+                crate::model::Provenance::Collected,
+                None,
+            )
+            .expect("ip");
+        app.reload().expect("reload");
+        app.view = View::Entities;
+        app.pane = Pane::Main;
+        app.selected = 0;
+        app.dispatch(Action::ToggleMergeMark).expect("mark");
+        assert_eq!(app.merge_marks.len(), 1);
+        app.dispatch(Action::OpenGraph).expect("g");
+        assert!(app.merge_marks.is_empty());
+        assert_eq!(app.view, View::Graph);
+    }
+
+    #[test]
+    fn merge_canonical_is_highlighted_marked_row_not_leftover_entity_id() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Canonical Highlight");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let first = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Domain,
+                "alpha.example",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("first");
+        let second = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Ip,
+                "192.0.2.11",
+                crate::model::Provenance::Collected,
+                None,
+            )
+            .expect("second");
+        let leftover = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Email,
+                "left@example.com",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("leftover");
+        app.reload().expect("reload");
+        app.view = View::Entities;
+        app.pane = Pane::Main;
+        app.selected = 0;
+        app.dispatch(Action::ToggleMergeMark).expect("mark first");
+        app.selected = 1;
+        app.dispatch(Action::ToggleMergeMark).expect("mark second");
+        app.selected = 1;
+        app.entity_id = Some(leftover);
+        app.dispatch(Action::ProposeMerge).expect("m");
+        let pending = app.pending_resolve.as_ref().expect("pending");
+        assert_eq!(pending.canonical_id, second);
+        assert_eq!(pending.entity_ids, vec![first, second]);
+        app.dispatch(Action::Cancel).expect("esc");
+        app.selected = 2;
+        app.entity_id = Some(leftover);
+        app.dispatch(Action::ProposeMerge)
+            .expect("m unmarked highlight");
+        let pending = app.pending_resolve.as_ref().expect("pending first mark");
+        assert_eq!(pending.canonical_id, first);
+        assert!(!pending.entity_ids.contains(&leftover));
+    }
+
+    #[test]
+    fn suggestions_overlay_does_not_auto_merge() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Suggest");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        app.store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Username,
+                "octocat",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("user");
+        app.store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Url,
+                "https://github.com/octocat",
+                crate::model::Provenance::External,
+                None,
+            )
+            .expect("url");
+        app.reload().expect("reload");
+        app.dispatch(Action::OpenSuggestions).expect("suggestions");
+        assert!(matches!(app.overlay, Overlay::Suggestions { .. }));
+        assert!(
+            app.workspace
+                .as_ref()
+                .expect("workspace")
+                .data
+                .resolutions
+                .is_empty()
+        );
+        app.dispatch(Action::Cancel).expect("esc");
+        assert_eq!(app.overlay, Overlay::None);
+        assert!(
+            app.workspace
+                .as_ref()
+                .expect("workspace")
+                .data
+                .resolutions
+                .is_empty()
         );
     }
 }

@@ -15,6 +15,7 @@ use super::evidence::{
 };
 use super::graph::{catalogue_link_type, list_entities, list_page_entities, list_relationships};
 use super::pages::{insert_note, insert_page, list_notes, list_pages};
+use super::resolution::{insert_resolution_record, list_resolutions};
 use super::rows::{id, json, ts};
 use crate::model::InvestigationData;
 
@@ -39,6 +40,7 @@ impl Store {
             agent_runs: list_agent_runs(connection, investigation_id)?,
             proposals: list_proposals(connection, investigation_id)?,
             page_entities: list_page_entities(connection, investigation_id)?,
+            resolutions: list_resolutions(connection, investigation_id)?,
         })
     }
 
@@ -146,6 +148,9 @@ impl Store {
         }
         for proposal in &data.proposals {
             insert_proposal_record(&transaction, proposal)?;
+        }
+        for resolution in &data.resolutions {
+            insert_resolution_record(&transaction, resolution)?;
         }
         transaction.commit()?;
         Ok(())

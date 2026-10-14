@@ -9,6 +9,7 @@ This is the complete guide to using os-int: the workbench, the collectors, the a
 - [The workbench](#the-workbench)
 - [Building a case](#building-a-case)
 - [Graph and Search Around](#graph-and-search-around)
+- [Entity resolution](#entity-resolution)
 - [Collectors](#collectors)
 - [Diagnostics](#diagnostics)
 - [External tools](#external-tools)
@@ -66,7 +67,7 @@ A **finding** is a claim. It should cite the sources that support it. Confidence
 | `F` | Finding | `T` | Timeline event |
 | `E` | Entity | `J` | Job |
 | `R` | Relationship | `Q` | Agent run |
-| | | `X` | Proposal |
+| `V` | Resolution | `X` | Proposal |
 
 `S-12` means "source number 12 in this investigation." The UUID remains the primary key.
 
@@ -207,7 +208,9 @@ Object View is the typed reading of one entity or page: property groups from the
 - Palette: **Object View** uses the same rules; a leftover entity is never reused.
 - `Esc` returns to the screen you came from.
 
-Identity is always shown, so every object has at least one property group. Known relationship verbs use the link-type catalog (`resolves_to`, `subdomain_of`, …). Unknown snake_case verbs still store and appear under **Other**. Accepting an agent Action records who and when; reserved Action kinds (`PROPOSE_RESOLVE` and the playbook stubs) stay refused.
+Identity is always shown, so every object has at least one property group. Known relationship verbs use the link-type catalog (`resolves_to`, `subdomain_of`, …). Unknown snake_case verbs still store and appear under **Other**. Accepting an agent Action records who and when. `PROPOSE_RESOLVE` / `PROPOSE_UNRESOLVE` apply only after accept. Playbook Action stubs stay refused.
+
+When the object is a resolved canonical, Object View lists **Constituents** (the absorbed records). Sources and links from both sides stay visible.
 
 ## Graph and Search Around
 
@@ -221,6 +224,30 @@ Graph is a terminal link-analysis canvas (TUI-first; there is no embedded webvie
 - `Enter` opens Object View for the selected node. `Esc` returns to the screen that opened Graph. The Entities table is unchanged: `Enter` there still opens Object View.
 
 Empty investigations do not crash: Graph shows an empty neighborhood and a collect hint.
+
+Resolved constituents are hidden: the graph shows **one node** for the canonical. Search Around from a constituent seed starts at the canonical.
+
+## Entity resolution
+
+Merge records that are the same real-world thing without destroying history. Unresolve is always available.
+
+### Safe merge practices
+
+- Merge only when you would treat the records as one thing in a report. Same host (`example.com` domain + hostname) is a typical yes. A domain and an unrelated URL that happens to share a string is a no.
+- Prefer the more specific or already-cited object as the winner (the highlighted marked row). The winner keeps its kind and value.
+- Read the confirm text. Esc cancels. Nothing merges until you confirm.
+- After merge, open Object View and check constituents, sources, and links. Both sides' citations must still be there.
+- Unresolve (`u` on the canonical) if the bag was wrong. Constituents return; property writes from that bag are undone. SQLite rows are not deleted, so `os-int doctor` should stay clean.
+- Do not accept an agent `PROPOSE_RESOLVE` without checking the entity ids. AI only proposes.
+- Suggestions (palette **Resolution suggestions**) are scored hints: same canonical email/domain/IP/repo URL, username↔profile URL, certificate SAN clusters. They never auto-merge.
+
+### Keys
+
+- **Entities:** `Space` marks or unmarks. `m` proposes a merge of the marked set (the highlighted marked row is the canonical). Enter confirms; Esc cancels.
+- **Object View / Entities:** `u` proposes unresolve of the active bag on the canonical.
+- Palette: **Merge selected entities**, **Unresolve entity**, **Resolution suggestions**.
+
+Timeline events `entities_resolved` and `entities_unresolved` record the actor and constituent ids.
 
 ## Collectors
 
@@ -418,7 +445,7 @@ os-int import ./example-corp
 os-int import ./example-corp --rename
 ```
 
-The directory contains `investigation.osint.json` (format `os-int-investigation`, version 1) plus a `files/` tree of the investigation's snapshots, notes artifacts, and reports. Paths inside the manifest are relative. Import refuses an archive whose investigation id already exists, unless you pass `--rename`, which assigns a new id and copies the files under it. The JSON fields, ingest batch, and version-bump rules are in [Ontology Exchange Format](ontology-exchange.md).
+The directory contains `investigation.osint.json` (format `os-int-investigation`, version 2) plus a `files/` tree of the investigation's snapshots, notes artifacts, and reports. Paths inside the manifest are relative. Version-1 archives still import (empty `data.resolutions`). Import refuses an archive whose investigation id already exists, unless you pass `--rename`, which assigns a new investigation id, remaps every record UUID (including resolution bags), and copies the files under the new id. The JSON fields, ingest batch, and version-bump rules are in [Ontology Exchange Format](ontology-exchange.md).
 
 Without `-o`, export uses `<sanitized-name>-<uuid>` in the current directory.
 
@@ -567,6 +594,9 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `[` `]` | Graph | Move the facet cursor |
 | `f` | Graph | Apply or toggle the highlighted facet |
 | `x` | Graph | Clear facet filters |
+| `Space` | Entities | Mark or unmark for merge |
+| `m` | Entities | Propose merge of marked entities |
+| `u` | Object View, Entities | Propose unresolve |
 | `Enter` | Entities | Open Object View |
 | `Enter` | Graph | Open Object View for the selected node |
 | `c` | Jobs | Cancel the selected job |

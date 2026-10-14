@@ -117,6 +117,11 @@ fn map_normal_key(key: KeyEvent, view: View, ctrl: bool) -> Option<Action> {
         KeyCode::Char('[') if view == View::Graph => Some(Action::GraphFacetMove(-1)),
         KeyCode::Char(']') if view == View::Graph => Some(Action::GraphFacetMove(1)),
         KeyCode::Char('x') if view == View::Graph => Some(Action::GraphClearFilters),
+        KeyCode::Char(' ') if view == View::Entities => Some(Action::ToggleMergeMark),
+        KeyCode::Char('m') if view == View::Entities => Some(Action::ProposeMerge),
+        KeyCode::Char('u') if matches!(view, View::Entities | View::Object) => {
+            Some(Action::Unresolve)
+        }
         KeyCode::Char('o') if view == View::Welcome => Some(Action::Command("open_investigation")),
         KeyCode::Char('d') if view == View::Welcome => Some(Action::Command("doctor")),
         KeyCode::Char('c') if view == View::Jobs => Some(Action::Command("cancel_job")),
@@ -153,6 +158,9 @@ os-int keyboard shortcuts
   [ / ]        Graph: move facet cursor
   f            Graph: apply (or toggle) the highlighted facet
   x            Graph: clear facet filters
+  Space        Entities: mark / unmark for merge
+  m            Entities: propose merge of marked rows
+  u            Object View / Entities: unresolve the current bag
   c            Cancel the selected job (Jobs view)
   ?            This help
 
@@ -167,6 +175,10 @@ appear under Other.
 Enter on Graph opens Object View for the selected node.
 Search Around merges new hops into the canvas. Caps require
 confirm before rendering a large neighborhood.
+
+Mark two or more entities (Space) and press m to merge.
+Suggestions never auto-merge. Object View lists constituents;
+u unresolves. Esc cancels a confirm without applying.
 
 Notes and Artifacts are in the Navigate column. On the welcome
 screen, o opens a case and d runs doctor.
@@ -254,6 +266,21 @@ mod tests {
         assert!(map_key(press(KeyCode::Char(']')), &overlay, View::Pages, false).is_none());
         assert!(map_key(press(KeyCode::Char('x')), &overlay, View::Findings, false).is_none());
         assert!(map_key(press(KeyCode::Char('+')), &overlay, View::Entities, false).is_none());
+        assert!(matches!(
+            map_key(press(KeyCode::Char(' ')), &overlay, View::Entities, false),
+            Some(Action::ToggleMergeMark)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('m')), &overlay, View::Entities, false),
+            Some(Action::ProposeMerge)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('u')), &overlay, View::Object, false),
+            Some(Action::Unresolve)
+        ));
+        assert!(map_key(press(KeyCode::Char(' ')), &overlay, View::Graph, false).is_none());
+        assert!(map_key(press(KeyCode::Char('m')), &overlay, View::Overview, false).is_none());
+        assert!(map_key(press(KeyCode::Char('u')), &overlay, View::Pages, false).is_none());
     }
 
     #[test]

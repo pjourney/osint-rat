@@ -139,6 +139,21 @@ pub const COMMANDS: &[Command] = &[
         hint: "s",
     },
     Command {
+        id: "merge_entities",
+        title: "Merge selected entities",
+        hint: "m",
+    },
+    Command {
+        id: "unresolve_entity",
+        title: "Unresolve entity",
+        hint: "u",
+    },
+    Command {
+        id: "resolution_suggestions",
+        title: "Resolution suggestions",
+        hint: "",
+    },
+    Command {
         id: "doctor",
         title: "Doctor",
         hint: "d",

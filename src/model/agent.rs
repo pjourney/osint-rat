@@ -85,13 +85,13 @@ pub enum AgentAction {
         #[serde(default)]
         format: Option<String>,
     },
-    /// Reserved until entity resolution ships. Stored if parsed; accept is refused.
+    /// Merge entities that are the same real-world thing. Accept is required.
     ProposeResolve {
         entities: Vec<String>,
         #[serde(default)]
         reason: String,
     },
-    /// Reserved until entity resolution ships. Stored if parsed; accept is refused.
+    /// Split a previously resolved bag. Accept is required.
     ProposeUnresolve {
         entity: String,
         #[serde(default)]
@@ -129,10 +129,7 @@ impl AgentAction {
     pub fn is_reserved(&self) -> bool {
         matches!(
             self,
-            AgentAction::ProposeResolve { .. }
-                | AgentAction::ProposeUnresolve { .. }
-                | AgentAction::RunPlaybook { .. }
-                | AgentAction::AssertFindingTemplate { .. }
+            AgentAction::RunPlaybook { .. } | AgentAction::AssertFindingTemplate { .. }
         )
     }
 

@@ -172,10 +172,13 @@ pub fn agent_instructions() -> String {
         r#"  {"action":"CREATE_PAGE","title":"...","page_type":"domain","target":"example.com"},"#,
         r#"  {"action":"LINK_ENTITY","from":"E-1","to":"E-2","relation":"resolves_to","sources":["S-1"]},"#,
         r#"  {"action":"RUN_COLLECTOR","collector":"dns","target":"example.com"},"#,
-        r#"  {"action":"GENERATE_REPORT","format":"markdown"}"#,
+        r#"  {"action":"GENERATE_REPORT","format":"markdown"},"#,
+        r#"  {"action":"PROPOSE_RESOLVE","entities":["E-1","E-2"],"reason":"same registrant"},"#,
+        r#"  {"action":"PROPOSE_UNRESOLVE","entity":"E-1"}"#,
         "]",
         "```",
-        "Supported actions: ADD_FINDING, ADD_NOTE, CREATE_PAGE, LINK_ENTITY, RUN_COLLECTOR, GENERATE_REPORT.",
+        "Supported actions: ADD_FINDING, ADD_NOTE, CREATE_PAGE, LINK_ENTITY, RUN_COLLECTOR, GENERATE_REPORT, PROPOSE_RESOLVE, PROPOSE_UNRESOLVE.",
+        "PROPOSE_RESOLVE and PROPOSE_UNRESOLVE never apply themselves. The analyst must accept.",
         "os-int will preview every action for the analyst. Nothing is applied automatically.",
     ]
     .join("\n")

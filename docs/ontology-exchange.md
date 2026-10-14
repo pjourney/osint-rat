@@ -2,16 +2,16 @@
 
 Two related payloads move investigation data in and out of os-int:
 
-1. **Investigation archive** — the on-disk export written by `os-int export` (`investigation.osint.json` plus a `files/` tree). This is format `os-int-investigation`, version **`1`**.
+1. **Investigation archive** — the on-disk export written by `os-int export` (`investigation.osint.json` plus a `files/` tree). This is format `os-int-investigation`, version **`2`**.
 2. **Evidence batch** — the in-memory (and, later, connector) payload collectors return. `storage::apply` writes it in one transaction. It is not versioned on disk today.
 
-This page describes **today’s** shapes from [`src/exchange.rs`](../src/exchange.rs), [`src/model/batch.rs`](../src/model/batch.rs), and [`docs/schema.md`](schema.md), then the **reserved v2** extension points (Objects, Links, Events, Actions, Resolution bags) and the rules for bumping `FORMAT_VERSION`. v2 is **not implemented**. Do not emit the reserved keys yet.
+This page describes **today’s** shapes from [`src/exchange.rs`](../src/exchange.rs), [`src/model/batch.rs`](../src/model/batch.rs), and [`docs/schema.md`](schema.md), then reserved later-version extension points (Events, playbook Actions, markings, audit) and the rules for bumping `FORMAT_VERSION`. Version 2 ships **resolution bags** as `data.resolutions`. Do not emit reserved keys that are not listed as implemented.
 
 The product thesis is in [VISION.md](../VISION.md). Phase gates are in [PHASED_ROADMAP.md](../PHASED_ROADMAP.md).
 
 ---
 
-## Investigation archive (format version 1)
+## Investigation archive (format version 2)
 
 `os-int export` writes a directory:
 
@@ -21,7 +21,7 @@ The product thesis is in [VISION.md](../VISION.md). Phase gates are in [PHASED_R
   files/                      # copy of the investigation directory (if it exists)
 ```
 
-`exchange::MANIFEST_NAME` is `investigation.osint.json`. `exchange::FORMAT_VERSION` is `1`. Suggested directory name: `<sanitized-investigation-name>-<32 hex digits>` (`exchange::suggested_export_name` uses `Uuid::simple()`, no hyphens).
+`exchange::MANIFEST_NAME` is `investigation.osint.json`. `exchange::FORMAT_VERSION` is `2`. Version 1 archives still import. Suggested directory name: `<sanitized-investigation-name>-<32 hex digits>` (`exchange::suggested_export_name` uses `Uuid::simple()`, no hyphens).
 
 Import accepts either the directory or a path to the JSON file. When the path is a file, `files/` is taken as a sibling of that file.
 
@@ -32,7 +32,7 @@ Import accepts either the directory or a path to the JSON file. When the path is
 | Field | Type | Today |
 | --- | --- | --- |
 | `format` | string | Always `os-int-investigation`. |
-| `format_version` | `u32` | `1` (`exchange::FORMAT_VERSION`). |
+| `format_version` | `u32` | `2` (`exchange::FORMAT_VERSION`). Readers accept any version ≤ 2. |
 | `exported_at` | RFC 3339 timestamp | Set at export time (`model::now()`, millisecond UTC). |
 | `data` | object | `InvestigationData` — every record of one investigation. |
 
@@ -56,6 +56,7 @@ Paths inside `data` stay **relative** to the investigation directory. Export doe
 | `jobs` | Background work. `investigation_id` is optional on the struct; arguments are redacted. |
 | `agent_runs` | Questions sent to a local agent CLI and the replies. |
 | `proposals` | Structured `AgentAction` values with `pending` / `accepted` / `rejected` / `invalid`. Optional `decided_by` (local actor) is present after accept/reject on current binaries; missing on version-1 archives. |
+| `resolutions` | Resolution bags (Phase 3). Empty / omitted on version-1 archives (`#[serde(default)]`). |
 | `page_entities` | `{ "page_id", "entity_id" }` links (`page_entities` table). A page’s `entity_id` is the primary subject and may be omitted from this list. |
 
 **Not exported:** `ui_state` (last view, last page, agent thread). That is local workbench chrome, not case evidence.
@@ -86,19 +87,36 @@ Source kinds today: `dns`, `rdap`, `http`, `tls`, `ct`, `ip_intel`, `repository`
 
 Artifact kinds today: `snapshot`, `file`, `report`, `agent_context`, `tool_output`, `repository`.
 
-Timeline kinds today: `registration`, `expiration`, `updated`, `certificate_issued`, `certificate_expires`, `commit`, `release`, `published`, `observed`, `changed`, `user`, `finding`, `investigation`.
+Timeline kinds today: `registration`, `expiration`, `updated`, `certificate_issued`, `certificate_expires`, `commit`, `release`, `published`, `observed`, `changed`, `user`, `finding`, `investigation`, `entities_resolved`, `entities_unresolved`.
 
 Built-in relationship verbs (`src/model/relationship.rs` `kinds`) include `resolves_to`, `alias_of`, `uses_nameserver`, `mail_handled_by`, `spf_includes`, `reverse_dns`, `announced_by`, `operated_by`, `registered_with`, `registered_to`, `redirects_to`, `serves`, `links_to`, `mentions`, `presents_certificate`, `issued_by`, `covers`, `subdomain_of`, `references`, `contributed_to`, `hosted_on`, `associated_with`, `contains`. Other `snake_case` verbs are stored as-is.
 
-Agent actions today: `ADD_FINDING`, `ADD_NOTE`, `CREATE_PAGE`, `LINK_ENTITY`, `RUN_COLLECTOR`, `GENERATE_REPORT`. Reserved kinds `PROPOSE_RESOLVE`, `PROPOSE_UNRESOLVE`, `RUN_PLAYBOOK`, and `ASSERT_FINDING_TEMPLATE` are in the enum and the Action catalog so they can be stored if parsed; accept is refused until those phases ship. Do not emit reserved kinds from collectors or the agent prompt. Catalog: [ontology.md](ontology.md).
+Agent actions today: `ADD_FINDING`, `ADD_NOTE`, `CREATE_PAGE`, `LINK_ENTITY`, `RUN_COLLECTOR`, `GENERATE_REPORT`, `PROPOSE_RESOLVE`, `PROPOSE_UNRESOLVE`. Reserved kinds `RUN_PLAYBOOK` and `ASSERT_FINDING_TEMPLATE` are in the enum and the Action catalog so they can be stored if parsed; accept is refused until those phases ship. Resolution Actions still require human accept. Catalog: [ontology.md](ontology.md).
 
-### Import behavior (v1)
+### `data.resolutions` (format version 2)
+
+Each bag:
+
+| Field | Notes |
+| --- | --- |
+| `id`, `investigation_id`, `seq` | Stable UUID and short ref `V-n`. |
+| `canonical_id` | Winner entity UUID. |
+| `constituent_ids` | All members, including the canonical. |
+| `status` | `active` or `unresolved`. |
+| `reason`, `created_by`, `created_at` | Why and who merged. |
+| `unresolved_by`, `unresolved_at` | Set after split. |
+| `property_writes` | `{ key, previous, new_value }` applied to the canonical (`__label` / `__notes` for columns). |
+| `source_writes` | Source UUIDs copied onto the canonical. |
+
+Constituent entity rows remain. Unresolve undoes the writes in this bag. `--rename` remaps every record UUID, including `resolutions.id`, `canonical_id`, `constituent_ids`, and `source_writes`.
+
+### Import behavior (v1 and v2)
 
 From `exchange::import_investigation`:
 
 1. Parse the manifest. If `format_version` **>** `FORMAT_VERSION`, reject. Older or equal versions are accepted.
 2. Reject artifact `path` or source `snapshot_path` values that are not safe relative paths (`paths::is_safe_relative_path`).
-3. If an investigation with the same `id` exists: reject unless `--rename`. `--rename` assigns a new investigation UUID, suffixes the name with ` (imported)`, and rewrites `investigation_id` on child rows. **Record UUIDs are not rewritten.**
+3. If an investigation with the same `id` exists: reject unless `--rename`. `--rename` assigns a new investigation UUID, suffixes the name with ` (imported)`, remaps every record UUID (pages, sources, entities, relationships, resolutions, and all internal references), and rewrites `investigation_id` on child rows.
 4. If the name already exists (case-insensitive), append ` (2)`, ` (3)`, … or a UUID suffix.
 5. Insert `InvestigationData`, then copy `files/` into the new investigation directory.
 
@@ -143,7 +161,7 @@ v1 already stores a cited graph. Phase 1 registers object types, link verbs, and
 | **Link** | 1 | `data.relationships` (`kind` is still a free `snake_case` string) | Catalog metadata: description, inverse, allowed endpoint kinds. Unknown verbs still store, grouped as “Other”. First-use rows go in SQLite `link_types` (not exported). |
 | **Event** | 6 | `data.timeline` (instant `occurred_at`) | Interval or instant Event objects; links from entities to events; co-occurrence. Do not replace `timeline` without a bump + import of v1 events. |
 | **Action** | 1, 5 | `data.proposals` + `AgentAction` | Catalog of action kinds (existing six plus reserved resolve / playbook kinds). Optional `decided_by` plus existing `decided_at`. Automations propose; they do not silently write. |
-| **Resolution bag** | 3 | *(none)* | Canonical object + constituents; property writes tracked for unresolve. Never auto-merge. |
+| **Resolution bag** | 3 | `data.resolutions` (format version 2) | Canonical object + constituents; property writes tracked for unresolve. Never auto-merge. |
 | **Markings** | 7 | `investigation.tags` (free strings) | TLP (or confidentiality labels) on the investigation and optionally on objects. Visible in the UI and the manifest. |
 | **Audit** | 7 | *(none; jobs/proposals are not an audit log)* | Append-only merge / accept / playbook / export / marking events. |
 
@@ -155,7 +173,7 @@ Reserved **`data` keys** for a version-2 archive (do not write them at `format_v
 - `links` — only if relationships need a parallel catalogued collection
 - `events` — first-class Event objects (Phase 6)
 - `actions` — if Actions outgrow `proposals`
-- `resolutions` — resolution bags (Phase 3)
+- `resolutions` — **shipped in version 2** (Phase 3)
 - `markings` — structured markings (Phase 7)
 - `audit` — audit slice (Phase 7)
 
@@ -167,9 +185,9 @@ Reserved **`EvidenceBatch` keys** for a future connector protocol: `objects`, `l
 
 ## `FORMAT_VERSION` bump rules
 
-`FORMAT_VERSION` lives in `src/exchange.rs` and remains **`1`**. Phase 1 added optional `proposals.decided_by` with `#[serde(default)]` and did not add a required collection, so the bump rules say stay at 1. Phase 2 (Graph and Search Around) is TUI and query-only: it does not add archive fields, so the version stays **1**. Import still rejects any archive whose `format_version` is **greater** than the running binary. Older archives must keep importing.
+`FORMAT_VERSION` lives in `src/exchange.rs` and is **`2`**. Phase 3 added the `resolutions` collection, which must survive export → import, so the bump rules required 1 → 2. Version-1 archives still import (`resolutions` defaults to empty). Import still rejects any archive whose `format_version` is **greater** than the running binary.
 
-Checked-in proof: `tests/fixtures/archives/v1-minimal/investigation.osint.json` (no `decided_by`) plus `export_then_import_round_trips`. `--rename` ID behavior is unchanged: only the investigation UUID is rewritten.
+Checked-in proof: `tests/fixtures/archives/v1-minimal/investigation.osint.json` (no `decided_by`, no `resolutions`) plus `export_then_import_round_trips` and `export_import_preserves_resolution_bags`. `--rename` ID behavior is unchanged: only the investigation UUID is rewritten (including on resolution rows).
 
 Cross-phase rule (roadmap): a format bump **and** import compatibility notes land in the same PR as the behavior change.
 

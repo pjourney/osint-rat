@@ -232,6 +232,21 @@ impl Fields {
             .map(|(_, value)| value.as_str())
     }
 
+    /// Inserts or replaces a key. Used when merging property bags so unresolve can undo.
+    pub fn set(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        let key = key.into();
+        if let Some((_, existing)) = self.0.iter_mut().find(|(candidate, _)| candidate == &key) {
+            *existing = value.into();
+            return;
+        }
+        self.0.push((key, value.into()));
+    }
+
+    pub fn remove(&mut self, key: &str) -> Option<String> {
+        let index = self.0.iter().position(|(candidate, _)| candidate == key)?;
+        Some(self.0.remove(index).1)
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
         self.0
             .iter()

@@ -16,6 +16,10 @@ A **page** is a subject you chose to work on: "look at example.com". An **entity
 
 Press `e` on Overview to edit the current page's notes in your editor. Add a finding from the command palette (`p`, then "finding").
 
+## How do I merge two entities that are the same thing?
+
+On **Entities**, mark each row with `Space`, press `m`, and confirm. The highlighted marked row is the canonical. Object View lists constituents. Graph shows one node. `u` on the canonical unresolves. Suggestions never auto-merge. See [Entity resolution](guide.md#entity-resolution).
+
 ## What do the badges mean?
 
 | Badge | Provenance | Meaning |

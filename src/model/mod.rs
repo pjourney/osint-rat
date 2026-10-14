@@ -21,6 +21,7 @@ pub mod note;
 pub mod ontology;
 pub mod page;
 pub mod relationship;
+pub mod resolution;
 pub mod source;
 pub mod target;
 pub mod timeline;
@@ -52,6 +53,11 @@ pub use ontology::{
 };
 pub use page::{Page, PageKind};
 pub use relationship::{Relationship, kinds as relation, normalize_relationship_kind};
+pub use resolution::{
+    LABEL_WRITE_KEY, NOTES_WRITE_KEY, PropertyWrite, Resolution, ResolutionStatus,
+    ResolutionSuggestion, SuggestionRule, new_resolution, plan_property_writes, plan_source_writes,
+    suggest_resolutions,
+};
 pub use source::{Source, SourceKind};
 pub use target::{Target, TargetError, TargetKind};
 pub use timeline::{TimelineEvent, TimelineKind};

@@ -2,6 +2,7 @@
 //! `files/` tree) whose paths are relative, so they can be shared without the originating
 //! computer's absolute paths.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -17,8 +18,8 @@ use crate::storage::Store;
 /// On-disk investigation archive version (`os-int-investigation`).
 ///
 /// Import rejects any archive whose `format_version` is greater than this value.
-/// Bump rules and reserved v2 keys: `docs/ontology-exchange.md`.
-pub const FORMAT_VERSION: u32 = 1;
+/// Version 2 adds `data.resolutions`. Bump rules: `docs/ontology-exchange.md`.
+pub const FORMAT_VERSION: u32 = 2;
 pub const MANIFEST_NAME: &str = "investigation.osint.json";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -80,7 +81,8 @@ pub fn suggested_export_name(data: &InvestigationData) -> String {
 }
 
 /// Imports an archive. If an investigation with the same ID exists it is rejected unless
-/// `rename` is set, in which case a new ID is assigned and files are copied under it.
+/// `rename` is set, in which case every record UUID is remapped and files are copied under
+/// the new investigation id.
 pub fn import_investigation(
     store: &mut Store,
     archive: &Path,
@@ -170,41 +172,139 @@ fn unique_name(store: &Store, base: &str) -> Result<String> {
 }
 
 fn reassign_ids(data: &mut InvestigationData) {
-    let new_id = Uuid::new_v4();
-    data.investigation.id = new_id;
+    let new_investigation = Uuid::new_v4();
+    data.investigation.id = new_investigation;
     data.investigation.name = format!("{} (imported)", data.investigation.name);
+    let mut pages = HashMap::new();
+    let mut sources = HashMap::new();
+    let mut findings = HashMap::new();
+    let mut entities = HashMap::new();
+    let mut relationships = HashMap::new();
+    let mut notes = HashMap::new();
+    let mut artifacts = HashMap::new();
+    let mut timeline = HashMap::new();
+    let mut jobs = HashMap::new();
+    let mut runs = HashMap::new();
+    let mut proposals = HashMap::new();
+    let mut resolutions = HashMap::new();
+    let mut threads = HashMap::new();
     for page in &mut data.pages {
-        page.investigation_id = new_id;
+        page.id = next_id(&mut pages, page.id);
+        page.investigation_id = new_investigation;
     }
     for source in &mut data.sources {
-        source.investigation_id = new_id;
+        source.id = next_id(&mut sources, source.id);
+        source.investigation_id = new_investigation;
     }
     for finding in &mut data.findings {
-        finding.investigation_id = new_id;
+        finding.id = next_id(&mut findings, finding.id);
+        finding.investigation_id = new_investigation;
     }
     for entity in &mut data.entities {
-        entity.investigation_id = new_id;
+        entity.id = next_id(&mut entities, entity.id);
+        entity.investigation_id = new_investigation;
     }
     for relationship in &mut data.relationships {
-        relationship.investigation_id = new_id;
+        relationship.id = next_id(&mut relationships, relationship.id);
+        relationship.investigation_id = new_investigation;
     }
     for note in &mut data.notes {
-        note.investigation_id = new_id;
+        note.id = next_id(&mut notes, note.id);
+        note.investigation_id = new_investigation;
     }
     for artifact in &mut data.artifacts {
-        artifact.investigation_id = new_id;
+        artifact.id = next_id(&mut artifacts, artifact.id);
+        artifact.investigation_id = new_investigation;
     }
     for event in &mut data.timeline {
-        event.investigation_id = new_id;
+        event.id = next_id(&mut timeline, event.id);
+        event.investigation_id = new_investigation;
     }
     for job in &mut data.jobs {
-        job.investigation_id = Some(new_id);
+        job.id = next_id(&mut jobs, job.id);
+        job.investigation_id = job.investigation_id.map(|_| new_investigation);
     }
     for run in &mut data.agent_runs {
-        run.investigation_id = new_id;
+        run.id = next_id(&mut runs, run.id);
+        run.investigation_id = new_investigation;
+        run.thread_id = next_id(&mut threads, run.thread_id);
     }
     for proposal in &mut data.proposals {
-        proposal.investigation_id = new_id;
+        proposal.id = next_id(&mut proposals, proposal.id);
+        proposal.investigation_id = new_investigation;
+    }
+    for resolution in &mut data.resolutions {
+        resolution.id = next_id(&mut resolutions, resolution.id);
+        resolution.investigation_id = new_investigation;
+    }
+    for page in &mut data.pages {
+        page.entity_id = mapped_opt(&entities, page.entity_id);
+    }
+    for source in &mut data.sources {
+        source.page_id = mapped_opt(&pages, source.page_id);
+        source.job_id = mapped_opt(&jobs, source.job_id);
+    }
+    for finding in &mut data.findings {
+        finding.page_id = mapped_opt(&pages, finding.page_id);
+        remap_uuid_list(&sources, &mut finding.source_ids);
+    }
+    for entity in &mut data.entities {
+        remap_uuid_list(&sources, &mut entity.source_ids);
+    }
+    for relationship in &mut data.relationships {
+        relationship.from_id = mapped(&entities, relationship.from_id);
+        relationship.to_id = mapped(&entities, relationship.to_id);
+        remap_uuid_list(&sources, &mut relationship.source_ids);
+    }
+    for note in &mut data.notes {
+        note.page_id = mapped_opt(&pages, note.page_id);
+    }
+    for artifact in &mut data.artifacts {
+        artifact.page_id = mapped_opt(&pages, artifact.page_id);
+        artifact.source_id = mapped_opt(&sources, artifact.source_id);
+    }
+    for event in &mut data.timeline {
+        event.source_id = mapped_opt(&sources, event.source_id);
+        event.entity_id = mapped_opt(&entities, event.entity_id);
+        event.page_id = mapped_opt(&pages, event.page_id);
+    }
+    for job in &mut data.jobs {
+        job.page_id = mapped_opt(&pages, job.page_id);
+    }
+    for run in &mut data.agent_runs {
+        run.page_id = mapped_opt(&pages, run.page_id);
+        run.context_artifact_id = mapped_opt(&artifacts, run.context_artifact_id);
+        run.job_id = mapped_opt(&jobs, run.job_id);
+    }
+    for proposal in &mut data.proposals {
+        proposal.agent_run_id = mapped(&runs, proposal.agent_run_id);
+    }
+    for link in &mut data.page_entities {
+        link.page_id = mapped(&pages, link.page_id);
+        link.entity_id = mapped(&entities, link.entity_id);
+    }
+    for resolution in &mut data.resolutions {
+        resolution.canonical_id = mapped(&entities, resolution.canonical_id);
+        remap_uuid_list(&entities, &mut resolution.constituent_ids);
+        remap_uuid_list(&sources, &mut resolution.source_writes);
+    }
+}
+
+fn next_id(map: &mut HashMap<Uuid, Uuid>, old: Uuid) -> Uuid {
+    *map.entry(old).or_insert_with(Uuid::new_v4)
+}
+
+fn mapped(map: &HashMap<Uuid, Uuid>, old: Uuid) -> Uuid {
+    map.get(&old).copied().unwrap_or(old)
+}
+
+fn mapped_opt(map: &HashMap<Uuid, Uuid>, old: Option<Uuid>) -> Option<Uuid> {
+    old.map(|id| mapped(map, id))
+}
+
+fn remap_uuid_list(map: &HashMap<Uuid, Uuid>, ids: &mut [Uuid]) {
+    for id in ids.iter_mut() {
+        *id = mapped(map, *id);
     }
 }
 
@@ -328,12 +428,162 @@ mod tests {
         );
         assert!(view.groups.iter().any(|group| group.id == "identity"));
         assert!(view.links.iter().any(|group| group.catalogued));
+        assert!(imported.resolutions.is_empty());
         let export_dir = directory.path().join("re-export");
         export_data(&imported, directory.path(), &export_dir).expect("re-export");
         let text = fs::read_to_string(export_dir.join(MANIFEST_NAME)).expect("manifest");
         let manifest: ArchiveManifest = serde_json::from_str(&text).expect("parse");
         assert_eq!(manifest.format_version, FORMAT_VERSION);
-        assert_eq!(FORMAT_VERSION, 1);
+        assert_eq!(FORMAT_VERSION, 2);
+        assert!(manifest.data.resolutions.is_empty());
+    }
+
+    #[test]
+    fn export_import_preserves_resolution_bags() {
+        let mut store = Store::open_in_memory().expect("store");
+        let investigation = store
+            .create_investigation("Resolve Me", "")
+            .expect("created");
+        let domain = store
+            .add_entity(
+                investigation.id,
+                crate::model::EntityKind::Domain,
+                "example.com",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("domain");
+        let host = store
+            .add_entity(
+                investigation.id,
+                crate::model::EntityKind::Hostname,
+                "example.com",
+                crate::model::Provenance::Collected,
+                None,
+            )
+            .expect("host");
+        store
+            .resolve_entities(
+                investigation.id,
+                &[domain, host],
+                domain,
+                "same host",
+                "tester",
+            )
+            .expect("merge");
+        let data = store.load_investigation(investigation.id).expect("load");
+        assert_eq!(data.resolutions.len(), 1);
+        let directory = tempfile::tempdir().expect("tempdir");
+        let export_dir = directory.path().join("archive");
+        export_data(&data, directory.path(), &export_dir).expect("export");
+        let text = fs::read_to_string(export_dir.join(MANIFEST_NAME)).expect("manifest");
+        let manifest: ArchiveManifest = serde_json::from_str(&text).expect("parse");
+        assert_eq!(manifest.format_version, 2);
+        assert_eq!(manifest.data.resolutions.len(), 1);
+        let mut target = Store::open_in_memory().expect("target");
+        let paths = crate::paths::AppPaths::new(
+            directory.path().join("cfg"),
+            directory.path().join("data"),
+        );
+        paths.ensure_dirs().expect("dirs");
+        let imported =
+            import_investigation(&mut target, &export_dir, &paths, false).expect("import");
+        assert_eq!(imported.resolutions.len(), 1);
+        assert_eq!(imported.resolutions[0].canonical_id, domain);
+        assert!(imported.resolutions[0].constituent_ids.contains(&host));
+        assert!(imported.is_absorbed(host));
+    }
+
+    #[test]
+    fn rename_into_same_store_remaps_all_record_uuids() {
+        let mut store = Store::open_in_memory().expect("store");
+        let investigation = store
+            .create_investigation("Rename Me", "")
+            .expect("created");
+        store
+            .create_page(NewPage::new(
+                investigation.id,
+                "",
+                PageKind::Domain,
+                Some("example.com"),
+            ))
+            .expect("page");
+        let domain = store
+            .add_entity(
+                investigation.id,
+                crate::model::EntityKind::Domain,
+                "example.com",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("domain");
+        let host = store
+            .add_entity(
+                investigation.id,
+                crate::model::EntityKind::Hostname,
+                "example.com",
+                crate::model::Provenance::Collected,
+                None,
+            )
+            .expect("host");
+        store
+            .resolve_entities(
+                investigation.id,
+                &[domain, host],
+                domain,
+                "same host",
+                "tester",
+            )
+            .expect("merge");
+        let data = store.load_investigation(investigation.id).expect("load");
+        let original_resolution = data.resolutions[0].clone();
+        let directory = tempfile::tempdir().expect("tempdir");
+        let export_dir = directory.path().join("archive");
+        export_data(&data, directory.path(), &export_dir).expect("export");
+        let paths = crate::paths::AppPaths::new(
+            directory.path().join("cfg"),
+            directory.path().join("data"),
+        );
+        paths.ensure_dirs().expect("dirs");
+        let imported =
+            import_investigation(&mut store, &export_dir, &paths, true).expect("rename import");
+        assert_ne!(imported.investigation.id, investigation.id);
+        assert!(
+            imported
+                .entities
+                .iter()
+                .all(|entity| entity.id != domain && entity.id != host)
+        );
+        assert_eq!(imported.resolutions.len(), 1);
+        let bag = &imported.resolutions[0];
+        assert_ne!(bag.id, original_resolution.id);
+        assert_ne!(bag.canonical_id, original_resolution.canonical_id);
+        assert!(
+            imported
+                .entities
+                .iter()
+                .any(|entity| entity.id == bag.canonical_id)
+        );
+        for id in &bag.constituent_ids {
+            assert!(
+                imported.entities.iter().any(|entity| entity.id == *id),
+                "constituent {id} must remap to an imported entity"
+            );
+        }
+        assert!(
+            imported.is_absorbed(
+                *bag.constituent_ids
+                    .iter()
+                    .find(|id| **id != bag.canonical_id)
+                    .expect("constituent")
+            )
+        );
+        let original = store
+            .load_investigation(investigation.id)
+            .expect("original remains");
+        assert_eq!(original.resolutions[0].canonical_id, domain);
+        assert!(original.is_absorbed(host));
+        assert!(store.foreign_key_violations().expect("fk").is_empty());
     }
 
     #[test]
