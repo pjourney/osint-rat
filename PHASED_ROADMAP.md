@@ -15,7 +15,7 @@
 
 | Phase | Name | Status |
 | --- | --- | --- |
-| 0 | Foundation & vision freeze | Not started |
+| 0 | Foundation & vision freeze | Done |
 | 1 | Ontology runtime v1 | Not started |
 | 2 | Graph & Search Around | Not started |
 | 3 | Entity resolution | Not started |

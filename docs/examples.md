@@ -165,4 +165,5 @@ os-int-learn report "Example Corp" --format markdown
 - [User guide](guide.md)
 - [FAQ](faq.md)
 - [Database tables](schema.md)
+- [Ontology Exchange Format](ontology-exchange.md)
 - [Configuration reference](guide.md#configuration)

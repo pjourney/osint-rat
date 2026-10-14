@@ -29,13 +29,15 @@ Use a throwaway data directory so you do not mix experiments with real cases:
 cargo run -- --data-dir /tmp/os-int-dev --config /tmp/os-int-dev/config.toml
 ```
 
-Checks this repository expects, and that CI runs on every pull request:
+Checks this repository expects, and that CI runs on every pull request (`.github/workflows/ci.yml`):
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 ```
+
+These three commands stay required. Phase work is merge-gated: do not start phase *N+1* on `main` until phase *N* criteria in [PHASED_ROADMAP.md](PHASED_ROADMAP.md) pass. Any pull request that adds or changes a model or storage path must include tests for that path in the same PR.
 
 `cargo fmt` (without `--check`) rewrites formatting. `cargo run -- doctor` is a useful smoke test after a change to startup, paths, or tool detection.
 
@@ -74,6 +76,7 @@ Add tests next to the code they cover:
 | Area | What to test |
 | --- | --- |
 | Parsers and `build_batch` | No network. Feed fixture text, assert the batch. |
+| New or changed `src/model/` / `src/storage/` paths | Required on phase PRs. Cover apply, load, and export/import when the on-disk shape changes. |
 | `App::dispatch` | UI state transitions without a terminal. |
 | `sanitize` and path checks | Terminal escapes, path traversal, fence neutralization. |
 | Report rendering | Provenance labels and source ids survive into the document. |
@@ -94,8 +97,12 @@ Live collectors can be exercised with `os-int collect`. CI must not depend on th
 - [ ] `cargo fmt --all -- --check`
 - [ ] `cargo clippy --all-targets -- -D warnings`
 - [ ] `cargo test --all-targets`
-- [ ] Docs updated when behavior an analyst can observe has changed
+- [ ] Tests added for any new or changed model/storage path
+- [ ] Docs updated when behavior an analyst can observe has changed (`guide.md`, and [ontology-exchange.md](docs/ontology-exchange.md) when export or `EvidenceBatch` changes)
 - [ ] New collector or tool is passive, and untrusted output is sanitized
+- [ ] Phase PR: [PHASED_ROADMAP.md](PHASED_ROADMAP.md) status/checklist updated; no collector-count vanity metrics
+
+Recommended GitHub labels: `phase-0` … `phase-9` (one per roadmap phase). Apply the phase that the change belongs to.
 
 ## Security issues
 
@@ -104,9 +111,12 @@ Please follow [SECURITY.md](SECURITY.md). Use a private report rather than a pub
 ## See also
 
 - [README](README.md)
+- [Vision](VISION.md)
+- [Phased roadmap](PHASED_ROADMAP.md)
 - [User guide](docs/guide.md)
 - [Examples](docs/examples.md)
 - [FAQ](docs/faq.md)
 - [Database tables](docs/schema.md)
+- [Ontology Exchange Format](docs/ontology-exchange.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Code of conduct](CODE_OF_CONDUCT.md)

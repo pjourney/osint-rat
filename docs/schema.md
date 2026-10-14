@@ -54,10 +54,11 @@ Collectors do not write these tables. They return an `EvidenceBatch`. `storage::
 
 `os-int export` writes `investigation.osint.json` plus a `files/` tree. The JSON document's `data` object is the same shape as `InvestigationData`: the investigation and the rows above, with paths still relative. Import rejects an archive whose investigation id is already present unless you pass `--rename`.
 
-Format name: `os-int-investigation`. Format version: `1` (`exchange::FORMAT_VERSION`).
+Format name: `os-int-investigation`. Format version: `1` (`exchange::FORMAT_VERSION`). Field list, EvidenceBatch ingest shape, reserved v2 keys, and bump rules: [Ontology Exchange Format](ontology-exchange.md).
 
 ## See also
 
+- [Ontology Exchange Format](ontology-exchange.md)
 - [Architecture — storage layout](ARCHITECTURE.md#storage-layout)
 - [User guide — where files live](guide.md#where-files-live)
 - [Examples — export and import](examples.md#write-a-report-and-hand-the-case-over)

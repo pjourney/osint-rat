@@ -14,6 +14,10 @@ use crate::model::{InvestigationData, now};
 use crate::paths::{is_safe_relative_path, sanitize_filename};
 use crate::storage::Store;
 
+/// On-disk investigation archive version (`os-int-investigation`).
+///
+/// Import rejects any archive whose `format_version` is greater than this value.
+/// Bump rules and reserved v2 keys: `docs/ontology-exchange.md`.
 pub const FORMAT_VERSION: u32 = 1;
 pub const MANIFEST_NAME: &str = "investigation.osint.json";
 

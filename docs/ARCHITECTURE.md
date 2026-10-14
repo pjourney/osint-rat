@@ -79,7 +79,7 @@ A useful order:
 | Change a screen | `tui/screens.rs`. Put the state change in `app/`, not in the widget |
 | Add a palette command | `app/commands.rs`, then handle the id in `App::run_command` |
 | Add a report section | `report/`. Keep AI-written text labelled as inference |
-| Change the on-disk export | `exchange/`. Bump `FORMAT_VERSION` if older archives would no longer import |
+| Change the on-disk export | `exchange/`. Follow the bump rules in [ontology-exchange.md](ontology-exchange.md#format_version-bump-rules). Bump `FORMAT_VERSION` if older archives would no longer import, or if a new collection must survive round-trip |
 
 Collectors, tools, and the TUI do not write SQLite. `storage::apply` is the path that turns a `CollectionOutput` into rows.
 
@@ -160,5 +160,8 @@ Database rows store **relative** paths inside the investigation directory, so an
 - [User guide](guide.md)
 - [Examples](examples.md)
 - [Database tables](schema.md)
+- [Ontology Exchange Format](ontology-exchange.md)
+- [Vision](../VISION.md)
+- [Phased roadmap](../PHASED_ROADMAP.md)
 - [Contributing](../CONTRIBUTING.md)
 - [Security policy](../SECURITY.md)
