@@ -51,6 +51,10 @@ Collectors do not write these tables. They return an `EvidenceBatch`. `storage::
 
 `provenance` is one of `collected`, `external`, `analyst`, `agent`. `confidence` is one of `unknown`, `low`, `medium`, `high`, `confirmed`. Both are stored as those words. The workbench shows provenance as `[COL]`, `[EXT]`, `[ANL]`, and `[AI]`.
 
+## Graph queries
+
+Search Around does not add a table. `Store::search_around` loads the investigation snapshot and runs `model::search_around` over `entities` and `relationships`. Facet counts are derived from that result. Render caps live in the query, not in SQLite.
+
 ## Export
 
 `os-int export` writes `investigation.osint.json` plus a `files/` tree. The JSON document's `data` object is the same shape as `InvestigationData`: the investigation and the rows above, with paths still relative. Import rejects an archive whose investigation id is already present unless you pass `--rename`.

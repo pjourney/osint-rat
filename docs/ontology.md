@@ -87,6 +87,10 @@ Implemented agent Actions stay the six kinds the workbench already applies. Rese
 
 Accept and reject record `decided_at` and `decided_by` (the local user name from `$USER` / `$USERNAME`, or `local`). Pending rows leave both empty. `decided_by` is an optional archive field; format version stays **1**.
 
+## Graph and Search Around
+
+The Graph screen walks the same objects and catalogued links. Search Around is a pure hop expansion over `entities` + `relationships` (in-memory snapshot or `Store::search_around`). Filters: link types, entity kinds, relationship provenance, and an optional time window on `relationships.created_at`. Unknown verbs still traverse; they group under Other in Object View and appear by their snake_case key in the facet strip. Caps (200 nodes / 400 edges) are a render guardrail, not a storage limit. The archive format does not change.
+
 ## Object View
 
 From **Entities**, press `Enter` (or `v`, or the palette command **Object View**) to open the highlighted row. From **Pages** or Overview, press `v` (or the palette) to open the current page — its primary entity when it has one. A leftover entity is never reused. Esc returns.
@@ -104,3 +108,4 @@ The screen shows:
 - [Database tables](schema.md)
 - [Architecture — where to make a change](ARCHITECTURE.md#where-to-make-a-change)
 - [User guide — Object View](guide.md#object-view)
+- [User guide — Graph and Search Around](guide.md#graph-and-search-around)

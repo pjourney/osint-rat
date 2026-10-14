@@ -299,4 +299,69 @@ mod tests {
         assert!(text.contains("Identity"), "{text}");
         assert!(text.contains("P-1"), "{text}");
     }
+
+    #[test]
+    fn graph_renders_nodes_and_facets_without_panic() {
+        let (_directory, mut app) = test_app();
+        app.dispatch(Action::Command("new_investigation"))
+            .expect("form");
+        if let crate::app::Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set("Example Corp");
+        }
+        app.dispatch(Action::Submit).expect("create");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let page = app
+            .store
+            .create_page(NewPage::new(
+                investigation_id,
+                "",
+                PageKind::Domain,
+                Some("example.com"),
+            ))
+            .expect("page");
+        let mut batch = crate::model::EvidenceBatch::new();
+        let source = crate::model::NewSource::collected(
+            crate::model::SourceKind::Dns,
+            "dns",
+            "DNS records for example.com",
+        );
+        let key = batch.add_source(source);
+        let domain = crate::model::EntityKey::new(crate::model::EntityKind::Domain, "example.com");
+        let ip = crate::model::EntityKey::new(crate::model::EntityKind::Ip, "192.0.2.10");
+        batch.relate(&domain, "resolves_to", &ip, Some(key));
+        app.store
+            .apply_batch(
+                crate::storage::ApplyContext {
+                    investigation_id,
+                    page_id: Some(page.id),
+                    job_id: None,
+                },
+                &batch,
+            )
+            .expect("applies");
+        app.open_investigation(investigation_id)
+            .expect("reload workspace");
+        app.dispatch(Action::OpenGraph).expect("graph");
+        assert_eq!(app.view, View::Graph);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal.draw(|frame| draw(frame, &app)).expect("draw");
+        let text = visible_text(&terminal);
+        assert!(
+            text.contains("Graph") || text.contains("Neighborhood"),
+            "{text}"
+        );
+        assert!(
+            text.contains("example.com") || text.contains("E-1"),
+            "{text}"
+        );
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = crate::app::Pane::Main;
+        app.selected = 0;
+        terminal
+            .draw(|frame| draw(frame, &app))
+            .expect("draw entities");
+        let entities = visible_text(&terminal);
+        assert!(entities.contains("example.com"), "{entities}");
+    }
 }

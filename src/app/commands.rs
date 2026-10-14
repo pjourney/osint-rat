@@ -129,6 +129,16 @@ pub const COMMANDS: &[Command] = &[
         hint: "v",
     },
     Command {
+        id: "open_graph",
+        title: "Graph",
+        hint: "g",
+    },
+    Command {
+        id: "search_around",
+        title: "Search Around",
+        hint: "s",
+    },
+    Command {
         id: "doctor",
         title: "Doctor",
         hint: "d",

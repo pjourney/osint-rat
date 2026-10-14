@@ -107,6 +107,16 @@ fn map_normal_key(key: KeyEvent, view: View, ctrl: bool) -> Option<Action> {
         KeyCode::Char('e') => Some(Action::Edit),
         KeyCode::Char('r') => Some(Action::Refresh),
         KeyCode::Char('v') => Some(Action::OpenObjectView),
+        KeyCode::Char('g') => Some(Action::OpenGraph),
+        KeyCode::Char('s') => Some(Action::SearchAround),
+        KeyCode::Char('+') | KeyCode::Char('=') if view == View::Graph => {
+            Some(Action::GraphHops(1))
+        }
+        KeyCode::Char('-') if view == View::Graph => Some(Action::GraphHops(-1)),
+        KeyCode::Char('f') if view == View::Graph => Some(Action::GraphApplyFacet),
+        KeyCode::Char('[') if view == View::Graph => Some(Action::GraphFacetMove(-1)),
+        KeyCode::Char(']') if view == View::Graph => Some(Action::GraphFacetMove(1)),
+        KeyCode::Char('x') if view == View::Graph => Some(Action::GraphClearFilters),
         KeyCode::Char('o') if view == View::Welcome => Some(Action::Command("open_investigation")),
         KeyCode::Char('d') if view == View::Welcome => Some(Action::Command("doctor")),
         KeyCode::Char('c') if view == View::Jobs => Some(Action::Command("cancel_job")),
@@ -137,15 +147,26 @@ os-int keyboard shortcuts
   e            Edit notes in $EDITOR (Overview) or open Settings
   r            Run default collectors for this page
   v            Object View for the selected entity or page
+  g            Graph (entities as nodes, relationships as edges)
+  s            Search Around from the selection (default 2 hops)
+  + / -        Graph: more / fewer hops
+  [ / ]        Graph: move facet cursor
+  f            Graph: apply (or toggle) the highlighted facet
+  x            Graph: clear facet filters
   c            Cancel the selected job (Jobs view)
   ?            This help
 
   1 Overview  2 Pages  3 Sources  4 Findings  5 Entities
   6 Timeline  7 Agent  8 Jobs     9 Tools     0 Settings
+  Graph is in the Navigate column (g or palette).
 
 Enter on Entities opens Object View (properties, catalogued
 links, sources, findings). Esc returns. Unknown link verbs
 appear under Other.
+
+Enter on Graph opens Object View for the selected node.
+Search Around merges new hops into the canvas. Caps require
+confirm before rendering a large neighborhood.
 
 Notes and Artifacts are in the Navigate column. On the welcome
 screen, o opens a case and d runs doctor.
@@ -194,6 +215,23 @@ mod tests {
         assert!(matches!(
             map_key(press(KeyCode::Char('v')), &overlay, View::Entities, false),
             Some(Action::OpenObjectView)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('g')), &overlay, View::Entities, false),
+            Some(Action::OpenGraph)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('s')), &overlay, View::Entities, false),
+            Some(Action::SearchAround)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('+')), &overlay, View::Graph, false),
+            Some(Action::GraphHops(1))
+        ));
+        assert!(map_key(press(KeyCode::Char('f')), &overlay, View::Overview, false).is_none());
+        assert!(matches!(
+            map_key(press(KeyCode::Char('f')), &overlay, View::Graph, false),
+            Some(Action::GraphApplyFacet)
         ));
     }
 

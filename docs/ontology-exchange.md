@@ -167,7 +167,7 @@ Reserved **`EvidenceBatch` keys** for a future connector protocol: `objects`, `l
 
 ## `FORMAT_VERSION` bump rules
 
-`FORMAT_VERSION` lives in `src/exchange.rs` and remains **`1`**. Phase 1 added optional `proposals.decided_by` with `#[serde(default)]` and did not add a required collection, so the bump rules say stay at 1. Import still rejects any archive whose `format_version` is **greater** than the running binary. Older archives must keep importing.
+`FORMAT_VERSION` lives in `src/exchange.rs` and remains **`1`**. Phase 1 added optional `proposals.decided_by` with `#[serde(default)]` and did not add a required collection, so the bump rules say stay at 1. Phase 2 (Graph and Search Around) is TUI and query-only: it does not add archive fields, so the version stays **1**. Import still rejects any archive whose `format_version` is **greater** than the running binary. Older archives must keep importing.
 
 Checked-in proof: `tests/fixtures/archives/v1-minimal/investigation.osint.json` (no `decided_by`) plus `export_then_import_round_trips`. `--rename` ID behavior is unchanged: only the investigation UUID is rewritten.
 

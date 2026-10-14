@@ -107,6 +107,10 @@ pub fn hint_line(theme: &Theme) -> Line<'static> {
         Span::raw(" Palette  "),
         Span::styled("[r]", theme.header),
         Span::raw(" Collect  "),
+        Span::styled("[g]", theme.header),
+        Span::raw(" Graph  "),
+        Span::styled("[s]", theme.header),
+        Span::raw(" Around  "),
         Span::styled("[?]", theme.header),
         Span::raw(" Help"),
     ])

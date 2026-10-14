@@ -176,6 +176,8 @@ The screen has a navigation column, a main pane, and (on a wide terminal) a deta
 | `e` | Edit the current page notes in `$EDITOR`, or open agent and theme settings |
 | `r` | Run the default collectors for the current page |
 | `v` | Object View: highlighted entity, or the current page |
+| `g` | Graph: entities as nodes, relationships as edges |
+| `s` | Search Around from the current selection |
 | `c` | Cancel the selected job (Jobs screen) |
 | `?` | Help |
 | `1`–`6` | Overview, Pages, Sources, Findings, Entities, Timeline |
