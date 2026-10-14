@@ -1074,3 +1074,210 @@ fn resolve_can_stack_an_already_canonical_winner() {
         "{message}"
     );
 }
+
+struct SharedBagFixture {
+    canonical: Uuid,
+    shared_source: Uuid,
+    original_source: Uuid,
+    bag1: crate::model::Resolution,
+    bag2: crate::model::Resolution,
+}
+
+fn two_bags_sharing_source_and_asn(store: &mut Store, investigation_id: Uuid) -> SharedBagFixture {
+    let canonical = store
+        .add_entity(
+            investigation_id,
+            EntityKind::Domain,
+            "example.com",
+            Provenance::Analyst,
+            None,
+        )
+        .expect("canonical");
+    store
+        .add_entity(
+            investigation_id,
+            EntityKind::Hostname,
+            "ns1.example.net",
+            Provenance::Collected,
+            None,
+        )
+        .expect("ns1");
+    store
+        .add_entity(
+            investigation_id,
+            EntityKind::Hostname,
+            "ns2.example.net",
+            Provenance::Collected,
+            None,
+        )
+        .expect("ns2");
+    let context = ApplyContext {
+        investigation_id,
+        page_id: None,
+        job_id: None,
+    };
+    let mut original = EvidenceBatch::new();
+    let original_key = original.add_source(NewSource::collected(
+        SourceKind::Manual,
+        "analyst",
+        "original on canonical",
+    ));
+    let domain_key = original.entity(EntityKind::Domain, "example.com", Some(original_key));
+    original.annotate(&domain_key, "registrar", "Keep Me");
+    let original_applied = store.apply_batch(context, &original).expect("original");
+    let original_source = original_applied.source_ids[0];
+    let mut shared = EvidenceBatch::new();
+    let shared_key = shared.add_source(NewSource::collected(
+        SourceKind::Dns,
+        "dns",
+        "shared nameserver source",
+    ));
+    let ns1_key = shared.entity(EntityKind::Hostname, "ns1.example.net", Some(shared_key));
+    let ns2_key = shared.entity(EntityKind::Hostname, "ns2.example.net", Some(shared_key));
+    shared.annotate(&ns1_key, "asn", "AS1");
+    shared.annotate(&ns2_key, "asn", "AS1");
+    let shared_applied = store.apply_batch(context, &shared).expect("shared");
+    let shared_source = shared_applied.source_ids[0];
+    let data = store.load_investigation(investigation_id).expect("load");
+    let ns1 = data
+        .entities
+        .iter()
+        .find(|entity| entity.value == "ns1.example.net")
+        .expect("ns1 row")
+        .id;
+    let ns2 = data
+        .entities
+        .iter()
+        .find(|entity| entity.value == "ns2.example.net")
+        .expect("ns2 row")
+        .id;
+    let bag1 = store
+        .resolve_entities(
+            investigation_id,
+            &[canonical, ns1],
+            canonical,
+            "first nameserver",
+            "tester",
+        )
+        .expect("bag1");
+    assert!(bag1.source_writes.contains(&shared_source));
+    assert!(
+        bag1.property_writes
+            .iter()
+            .any(|write| write.key == "asn" && write.new_value == "AS1")
+    );
+    let bag2 = store
+        .resolve_entities(
+            investigation_id,
+            &[canonical, ns2],
+            canonical,
+            "second nameserver",
+            "tester",
+        )
+        .expect("bag2");
+    assert!(
+        bag2.source_writes.is_empty(),
+        "already-present sources must not be claimed by the second bag: {:?}",
+        bag2.source_writes
+    );
+    assert!(
+        bag2.property_writes.is_empty(),
+        "already-present fields must not be claimed by the second bag: {:?}",
+        bag2.property_writes
+    );
+    SharedBagFixture {
+        canonical,
+        shared_source,
+        original_source,
+        bag1,
+        bag2,
+    }
+}
+
+fn canonical_row(store: &Store, investigation_id: Uuid, canonical: Uuid) -> crate::model::Entity {
+    store
+        .load_investigation(investigation_id)
+        .expect("load")
+        .entities
+        .into_iter()
+        .find(|entity| entity.id == canonical)
+        .expect("canonical")
+}
+
+#[test]
+fn shared_source_write_survives_until_last_bag() {
+    let (mut store, investigation) = store_with_investigation();
+    let fixture = two_bags_sharing_source_and_asn(&mut store, investigation.id);
+    store
+        .unresolve_entities(fixture.bag1.id, "tester")
+        .expect("unresolve first bag");
+    let data = store.load_investigation(investigation.id).expect("load");
+    let canonical = data
+        .entities
+        .iter()
+        .find(|entity| entity.id == fixture.canonical)
+        .expect("canonical");
+    assert!(canonical.source_ids.contains(&fixture.shared_source));
+    assert!(canonical.source_ids.contains(&fixture.original_source));
+    assert!(
+        data.is_absorbed(
+            data.entities
+                .iter()
+                .find(|entity| entity.value == "ns2.example.net")
+                .expect("ns2")
+                .id
+        )
+    );
+}
+
+#[test]
+fn shared_property_write_survives_until_last_bag() {
+    let (mut store, investigation) = store_with_investigation();
+    let fixture = two_bags_sharing_source_and_asn(&mut store, investigation.id);
+    store
+        .unresolve_entities(fixture.bag1.id, "tester")
+        .expect("unresolve first bag");
+    let canonical = canonical_row(&store, investigation.id, fixture.canonical);
+    assert_eq!(canonical.fields.get("asn"), Some("AS1"));
+    assert_eq!(canonical.fields.get("registrar"), Some("Keep Me"));
+}
+
+#[test]
+fn unresolve_last_bag_removes_shared_writes_and_keeps_originals() {
+    let (mut store, investigation) = store_with_investigation();
+    let fixture = two_bags_sharing_source_and_asn(&mut store, investigation.id);
+    store
+        .unresolve_entities(fixture.bag1.id, "tester")
+        .expect("unresolve first");
+    store
+        .unresolve_entities(fixture.bag2.id, "tester")
+        .expect("unresolve last");
+    let data = store.load_investigation(investigation.id).expect("load");
+    let canonical = data
+        .entities
+        .iter()
+        .find(|entity| entity.id == fixture.canonical)
+        .expect("canonical");
+    assert!(canonical.source_ids.contains(&fixture.original_source));
+    assert!(!canonical.source_ids.contains(&fixture.shared_source));
+    assert_eq!(canonical.fields.get("registrar"), Some("Keep Me"));
+    assert!(canonical.fields.get("asn").is_none());
+    assert!(
+        !data.is_absorbed(
+            data.entities
+                .iter()
+                .find(|entity| entity.value == "ns1.example.net")
+                .expect("ns1")
+                .id
+        )
+    );
+    assert!(
+        !data.is_absorbed(
+            data.entities
+                .iter()
+                .find(|entity| entity.value == "ns2.example.net")
+                .expect("ns2")
+                .id
+        )
+    );
+}

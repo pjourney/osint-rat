@@ -65,6 +65,7 @@ impl App {
     }
 
     pub(crate) fn open_graph(&mut self) {
+        self.merge_marks.clear();
         if self.workspace.is_none() {
             self.status = "Create or open an investigation first.".into();
             return;

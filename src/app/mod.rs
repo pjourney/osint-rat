@@ -573,7 +573,10 @@ impl App {
             Action::OpenAgent => self.switch_view(View::Agent),
             Action::OpenOverview => self.switch_view(View::Overview),
             Action::OpenObjectView => self.open_object_view(),
-            Action::OpenGraph => self.open_graph(),
+            Action::OpenGraph => {
+                self.merge_marks.clear();
+                self.open_graph();
+            }
             Action::SearchAround => self.search_around_from_selection(),
             Action::GraphHops(delta) => self.change_graph_hops(delta),
             Action::GraphFacetMove(delta) => self.move_graph_facet(delta),
@@ -3472,6 +3475,40 @@ mod tests {
         assert!(app.status.contains("Mark at least two"));
         let listed = app.listed_entities();
         assert_eq!(listed[0].id, first);
+    }
+
+    #[test]
+    fn open_graph_clears_merge_marks() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Graph Marks");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        app.store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Domain,
+                "example.com",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("domain");
+        app.store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Ip,
+                "192.0.2.10",
+                crate::model::Provenance::Collected,
+                None,
+            )
+            .expect("ip");
+        app.reload().expect("reload");
+        app.view = View::Entities;
+        app.pane = Pane::Main;
+        app.selected = 0;
+        app.dispatch(Action::ToggleMergeMark).expect("mark");
+        assert_eq!(app.merge_marks.len(), 1);
+        app.dispatch(Action::OpenGraph).expect("g");
+        assert!(app.merge_marks.is_empty());
+        assert_eq!(app.view, View::Graph);
     }
 
     #[test]

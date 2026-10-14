@@ -143,6 +143,7 @@ fn revert_property_writes(
     connection: &Connection,
     entity_id: Uuid,
     writes: &[PropertyWrite],
+    remaining: &[Entity],
 ) -> rusqlite::Result<()> {
     if writes.is_empty() {
         return Ok(());
@@ -151,6 +152,9 @@ fn revert_property_writes(
         load_entity(connection, entity_id)?.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
     for write in writes.iter().rev() {
         if !cell_matches_write(&entity, write) {
+            continue;
+        }
+        if remaining_holds_property(remaining, write) {
             continue;
         }
         match write.key.as_str() {
@@ -189,18 +193,80 @@ fn cell_matches_write(entity: &Entity, write: &PropertyWrite) -> bool {
     }
 }
 
-fn revert_source_writes(connection: &Connection, resolution: &Resolution) -> rusqlite::Result<()> {
-    let remaining: HashSet<Uuid> = list_resolutions(connection, resolution.investigation_id)?
-        .into_iter()
-        .filter(|item| {
-            item.is_active()
-                && item.id != resolution.id
-                && item.canonical_id == resolution.canonical_id
-        })
-        .flat_map(|item| item.source_writes)
-        .collect();
-    for source_id in &resolution.source_writes {
-        if remaining.contains(source_id) {
+fn remaining_holds_property(remaining: &[Entity], write: &PropertyWrite) -> bool {
+    remaining.iter().any(|entity| match write.key.as_str() {
+        LABEL_WRITE_KEY => entity.label == write.new_value,
+        NOTES_WRITE_KEY => entity.notes == write.new_value,
+        key => entity.fields.get(key) == Some(write.new_value.as_str()),
+    })
+}
+
+fn remaining_holds_source(remaining: &[Entity], source_id: Uuid) -> bool {
+    remaining
+        .iter()
+        .any(|entity| entity.source_ids.contains(&source_id))
+}
+
+fn remaining_constituents(
+    connection: &Connection,
+    resolution: &Resolution,
+    all: &[Resolution],
+) -> rusqlite::Result<Vec<Entity>> {
+    let mut ids = Vec::new();
+    let mut seen = HashSet::new();
+    for item in all {
+        if !item.is_active()
+            || item.id == resolution.id
+            || item.canonical_id != resolution.canonical_id
+        {
+            continue;
+        }
+        for entity_id in item.others() {
+            if seen.insert(entity_id) {
+                ids.push(entity_id);
+            }
+        }
+    }
+    let mut loaded = Vec::new();
+    for entity_id in ids {
+        if let Some(entity) = load_entity(connection, entity_id)? {
+            loaded.push(entity);
+        }
+    }
+    Ok(loaded)
+}
+
+fn inherited_sibling_writes(
+    resolution: &Resolution,
+    all: &[Resolution],
+) -> (Vec<PropertyWrite>, Vec<Uuid>) {
+    let mut properties = resolution.property_writes.clone();
+    let mut sources = resolution.source_writes.clone();
+    for item in all {
+        if item.id == resolution.id
+            || item.is_active()
+            || item.canonical_id != resolution.canonical_id
+        {
+            continue;
+        }
+        properties.extend(item.property_writes.iter().cloned());
+        for source_id in &item.source_writes {
+            if !sources.contains(source_id) {
+                sources.push(*source_id);
+            }
+        }
+    }
+    (properties, sources)
+}
+
+fn revert_source_writes(
+    connection: &Connection,
+    resolution: &Resolution,
+    source_writes: &[Uuid],
+    remaining: &[Entity],
+) -> rusqlite::Result<()> {
+    for source_id in source_writes {
+        if remaining_holds_source(remaining, *source_id) {
             continue;
         }
         let attached = connection
@@ -359,12 +425,16 @@ impl Store {
                 resolution.short_ref()
             );
         }
+        let all = list_resolutions(&transaction, resolution.investigation_id)?;
+        let remaining = remaining_constituents(&transaction, &resolution, &all)?;
+        let (property_writes, source_writes) = inherited_sibling_writes(&resolution, &all);
         revert_property_writes(
             &transaction,
             resolution.canonical_id,
-            &resolution.property_writes,
+            &property_writes,
+            &remaining,
         )?;
-        revert_source_writes(&transaction, &resolution)?;
+        revert_source_writes(&transaction, &resolution, &source_writes, &remaining)?;
         let timestamp = now();
         transaction.execute(
             "UPDATE resolutions SET status = ?2, unresolved_by = ?3, unresolved_at = ?4 WHERE id = ?1",
