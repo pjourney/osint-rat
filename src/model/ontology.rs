@@ -1074,14 +1074,9 @@ pub fn action_type_for(action: &AgentAction) -> &'static ActionType {
     action_type(action.name()).expect("every AgentAction variant is catalogued")
 }
 
-/// Local actor recorded on accept/reject. Uses `$USER` / `$USERNAME`, else `local`.
+/// Local actor recorded on accept/reject. Uses [`super::Identity::from_env`].
 pub fn local_actor() -> String {
-    std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "local".into())
+    super::Identity::from_env().user_id
 }
 
 /// One property shown in Object View.
@@ -1173,6 +1168,7 @@ impl ObjectView {
         identity.push("value", entity.value.clone());
         identity.push("label", entity.label.clone());
         identity.push("provenance", entity.provenance.as_str());
+        identity.push("marking", entity.marking().as_str());
         let groups = property_groups(object_type, &identity, &entity.fields);
         let members = object_member_ids(workspace, entity.id);
         let mut source_ids = entity.source_ids.clone();
@@ -1605,6 +1601,7 @@ mod tests {
             name: "Case".into(),
             description: String::new(),
             tags: Vec::new(),
+            marking: crate::model::Marking::Unmarked,
             created_at: now(),
             updated_at: now(),
         });
@@ -1676,6 +1673,7 @@ mod tests {
             name: "Case".into(),
             description: String::new(),
             tags: Vec::new(),
+            marking: crate::model::Marking::Unmarked,
             created_at: now(),
             updated_at: now(),
         });

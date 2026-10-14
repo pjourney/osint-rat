@@ -722,6 +722,7 @@ mod tests {
             name: "Fixture".into(),
             description: String::new(),
             tags: Vec::new(),
+            marking: crate::model::Marking::Unmarked,
             created_at: now(),
             updated_at: now(),
         }
@@ -833,6 +834,8 @@ mod tests {
             page_entities: Vec::new(),
             resolutions: Vec::new(),
             events: Vec::new(),
+            audit: Vec::new(),
+            members: Vec::new(),
         };
         (data, domain, ip, nameserver, asn, ns_ip, isolated)
     }
@@ -1071,6 +1074,8 @@ mod tests {
             page_entities: Vec::new(),
             resolutions: Vec::new(),
             events: Vec::new(),
+            audit: Vec::new(),
+            members: Vec::new(),
         };
         let one = search_around(&data, &SearchAroundQuery::new(vec![domain.id], 1));
         assert_eq!(one.nodes.len(), 3);
@@ -1108,6 +1113,8 @@ mod tests {
             page_entities: Vec::new(),
             resolutions: Vec::new(),
             events: Vec::new(),
+            audit: Vec::new(),
+            members: Vec::new(),
         };
         let one = search_around(&data, &SearchAroundQuery::new(vec![alpha.id], 1));
         assert_eq!(one.nodes.len(), 3);
@@ -1147,6 +1154,8 @@ mod tests {
             page_entities: Vec::new(),
             resolutions: Vec::new(),
             events: Vec::new(),
+            audit: Vec::new(),
+            members: Vec::new(),
         };
         let mut query = SearchAroundQuery::new(vec![domain.id], 2);
         query.link_types = vec!["resolves_to".into()];
@@ -1212,6 +1221,8 @@ mod tests {
                 source_writes: Vec::new(),
             }],
             events: Vec::new(),
+            audit: Vec::new(),
+            members: Vec::new(),
         };
         data.investigation.id = domain.investigation_id;
         let result = search_around(&data, &SearchAroundQuery::new(vec![domain.id], 1));

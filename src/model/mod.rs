@@ -9,7 +9,9 @@
 
 pub mod agent;
 pub mod artifact;
+pub mod audit;
 pub mod batch;
+pub mod collaboration;
 pub mod common;
 pub mod cooccur;
 pub mod entity;
@@ -17,9 +19,11 @@ pub mod event;
 pub mod finding;
 pub mod geo;
 pub mod graph;
+pub mod identity;
 pub mod ids;
 pub mod investigation;
 pub mod job;
+pub mod marking;
 pub mod note;
 pub mod ontology;
 pub mod page;
@@ -34,10 +38,12 @@ pub mod workspace;
 
 pub use agent::{AgentAction, AgentRun, Proposal, ProposalStatus};
 pub use artifact::{Artifact, ArtifactKind};
+pub use audit::{AuditEntry, AuditKind};
 pub use batch::{
     EntityKey, EvidenceBatch, NewArtifact, NewCollectedFinding, NewEntity, NewRelationship,
     NewSource, NewTimelineEvent, SourceKey,
 };
+pub use collaboration::{CONFLICT_POLICY, Member, Role};
 pub use common::{Confidence, Fields, Provenance, Timestamp, now};
 pub use cooccur::{
     CoOccurrence, CoOccurrenceKind, CoOccurrenceQuery, DEFAULT_WINDOW, co_occur, event_involves,
@@ -58,9 +64,11 @@ pub use graph::{
     SearchAroundResult, VisibleGraph, apply_graph_filters, facet_chips, graph_facets,
     layout_columns, merge_search_results, offset_hops, search_around,
 };
+pub use identity::Identity;
 pub use ids::{RefKind, ShortRef, find_refs, parse_ref_list};
 pub use investigation::{Investigation, InvestigationSummary};
 pub use job::{JobRecord, JobStatus};
+pub use marking::{Marking, MarkingError, OBJECT_MARKING_FIELD};
 pub use note::Note;
 pub use ontology::{
     ACTION_TYPES, ActionType, CataloguedLink, LINK_TYPES, LinkDirection, LinkType, OBJECT_TYPES,

@@ -9,9 +9,9 @@ use uuid::Uuid;
 use super::rows::{RowExt, id, json, ts};
 use super::{SeqTable, Store, next_seq, touch_investigation};
 use crate::model::{
-    CataloguedLink, Confidence, Entity, EntityKey, EntityKind, Fields, PageEntityLink, Provenance,
-    Relationship, SearchAroundQuery, SearchAroundResult, normalize_relationship_kind, now,
-    search_around,
+    AuditKind, CataloguedLink, Confidence, Entity, EntityKey, EntityKind, Fields, Marking,
+    OBJECT_MARKING_FIELD, PageEntityLink, Provenance, Relationship, SearchAroundQuery,
+    SearchAroundResult, normalize_relationship_kind, now, search_around,
 };
 
 /// Inserts an entity or returns the existing one with the same kind and canonical value.
@@ -375,6 +375,7 @@ impl Store {
         if value.trim().is_empty() {
             bail!("an entity needs a value");
         }
+        self.assert_can_mutate(investigation_id)?;
         let key = EntityKey::new(kind, value);
         let transaction = self.connection_mut().transaction()?;
         let (entity_id, _) = upsert_entity(&transaction, investigation_id, &key, provenance, None)?;
@@ -417,6 +418,7 @@ impl Store {
         if from_id == to_id {
             bail!("an entity cannot be related to itself");
         }
+        self.assert_can_mutate(investigation_id)?;
         let transaction = self.connection_mut().transaction()?;
         let (relationship_id, _) = upsert_relationship(
             &transaction,
@@ -433,6 +435,48 @@ impl Store {
         touch_investigation(&transaction, investigation_id)?;
         transaction.commit()?;
         Ok(relationship_id)
+    }
+
+    pub fn set_entity_marking(&mut self, entity_id: Uuid, marking: Marking) -> Result<()> {
+        let (investigation_id, previous): (Uuid, String) = self.connection().query_row(
+            "SELECT investigation_id, fields FROM entities WHERE id = ?1",
+            params![id(&entity_id)],
+            |row| Ok((row.uuid(0)?, row.get(1)?)),
+        )?;
+        self.assert_can_mutate(investigation_id)?;
+        let mut fields: Fields = serde_json::from_str(&previous).unwrap_or_default();
+        let from = fields
+            .get(OBJECT_MARKING_FIELD)
+            .and_then(|value| Marking::parse(value).ok())
+            .unwrap_or(Marking::Unmarked);
+        if from == marking {
+            return Ok(());
+        }
+        if marking == Marking::Unmarked {
+            fields.remove(OBJECT_MARKING_FIELD);
+        } else {
+            fields.set(OBJECT_MARKING_FIELD, marking.as_str());
+        }
+        let identity = self.identity().clone();
+        let transaction = self.connection_mut().transaction()?;
+        transaction.execute(
+            "UPDATE entities SET fields = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id(&entity_id), json(&fields), ts(&now())],
+        )?;
+        let mut details = Fields::new();
+        details.push("from", from.as_str());
+        details.push("to", marking.as_str());
+        super::audit::append_audit_on(
+            &transaction,
+            investigation_id,
+            &identity,
+            AuditKind::MarkingChanged,
+            &format!("Object marking {} → {}", from.label(), marking.label()),
+            details,
+            vec![entity_id],
+        )?;
+        transaction.commit()?;
+        Ok(())
     }
 
     pub fn delete_relationship(&self, relationship_id: Uuid) -> Result<()> {

@@ -21,8 +21,8 @@
 | 3 | Entity resolution | Done ([#7](https://github.com/pjourney/osint-rat/pull/7)) |
 | 4 | Ingest plane & connectors | Done ([#8](https://github.com/pjourney/osint-rat/pull/8)) |
 | 5 | Playbooks & automations | Done ([#9](https://github.com/pjourney/osint-rat/pull/9)) |
-| 6 | Temporal & geospatial | In progress ([#10](https://github.com/pjourney/osint-rat/pull/10)) |
-| 7 | Team, markings & audit | Not started |
+| 6 | Temporal & geospatial | Done ([#10](https://github.com/pjourney/osint-rat/pull/10)) |
+| 7 | Team, markings & audit | In progress |
 | 8 | Scale, API & STIX | Not started |
 | 9 | Distribution, demos & open platform | Not started |
 
@@ -277,11 +277,11 @@ Small-cell collaboration with governance (enterprise investigation platforms col
 
 ### Success criteria
 
-- [ ] Audit log records merge + accept Action + export on a test run; export can include audit slice.
-- [ ] TLP marking visible in UI and `investigation.osint.json`.
-- [ ] If sync is implemented: second client can open the same case read-only or as analyst per role; documented threat model in `docs/collaboration.md`.
-- [ ] Single-user path unchanged when sync disabled.
-- [ ] Tests for audit + markings; CI green.
+- [x] Audit log records merge + accept Action + export on a test run; export can include audit slice.
+- [x] TLP marking visible in UI and `investigation.osint.json`.
+- [x] If sync is implemented: second client can open the same case read-only or as analyst per role; documented threat model in `docs/collaboration.md`.
+- [x] Single-user path unchanged when sync disabled.
+- [x] Tests for audit + markings; CI green.
 
 ### How to complete
 

@@ -15,6 +15,10 @@ pub fn render_markdown(workspace: &Workspace) -> String {
         env!("CARGO_PKG_VERSION"),
         now().to_rfc3339()
     ));
+    out.push_str(&format!(
+        "**Marking:** {}.\n\n",
+        investigation.marking.label()
+    ));
     out.push_str("> AI-written analysis is labelled **AI inference (unverified)**. Claims that can be tied to a source keep their source IDs.\n\n");
     if !investigation.description.trim().is_empty() {
         out.push_str("## Executive Summary\n\n");
@@ -313,6 +317,7 @@ mod tests {
             name: name.into(),
             description: "A test case.".into(),
             tags: Vec::new(),
+            marking: crate::model::Marking::Unmarked,
             created_at: timestamp,
             updated_at: timestamp,
         }))
@@ -323,6 +328,7 @@ mod tests {
         let actual = render_markdown(&empty_workspace("Example Corp"));
         for heading in [
             "# Example Corp",
+            "**Marking:** unmarked.",
             "## Executive Summary",
             "## Scope",
             "## Diagnostics",

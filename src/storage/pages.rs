@@ -43,6 +43,7 @@ impl Store {
         if title.is_empty() {
             bail!("a page needs a title or a target");
         }
+        self.assert_can_mutate(new_page.investigation_id)?;
         let transaction = self.connection_mut().transaction()?;
         let timestamp = now();
         let mut page = Page {

@@ -41,6 +41,8 @@ impl Store {
         let playbook = meta.playbook;
         let seed = meta.seed;
         let automation = meta.automation;
+        self.assert_can_mutate(context.investigation_id)?;
+        let identity = self.identity().clone();
         let transaction = self.connection_mut().transaction()?;
         let mut summary = ApplySummary::default();
         for batch in batches {
@@ -84,6 +86,20 @@ impl Store {
                 page_id: context.page_id,
             },
         )?;
+        let mut details = crate::model::Fields::new();
+        details.push("playbook_id", playbook.id.as_str());
+        if automation {
+            details.push("automation", "true");
+        }
+        super::audit::append_audit_on(
+            &transaction,
+            context.investigation_id,
+            &identity,
+            crate::model::AuditKind::PlaybookRun,
+            &format!("Playbook {}", playbook.id),
+            details,
+            Vec::new(),
+        )?;
         touch_investigation(&transaction, context.investigation_id)?;
         transaction.commit()?;
         let digest_changed = meta
@@ -107,6 +123,7 @@ impl Store {
         if actions.is_empty() {
             return Ok(Vec::new());
         }
+        self.assert_can_mutate(investigation_id)?;
         let transaction = self.connection_mut().transaction()?;
         let timestamp = now();
         let run = AgentRun {

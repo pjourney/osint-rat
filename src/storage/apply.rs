@@ -90,6 +90,7 @@ impl Store {
         context: ApplyContext,
         batch: &EvidenceBatch,
     ) -> Result<ApplySummary> {
+        self.assert_can_mutate(context.investigation_id)?;
         let transaction = self.connection_mut().transaction()?;
         let summary = apply_batch_on(&transaction, context, batch)?;
         touch_investigation(&transaction, context.investigation_id)?;

@@ -1,10 +1,11 @@
 use super::*;
 use crate::model::{
-    AgentAction, ArtifactKind, Confidence, EntityKey, EntityKind, EvidenceBatch, JobRecord,
-    JobStatus, NewArtifact, NewSource, PageKind, ProposalStatus, Provenance, SearchAroundQuery,
-    SourceKind, TimelineKind, Workspace,
+    AgentAction, ArtifactKind, AuditKind, Confidence, EntityKey, EntityKind, EvidenceBatch,
+    Identity, JobRecord, JobStatus, Marking, NewArtifact, NewSource, PageKind, ProposalStatus,
+    Provenance, Role, SearchAroundQuery, SourceKind, TimelineKind, Workspace,
 };
 use rusqlite::params;
+use uuid::Uuid;
 
 fn store_with_investigation() -> (Store, Investigation) {
     let store = Store::open_in_memory().expect("store opens");
@@ -1499,4 +1500,345 @@ fn apply_rejects_unsafe_snapshot_and_artifact_paths() {
     );
     assert!(data.sources[0].snapshot_path.is_none());
     assert!(data.artifacts.is_empty());
+}
+
+#[test]
+fn marking_defaults_to_unmarked_and_persists() {
+    let (mut store, investigation) = store_with_investigation();
+    let loaded = store
+        .get_investigation(investigation.id)
+        .expect("get")
+        .expect("present");
+    assert_eq!(loaded.marking, Marking::Unmarked);
+    store
+        .set_marking(investigation.id, Marking::TlpAmber)
+        .expect("set");
+    let loaded = store
+        .get_investigation(investigation.id)
+        .expect("get")
+        .expect("present");
+    assert_eq!(loaded.marking, Marking::TlpAmber);
+    let audit = store.list_audit(investigation.id).expect("audit");
+    assert_eq!(audit.len(), 1);
+    assert_eq!(audit[0].kind, AuditKind::MarkingChanged);
+    assert_eq!(audit[0].details.get("to"), Some("tlp:amber"));
+}
+
+#[test]
+fn audit_records_merge_accept_and_export() {
+    let (mut store, investigation) = store_with_investigation();
+    store.set_identity(Identity {
+        user_id: "analyst".into(),
+        machine_name: "lab".into(),
+    });
+    let domain = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Domain,
+            "example.com",
+            Provenance::Analyst,
+            None,
+        )
+        .expect("domain");
+    let host = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Hostname,
+            "example.com",
+            Provenance::Collected,
+            None,
+        )
+        .expect("host");
+    store
+        .resolve_entities(
+            investigation.id,
+            &[domain, host],
+            domain,
+            "same host",
+            "analyst",
+        )
+        .expect("merge");
+    let mut run = crate::model::AgentRun {
+        id: Uuid::new_v4(),
+        investigation_id: investigation.id,
+        seq: 0,
+        thread_id: Uuid::new_v4(),
+        page_id: None,
+        agent_name: "test".into(),
+        program: "claude".into(),
+        args: Vec::new(),
+        question: "q".into(),
+        response: String::new(),
+        status: JobStatus::Succeeded,
+        error: None,
+        focus: None,
+        context_artifact_id: None,
+        job_id: None,
+        model: None,
+        cost_usd: None,
+        created_at: crate::model::now(),
+        finished_at: None,
+    };
+    store.insert_agent_run(&mut run).expect("run");
+    let proposals = store
+        .insert_proposals(
+            investigation.id,
+            run.id,
+            vec![(
+                AgentAction::AddNote {
+                    body: "cited".into(),
+                },
+                ProposalStatus::Pending,
+                None,
+            )],
+        )
+        .expect("proposals");
+    store
+        .update_proposal(proposals[0].id, ProposalStatus::Accepted, None)
+        .expect("accept");
+    store
+        .record_export(investigation.id, "/tmp/handoff")
+        .expect("export audit");
+    let kinds: Vec<_> = store
+        .list_audit(investigation.id)
+        .expect("audit")
+        .into_iter()
+        .map(|entry| entry.kind)
+        .collect();
+    assert!(kinds.contains(&AuditKind::EntitiesMerged));
+    assert!(kinds.contains(&AuditKind::ActionAccepted));
+    assert!(kinds.contains(&AuditKind::Export));
+    let export_row = store
+        .list_audit(investigation.id)
+        .expect("audit")
+        .into_iter()
+        .find(|entry| entry.kind == AuditKind::Export)
+        .expect("export row");
+    assert_eq!(export_row.actor, "analyst");
+    assert_eq!(export_row.machine, "lab");
+}
+
+#[test]
+fn audit_log_rejects_updates() {
+    let (mut store, investigation) = store_with_investigation();
+    store
+        .set_marking(investigation.id, Marking::TlpGreen)
+        .expect("mark");
+    let error = store
+        .connection()
+        .execute("UPDATE audit_log SET summary = 'rewritten'", [])
+        .expect_err("append-only");
+    assert!(
+        error.to_string().contains("append-only"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn empty_members_is_single_user_owner() {
+    let (store, investigation) = store_with_investigation();
+    assert!(
+        store
+            .list_members(investigation.id)
+            .expect("members")
+            .is_empty()
+    );
+    assert_eq!(store.role_for(investigation.id).expect("role"), Role::Owner);
+}
+
+#[test]
+fn shared_file_reader_cannot_mutate_and_analyst_can() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("os-int.sqlite3");
+    let mut owner = Store::open(&path).expect("owner");
+    owner.set_identity(Identity {
+        user_id: "alice".into(),
+        machine_name: "desk-a".into(),
+    });
+    let investigation = owner.create_investigation("Shared", "").expect("created");
+    owner
+        .add_member(investigation.id, "bob", Role::Analyst)
+        .expect("bob");
+    owner
+        .add_member(investigation.id, "carol", Role::Reader)
+        .expect("carol");
+    drop(owner);
+    let mut analyst = Store::open(&path).expect("analyst");
+    analyst.set_identity(Identity {
+        user_id: "bob".into(),
+        machine_name: "desk-b".into(),
+    });
+    assert_eq!(
+        analyst.role_for(investigation.id).expect("role"),
+        Role::Analyst
+    );
+    analyst
+        .add_entity(
+            investigation.id,
+            EntityKind::Domain,
+            "example.net",
+            Provenance::Analyst,
+            None,
+        )
+        .expect("analyst write");
+    let mut reader = Store::open(&path).expect("reader");
+    reader.set_identity(Identity {
+        user_id: "carol".into(),
+        machine_name: "desk-c".into(),
+    });
+    assert_eq!(
+        reader.role_for(investigation.id).expect("role"),
+        Role::Reader
+    );
+    let loaded = reader
+        .load_investigation(investigation.id)
+        .expect("reader load");
+    assert_eq!(loaded.investigation.name, "Shared");
+    let error = reader
+        .add_entity(
+            investigation.id,
+            EntityKind::Ip,
+            "192.0.2.9",
+            Provenance::Analyst,
+            None,
+        )
+        .expect_err("reader write");
+    assert!(error.to_string().contains("reader"));
+    let error = reader
+        .set_marking(investigation.id, Marking::TlpRed)
+        .expect_err("reader marking");
+    assert!(error.to_string().contains("owner"));
+}
+
+#[test]
+fn object_marking_lives_in_the_property_bag() {
+    let (mut store, investigation) = store_with_investigation();
+    let entity_id = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Ip,
+            "192.0.2.1",
+            Provenance::Collected,
+            None,
+        )
+        .expect("entity");
+    store
+        .set_entity_marking(entity_id, Marking::TlpRed)
+        .expect("set");
+    let data = store.load_investigation(investigation.id).expect("load");
+    assert_eq!(data.entities[0].marking(), Marking::TlpRed);
+    assert_eq!(
+        data.entities[0]
+            .fields
+            .get(crate::model::OBJECT_MARKING_FIELD),
+        Some("tlp:red")
+    );
+}
+
+#[test]
+fn last_owner_cannot_be_removed() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("os-int.sqlite3");
+    let mut owner = Store::open(&path).expect("owner");
+    owner.set_identity(Identity {
+        user_id: "alice".into(),
+        machine_name: "desk-a".into(),
+    });
+    let investigation = owner.create_investigation("Owned", "").expect("created");
+    owner
+        .add_member(investigation.id, "bob", Role::Analyst)
+        .expect("bob");
+    let error = owner
+        .remove_member(investigation.id, "alice")
+        .expect_err("last owner");
+    assert!(error.to_string().contains("owner"));
+    owner
+        .add_member(investigation.id, "dana", Role::Owner)
+        .expect("second owner");
+    owner
+        .remove_member(investigation.id, "alice")
+        .expect("can leave when another owner remains");
+}
+
+#[test]
+fn analyst_cannot_change_investigation_marking() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("os-int.sqlite3");
+    let mut owner = Store::open(&path).expect("owner");
+    owner.set_identity(Identity {
+        user_id: "alice".into(),
+        machine_name: "desk-a".into(),
+    });
+    let investigation = owner.create_investigation("Marked", "").expect("created");
+    owner
+        .add_member(investigation.id, "bob", Role::Analyst)
+        .expect("bob");
+    drop(owner);
+    let mut analyst = Store::open(&path).expect("analyst");
+    analyst.set_identity(Identity {
+        user_id: "bob".into(),
+        machine_name: "desk-b".into(),
+    });
+    let error = analyst
+        .set_marking(investigation.id, Marking::TlpRed)
+        .expect_err("analyst marking");
+    assert!(error.to_string().contains("owner"));
+    let entity_id = analyst
+        .add_entity(
+            investigation.id,
+            EntityKind::Domain,
+            "example.org",
+            Provenance::Analyst,
+            None,
+        )
+        .expect("entity");
+    analyst
+        .set_entity_marking(entity_id, Marking::TlpGreen)
+        .expect("object marking");
+}
+
+#[test]
+fn reader_export_does_not_append_audit() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("os-int.sqlite3");
+    let mut owner = Store::open(&path).expect("owner");
+    owner.set_identity(Identity {
+        user_id: "alice".into(),
+        machine_name: "desk-a".into(),
+    });
+    let investigation = owner.create_investigation("Handoff", "").expect("created");
+    owner
+        .add_member(investigation.id, "carol", Role::Reader)
+        .expect("carol");
+    drop(owner);
+    let mut reader = Store::open(&path).expect("reader");
+    reader.set_identity(Identity {
+        user_id: "carol".into(),
+        machine_name: "desk-c".into(),
+    });
+    reader
+        .record_export(investigation.id, "/tmp/out")
+        .expect("reader export");
+    let audit = reader.list_audit(investigation.id).expect("audit");
+    assert!(
+        !audit.iter().any(|entry| entry.kind == AuditKind::Export),
+        "readers may export without writing an export row"
+    );
+}
+
+#[test]
+fn update_investigation_does_not_change_marking() {
+    let (mut store, mut investigation) = store_with_investigation();
+    store
+        .set_marking(investigation.id, Marking::TlpAmber)
+        .expect("set");
+    investigation.name = "Renamed".into();
+    investigation.marking = Marking::TlpRed;
+    store.update_investigation(&investigation).expect("update");
+    let loaded = store
+        .get_investigation(investigation.id)
+        .expect("get")
+        .expect("present");
+    assert_eq!(loaded.name, "Renamed");
+    assert_eq!(loaded.marking, Marking::TlpAmber);
 }

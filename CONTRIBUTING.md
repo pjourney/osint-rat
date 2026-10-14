@@ -123,5 +123,6 @@ Please follow [SECURITY.md](SECURITY.md). Use a private report rather than a pub
 - [Database tables](docs/schema.md)
 - [Ontology Exchange Format](docs/ontology-exchange.md)
 - [Playbooks](docs/playbooks.md)
+- [Collaboration](docs/collaboration.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Code of conduct](CODE_OF_CONDUCT.md)

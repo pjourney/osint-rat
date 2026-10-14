@@ -134,6 +134,21 @@ pub const COMMANDS: &[Command] = &[
         hint: "6",
     },
     Command {
+        id: "open_audit",
+        title: "Open Audit",
+        hint: "",
+    },
+    Command {
+        id: "set_marking",
+        title: "Set marking",
+        hint: "",
+    },
+    Command {
+        id: "add_member",
+        title: "Add team member",
+        hint: "",
+    },
+    Command {
         id: "toggle_nearby",
         title: "Nearby (country / prefix)",
         hint: "l",

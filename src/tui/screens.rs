@@ -136,6 +136,7 @@ fn draw_main(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         View::Settings => settings(frame, area, app, theme, focused),
         View::Object => object_view(frame, area, app, theme, focused),
         View::Graph => graph(frame, area, app, theme, focused),
+        View::Audit => audit(frame, area, app, theme, focused),
     }
 }
 
@@ -163,10 +164,14 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
             lines.push(Line::from(""));
         }
     } else {
-        lines.push(Line::from(Span::styled(
-            workspace.investigation().name.clone(),
-            theme.title,
-        )));
+        lines.push(Line::from(vec![
+            Span::styled(workspace.investigation().name.clone(), theme.title),
+            Span::raw("  "),
+            Span::styled(
+                workspace.investigation().marking.label().to_string(),
+                theme.header,
+            ),
+        ]));
         lines.push(Line::from(
             sanitize_line(&workspace.investigation().description).into_owned(),
         ));
@@ -177,12 +182,18 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
     }
     lines.push(Line::from(Span::styled("Summary", theme.header)));
     lines.push(Line::from(format!(
-        "  {} pages   {} sources   {} findings   {} entities   {} jobs",
+        "  marking {}   role {}",
+        workspace.investigation().marking.label(),
+        app.current_role_label()
+    )));
+    lines.push(Line::from(format!(
+        "  {} pages   {} sources   {} findings   {} entities   {} jobs   {} audit",
         workspace.data.pages.len(),
         workspace.data.sources.len(),
         workspace.data.findings.len(),
         workspace.data.entities.len(),
-        workspace.data.jobs.len()
+        workspace.data.jobs.len(),
+        workspace.data.audit.len()
     )));
     if let Some(page) = page {
         let entities: Vec<_> = workspace
@@ -669,6 +680,30 @@ fn entities(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
     );
 }
 
+fn audit(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
+    let Some(workspace) = app.workspace.as_ref() else {
+        return;
+    };
+    let mut items: Vec<String> = Vec::new();
+    for entry in &workspace.data.audit {
+        items.push(format!(
+            "{}  {}  {}@{}  {}",
+            entry.short_ref(),
+            entry.kind.label(),
+            entry.actor,
+            entry.machine,
+            truncate(&entry.summary, 48)
+        ));
+    }
+    if items.is_empty() {
+        items.push("(no audit events yet)".into());
+    }
+    frame.render_widget(
+        list_from(items, app.selected, theme).block(pane_block("Audit", focused, theme)),
+        area,
+    );
+}
+
 fn timeline(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
     let rows = Layout::vertical([Constraint::Length(3), Constraint::Min(4)]).split(area);
     let filter = match app.timeline.filter_entity_id.and_then(|id| {
@@ -1055,6 +1090,18 @@ fn draw_detail(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
 fn detail_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'static>> {
     match app.view {
+        View::Audit => {
+            if let Some(entry) = workspace.data.audit.get(app.selected) {
+                let mut lines = vec![
+                    Line::from(format!("{}  {}", entry.short_ref(), entry.kind.label())),
+                    Line::from(format!("When  {}", entry.occurred_at.to_rfc3339())),
+                    Line::from(format!("Actor  {}@{}", entry.actor, entry.machine)),
+                    Line::from(entry.summary.clone()),
+                ];
+                append_fields(&mut lines, &entry.details, theme);
+                return lines;
+            }
+        }
         View::Sources => {
             let source = app
                 .source_id

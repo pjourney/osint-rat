@@ -81,6 +81,8 @@ pub enum View {
     Object,
     /// Link-analysis canvas: entities as nodes, relationships as edges, Search Around.
     Graph,
+    /// Append-only governance log for this investigation.
+    Audit,
 }
 
 impl View {
@@ -101,6 +103,7 @@ impl View {
             View::Artifacts => "artifacts",
             View::Object => "object",
             View::Graph => "graph",
+            View::Audit => "audit",
         }
     }
 
@@ -121,6 +124,7 @@ impl View {
             "artifacts" => View::Artifacts,
             "object" => View::Object,
             "graph" => View::Graph,
+            "audit" => View::Audit,
             _ => return None,
         })
     }
@@ -197,6 +201,10 @@ pub enum FormKind {
     PlaybookPrompt,
     /// Watch set: re-run collect steps; dry-run lists planned Actions.
     Watch,
+    /// Set the investigation TLP marking.
+    Marking,
+    /// Add a case member.
+    TeamMember,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -334,6 +342,16 @@ impl App {
         self.store.list_investigations().unwrap_or_default()
     }
 
+    pub fn current_role_label(&self) -> String {
+        let Some(workspace) = self.workspace.as_ref() else {
+            return "—".into();
+        };
+        self.store
+            .role_for(workspace.id())
+            .map(|role| role.as_str().to_string())
+            .unwrap_or_else(|_| "—".into())
+    }
+
     pub fn nav_items(&self) -> Vec<(&'static str, View)> {
         vec![
             ("Overview", View::Overview),
@@ -343,6 +361,7 @@ impl App {
             ("Entities", View::Entities),
             ("Graph", View::Graph),
             ("Timeline", View::Timeline),
+            ("Audit", View::Audit),
             ("Notes", View::Notes),
             ("Artifacts", View::Artifacts),
             ("Agent", View::Agent),
@@ -1237,6 +1256,32 @@ impl App {
             FormKind::Ingest | FormKind::Playbook | FormKind::PlaybookPrompt | FormKind::Watch => {
                 self.submit_ingest_form(form)?;
             }
+            FormKind::Marking => {
+                let workspace = self
+                    .workspace
+                    .as_ref()
+                    .ok_or_else(|| eyre!("no investigation"))?;
+                let marking =
+                    crate::model::Marking::parse(values.first().unwrap_or(&String::new()))
+                        .map_err(|error| eyre!("{error}"))?;
+                let investigation_id = workspace.id();
+                self.store.set_marking(investigation_id, marking)?;
+                self.reload()?;
+                self.status = format!("Marking set to {}", marking.label());
+            }
+            FormKind::TeamMember => {
+                let workspace = self
+                    .workspace
+                    .as_ref()
+                    .ok_or_else(|| eyre!("no investigation"))?;
+                let user_id = values.first().cloned().unwrap_or_default();
+                let role = crate::model::Role::parse(values.get(1).unwrap_or(&String::new()))
+                    .map_err(|error| eyre!("{error}"))?;
+                let investigation_id = workspace.id();
+                self.store.add_member(investigation_id, &user_id, role)?;
+                self.reload()?;
+                self.status = format!("Added {user_id} as {}", role.as_str());
+            }
             FormKind::SettingsAgent => {
                 self.config.agent.active = values[0].clone();
                 self.config.agent.program =
@@ -1286,6 +1331,9 @@ impl App {
             "open_sources" => self.switch_view(View::Sources),
             "open_findings" => self.switch_view(View::Findings),
             "open_timeline" => self.switch_view(View::Timeline),
+            "open_audit" => self.switch_view(View::Audit),
+            "set_marking" => self.open_marking_form(),
+            "add_member" => self.open_member_form(),
             "toggle_nearby" => self.toggle_nearby(),
             "open_jobs" => self.switch_view(View::Jobs),
             "open_tools" => self.switch_view(View::Tools),
@@ -1316,6 +1364,8 @@ impl App {
         if let Overlay::Form(form) = &mut self.overlay
             && ((form.kind == FormKind::NewPage && form.index == 1)
                 || (form.kind == FormKind::Ingest && form.index == 0)
+                || (form.kind == FormKind::Marking && form.index == 0)
+                || (form.kind == FormKind::TeamMember && form.index == 1)
                 || (matches!(
                     form.kind,
                     FormKind::Playbook | FormKind::PlaybookPrompt | FormKind::Watch
@@ -1335,6 +1385,28 @@ impl App {
                 let index = kinds.iter().position(|kind| *kind == current).unwrap_or(0);
                 let next = kinds[(index as i32 + delta).rem_euclid(kinds.len() as i32) as usize];
                 form.fields[0].value.set(next.as_str());
+                return;
+            }
+            if form.kind == FormKind::Marking {
+                let kinds = crate::model::Marking::ALL;
+                let current = crate::model::Marking::parse(&form.fields[0].value.value)
+                    .unwrap_or(crate::model::Marking::Unmarked);
+                let index = kinds.iter().position(|kind| *kind == current).unwrap_or(0);
+                let next = kinds[(index as i32 + delta).rem_euclid(kinds.len() as i32) as usize];
+                form.fields[0].value.set(next.as_str());
+                return;
+            }
+            if form.kind == FormKind::TeamMember {
+                let roles = [
+                    crate::model::Role::Owner,
+                    crate::model::Role::Analyst,
+                    crate::model::Role::Reader,
+                ];
+                let current = crate::model::Role::parse(&form.fields[1].value.value)
+                    .unwrap_or(crate::model::Role::Analyst);
+                let index = roles.iter().position(|role| *role == current).unwrap_or(1);
+                let next = roles[(index as i32 + delta).rem_euclid(roles.len() as i32) as usize];
+                form.fields[1].value.set(next.as_str());
                 return;
             }
             let kinds = PageKind::KNOWN;
@@ -2117,6 +2189,7 @@ impl App {
             | View::Sources
             | View::Findings
             | View::Timeline
+            | View::Audit
             | View::Notes
             | View::Agent
             | View::Jobs
@@ -2880,6 +2953,34 @@ fn finding_form() -> FormState {
 
 fn note_form() -> FormState {
     FormState::new(FormKind::NewNote, vec![field("Note", "", "Markdown")])
+}
+
+impl App {
+    fn open_marking_form(&mut self) {
+        let current = self
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.investigation().marking.as_str().to_string())
+            .unwrap_or_else(|| "unmarked".into());
+        self.overlay = Overlay::Form(FormState::new(
+            FormKind::Marking,
+            vec![field(
+                "Marking",
+                &current,
+                "Left/Right: unmarked TLP:CLEAR GREEN AMBER AMBER+STRICT RED",
+            )],
+        ));
+    }
+
+    fn open_member_form(&mut self) {
+        self.overlay = Overlay::Form(FormState::new(
+            FormKind::TeamMember,
+            vec![
+                field("User id", "", "matches [identity] user_id"),
+                field("Role", "analyst", "Left/Right: owner analyst reader"),
+            ],
+        ));
+    }
 }
 
 fn ingest_form() -> FormState {

@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use super::common::{Fields, Provenance, Timestamp, open_enum};
 use super::ids::{RefKind, ShortRef};
+use super::marking::{Marking, OBJECT_MARKING_FIELD};
 use super::target::{normalize_email, normalize_hostname, normalize_url, parse_asn};
 
 open_enum! {
@@ -87,6 +88,14 @@ impl Entity {
         } else {
             &self.label
         }
+    }
+
+    /// Optional object-level TLP stored in the property bag. Unmarked when absent.
+    pub fn marking(&self) -> Marking {
+        self.fields
+            .get(OBJECT_MARKING_FIELD)
+            .and_then(|value| Marking::parse(value).ok())
+            .unwrap_or(Marking::Unmarked)
     }
 }
 

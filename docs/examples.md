@@ -174,7 +174,7 @@ os-int-learn report "Example Corp" --format json -o /tmp/example-corp.json
 os-int-learn export "Example Corp" -o /tmp/example-corp-export
 ```
 
-The export directory contains `investigation.osint.json` (format version 3) and a `files/` tree. GeoJSON and co-occurrence are separate:
+The export directory contains `investigation.osint.json` (format version 4) and a `files/` tree. Markings and the audit slice travel with the archive. GeoJSON and co-occurrence are separate:
 
 ```bash
 os-int-learn export "Example Corp" --format geojson -o /tmp/example-corp.geojson
@@ -208,4 +208,5 @@ os-int-learn report "Example Corp" --format markdown
 - [Database tables](schema.md)
 - [Ontology Exchange Format](ontology-exchange.md)
 - [Playbooks](playbooks.md)
+- [Collaboration](collaboration.md)
 - [Configuration reference](guide.md#configuration)

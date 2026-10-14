@@ -316,15 +316,23 @@ impl Store {
     }
 
     pub fn update_proposal(
-        &self,
+        &mut self,
         proposal_id: Uuid,
         status: ProposalStatus,
         error: Option<&str>,
     ) -> Result<()> {
+        let (investigation_id, action_name): (Uuid, String) = self.connection().query_row(
+            "SELECT investigation_id, action FROM proposals WHERE id = ?1",
+            params![id(&proposal_id)],
+            |row| Ok((row.uuid(0)?, row.get(1)?)),
+        )?;
+        self.assert_can_mutate(investigation_id)?;
         let decided = status != ProposalStatus::Pending;
         let decided_at = decided.then(now);
-        let decided_by = decided.then(crate::model::local_actor);
-        self.connection().execute(
+        let decided_by = decided.then(|| self.identity().user_id.clone());
+        let identity = self.identity().clone();
+        let transaction = self.connection_mut().transaction()?;
+        transaction.execute(
             "UPDATE proposals SET status = ?2, error = ?3, decided_at = ?4, decided_by = ?5 WHERE id = ?1",
             params![
                 id(&proposal_id),
@@ -334,6 +342,23 @@ impl Store {
                 decided_by,
             ],
         )?;
+        if status == ProposalStatus::Accepted {
+            let action_label = serde_json::from_str::<AgentAction>(&action_name)
+                .map(|action| action.name().to_string())
+                .unwrap_or_else(|_| "ACTION".into());
+            let mut details = crate::model::Fields::new();
+            details.push("action", action_label.as_str());
+            super::audit::append_audit_on(
+                &transaction,
+                investigation_id,
+                &identity,
+                crate::model::AuditKind::ActionAccepted,
+                &format!("Accepted {action_label}"),
+                details,
+                vec![proposal_id],
+            )?;
+        }
+        transaction.commit()?;
         Ok(())
     }
 

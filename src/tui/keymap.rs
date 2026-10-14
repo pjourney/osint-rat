@@ -181,7 +181,7 @@ os-int keyboard shortcuts
 
   1 Overview  2 Pages  3 Sources  4 Findings  5 Entities
   6 Timeline  7 Agent  8 Jobs     9 Tools     0 Settings
-  Graph is in the Navigate column (g or palette).
+  Graph and Audit are in the Navigate column (g or palette).
 
 Enter on Entities opens Object View (properties, catalogued
 links, sources, findings). Esc returns. Unknown link verbs
@@ -198,6 +198,9 @@ or prefix. Esc restores the previous list and selection.
 Mark two or more entities (Space) and press m to merge.
 Suggestions never auto-merge. Object View lists constituents;
 u unresolves. Esc cancels a confirm without applying.
+
+Overview shows the TLP marking. Palette: Set marking, Open Audit,
+Add team member. Export includes the audit slice.
 
 Notes and Artifacts are in the Navigate column. On the welcome
 screen, o opens a case and d runs doctor.

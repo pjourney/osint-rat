@@ -52,8 +52,8 @@ A useful order:
 
 | Module | Responsibility |
 | --- | --- |
-| `model/` | Domain types: `Investigation`, `Page`, `Source`, `Finding`, `Entity`, `Relationship`, `Resolution`, `Note`, `Artifact`, `TimelineEvent`, `Event`, `JobRecord`, `AgentRun`, `Proposal`, `Playbook`. Object/link/Action registries and Object View data in `ontology`. Search Around and graph visibility in `graph`. Resolution bags and suggestion rules in `resolution`. Overlay timeline, co-occurrence, and GeoJSON in `timeline` / `cooccur` / `geo`. Short references (`S-12`, `E-4`, `C-1`, `V-1`, …). No UI or storage code. |
-| `storage/` | `Store` wraps a SQLite connection: migrations, CRUD, applying collector output transactionally, loading a full `Workspace`. Graph query (`Store::search_around`) runs the same hop expansion as `model::search_around` on a loaded snapshot. Merge/unresolve lives in `storage/resolution.rs`. Playbook runs and automations (`playbook_runs`, `automations`) are local tables, not archived. `V5` adds `events` / `event_entities`. |
+| `model/` | Domain types: `Investigation`, `Page`, `Source`, `Finding`, `Entity`, `Relationship`, `Resolution`, `Note`, `Artifact`, `TimelineEvent`, `Event`, `JobRecord`, `AgentRun`, `Proposal`, `Playbook`, `Marking`, `AuditEntry`, `Member`. Object/link/Action registries and Object View data in `ontology`. Search Around and graph visibility in `graph`. Resolution bags and suggestion rules in `resolution`. Overlay timeline, co-occurrence, and GeoJSON in `timeline` / `cooccur` / `geo`. Short references (`S-12`, `E-4`, `C-1`, `V-1`, `L-1`, …). No UI or storage code. |
+| `storage/` | `Store` wraps a SQLite connection: migrations, CRUD, applying collector output transactionally, loading a full `Workspace`. Graph query (`Store::search_around`) runs the same hop expansion as `model::search_around` on a loaded snapshot. Merge/unresolve lives in `storage/resolution.rs`. Playbook runs and automations (`playbook_runs`, `automations`) are local tables, not archived. `V5` adds `events` / `event_entities`. `V6` adds `investigations.marking`, append-only `audit_log`, and `investigation_members`. |
 | `files.rs` | Investigation directory layout and content-addressed snapshot storage. |
 | `collectors/` | `Collector` trait plus built-ins: DNS, RDAP, HTTP, TLS, certificate transparency, IP intelligence, repository, file, email, username, subdomain, optional API wrappers, and `[[collectors.external]]` sidecars. `diagnose` turns observations into structured readings. Collectors return a `CollectionOutput` and never touch the database. |
 | `ingest/` | STIX 2.1, MISP, CSV/JSON observables, and Evidence Batch parsing. Untrusted files are size-capped; malformed input is an error, not a panic. Timestamps and coordinates are parsed without panicking. |
@@ -67,7 +67,7 @@ A useful order:
 | `exchange/` | Versioned, path-independent import and export of investigations. |
 | `app/` | `App` owns config, store, workspace, job manager, and all UI state (including `GraphState` and `TimelineState`). Keys map to `Action`s; `App::dispatch` performs state transitions and side effects. Per-investigation `ui_state` restores the last view, page, and agent thread after restart. Long notes open `$EDITOR` / `$VISUAL` without a shell. |
 | `tui/` | Terminal setup and restore, the async event loop, theme, keymap, widgets, screens, and overlays. Rendering is a pure function of `App`. |
-| `cli/` | Clap definitions and non-TUI commands (`list`, `new`, `open`, `export`, `import`, `collect`, `ingest`, `playbook`, `watch`, `report`, `geojson`, `cooccur`, `doctor`, `config`). |
+| `cli/` | Clap definitions and non-TUI commands (`list`, `new`, `open`, `export`, `import`, `collect`, `ingest`, `playbook`, `watch`, `report`, `geojson`, `cooccur`, `marking`, `team`, `audit`, `doctor`, `config`). |
 
 ## Where to make a change
 
@@ -87,6 +87,7 @@ A useful order:
 | Change a screen | `tui/screens.rs`. Put the state change in `app/`, not in the widget. Object View is `View::Object`. Graph is `View::Graph` |
 | Change Search Around or graph caps | `model/graph.rs` (pure query), then `storage/graph.rs` (`Store::search_around`), then `app/graph.rs` and `tui/screens.rs` |
 | Change Events, overlay timeline, or co-occurrence | `model/event.rs`, `model/timeline.rs`, `model/cooccur.rs`, `storage/events.rs`, then Timeline screen / `os-int cooccur` |
+| Change markings, audit, or roles | `model/marking.rs`, `model/audit.rs`, `model/collaboration.rs`, `storage/audit.rs`, `storage/collaboration.rs`, then Overview / Audit / `os-int marking` / `os-int team` / [collaboration.md](collaboration.md) |
 | Change geo fields or GeoJSON | `model/geo.rs`, `src/geo/`, IP/RDAP collectors, `os-int export --format geojson` |
 | Change merge, unresolve, or suggestion rules | `model/resolution.rs` (bags + scoring), `storage/resolution.rs`, then `app/resolution.rs` and Object View |
 | Add a palette command | `app/commands.rs`, then handle the id in `App::run_command` |
@@ -153,6 +154,7 @@ Database rows store **relative** paths inside the investigation directory, so an
 | Collectors return batches and do not touch SQLite | The CLI and the TUI share one apply path, and collectors stay testable without a database. |
 | Evidence Batch sidecars instead of forking the crate | External connectors print versioned JSON on stdout; ingest parses it; apply stays in storage. |
 | Subprocesses go through `exec/` | One place enforces "no shell", timeouts, output bounds, cancellation, and redaction. |
+| Shared data dir + roles, not a sync server | SQLite WAL serializes writers. Last-write-wins with audit. Empty membership is single-user owner. |
 
 ## Glossary
 
@@ -168,6 +170,9 @@ Database rows store **relative** paths inside the investigation directory, so an
 | Proposal | A structured agent action waiting for the analyst to accept or reject it. |
 | Playbook | A YAML document of collect / Search Around / tool / template steps. Templates become pending proposals. |
 | Automation | A watch set that re-runs collect steps and proposes Actions on changes. It does not silently write findings. |
+| Marking | Traffic Light Protocol label on an investigation (or optionally an object). |
+| Audit | Append-only governance log (`L-n`). Distinct from the investigative Timeline. |
+| Role | `owner` / `analyst` / `reader` on an investigation when membership is listed. |
 | Batch | The `EvidenceBatch` / `CollectionOutput` a collector returns. Applied in one transaction. |
 | Short ref | `S-12` style id. Sequence number scoped to one investigation. |
 | Activity | `passive` or `active`. Built-in collectors are passive. Tools marked `active` are refused. |
@@ -181,6 +186,7 @@ Database rows store **relative** paths inside the investigation directory, so an
 - [Connectors](connectors.md)
 - [Playbooks](playbooks.md)
 - [Ontology Exchange Format](ontology-exchange.md)
+- [Collaboration](collaboration.md)
 - [Vision](../VISION.md)
 - [Phased roadmap](../PHASED_ROADMAP.md)
 - [Contributing](../CONTRIBUTING.md)

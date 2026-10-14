@@ -26,10 +26,11 @@ pub enum RefKind {
     Proposal,
     Resolution,
     Event,
+    Audit,
 }
 
 impl RefKind {
-    pub const ALL: [RefKind; 13] = [
+    pub const ALL: [RefKind; 14] = [
         RefKind::Page,
         RefKind::Source,
         RefKind::Finding,
@@ -43,6 +44,7 @@ impl RefKind {
         RefKind::Proposal,
         RefKind::Resolution,
         RefKind::Event,
+        RefKind::Audit,
     ];
 
     pub fn prefix(self) -> &'static str {
@@ -60,6 +62,7 @@ impl RefKind {
             RefKind::Proposal => "X",
             RefKind::Resolution => "V",
             RefKind::Event => "C",
+            RefKind::Audit => "L",
         }
     }
 
@@ -79,6 +82,7 @@ impl RefKind {
             RefKind::Proposal => "PROPOSAL",
             RefKind::Resolution => "RESOLUTION",
             RefKind::Event => "CASE-EVENT",
+            RefKind::Audit => "AUDIT",
         }
     }
 
@@ -149,7 +153,7 @@ impl FromStr for ShortRef {
 }
 
 static REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b([PSFENRATJQXVC])-(\d{1,7})\b").expect("reference pattern is valid")
+    Regex::new(r"(?i)\b([PSFENRATJQXVLC])-(\d{1,7})\b").expect("reference pattern is valid")
 });
 
 /// Finds every short reference cited in free text, in order of first appearance, without
@@ -208,12 +212,14 @@ mod tests {
 
     #[test]
     fn finds_refs_in_text_once() {
-        let input = "Cloudflare fronts the site [S-31][s-32]; see f-2 and again S-31.";
+        let input = "Cloudflare fronts the site [S-31][s-32]; see f-2 and again S-31. Audit L-4 and event C-8.";
         let actual = find_refs(input);
         let expected = vec![
             ShortRef::new(RefKind::Source, 31),
             ShortRef::new(RefKind::Source, 32),
             ShortRef::new(RefKind::Finding, 2),
+            ShortRef::new(RefKind::Audit, 4),
+            ShortRef::new(RefKind::Event, 8),
         ];
         assert_eq!(actual, expected);
     }

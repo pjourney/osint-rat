@@ -18,9 +18,10 @@ use crate::storage::Store;
 /// On-disk investigation archive version (`os-int-investigation`).
 ///
 /// Import rejects any archive whose `format_version` is greater than this value.
-/// Version 3 adds `data.events` (first-class Event objects). Version 2 added
-/// `data.resolutions`. Bump rules: `docs/ontology-exchange.md`.
-pub const FORMAT_VERSION: u32 = 3;
+/// Version 4 adds `data.audit`, `data.members`, and `investigation.marking`.
+/// Version 3 added `data.events`. Version 2 added `data.resolutions`.
+/// Bump rules: `docs/ontology-exchange.md`.
+pub const FORMAT_VERSION: u32 = 4;
 pub const MANIFEST_NAME: &str = "investigation.osint.json";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -44,11 +45,12 @@ impl ArchiveManifest {
 
 /// Writes `path/investigation.osint.json` plus a copy of the investigation files directory.
 pub fn export_investigation(
-    store: &Store,
+    store: &mut Store,
     investigation_id: Uuid,
     files_root: &Path,
     destination: &Path,
 ) -> Result<PathBuf> {
+    store.record_export(investigation_id, &destination.display().to_string())?;
     let data = store.load_investigation(investigation_id)?;
     export_data(&data, files_root, destination)
 }
@@ -189,6 +191,7 @@ fn reassign_ids(data: &mut InvestigationData) {
     let mut proposals = HashMap::new();
     let mut resolutions = HashMap::new();
     let mut events = HashMap::new();
+    let mut audit = HashMap::new();
     let mut threads = HashMap::new();
     for page in &mut data.pages {
         page.id = next_id(&mut pages, page.id);
@@ -242,6 +245,13 @@ fn reassign_ids(data: &mut InvestigationData) {
     for event in &mut data.events {
         event.id = next_id(&mut events, event.id);
         event.investigation_id = new_investigation;
+    }
+    for entry in &mut data.audit {
+        entry.id = next_id(&mut audit, entry.id);
+        entry.investigation_id = new_investigation;
+    }
+    for member in &mut data.members {
+        member.investigation_id = new_investigation;
     }
     for page in &mut data.pages {
         page.entity_id = mapped_opt(&entities, page.entity_id);
@@ -298,6 +308,12 @@ fn reassign_ids(data: &mut InvestigationData) {
         event.source_id = mapped_opt(&sources, event.source_id);
         event.page_id = mapped_opt(&pages, event.page_id);
         remap_uuid_list(&entities, &mut event.entity_ids);
+    }
+    for entry in &mut data.audit {
+        remap_uuid_list(&entities, &mut entry.target_ids);
+        remap_uuid_list(&resolutions, &mut entry.target_ids);
+        remap_uuid_list(&proposals, &mut entry.target_ids);
+        remap_uuid_list(&audit, &mut entry.target_ids);
     }
 }
 
@@ -445,9 +461,14 @@ mod tests {
         let text = fs::read_to_string(export_dir.join(MANIFEST_NAME)).expect("manifest");
         let manifest: ArchiveManifest = serde_json::from_str(&text).expect("parse");
         assert_eq!(manifest.format_version, FORMAT_VERSION);
-        assert_eq!(FORMAT_VERSION, 3);
+        assert_eq!(FORMAT_VERSION, 4);
         assert!(manifest.data.resolutions.is_empty());
         assert!(manifest.data.events.is_empty());
+        assert!(manifest.data.audit.is_empty());
+        assert_eq!(
+            imported.investigation.marking,
+            crate::model::Marking::Unmarked
+        );
     }
 
     #[test]
@@ -544,7 +565,7 @@ mod tests {
         export_data(&data, directory.path(), &export_dir).expect("export");
         let text = fs::read_to_string(export_dir.join(MANIFEST_NAME)).expect("manifest");
         let manifest: ArchiveManifest = serde_json::from_str(&text).expect("parse");
-        assert_eq!(manifest.format_version, 3);
+        assert_eq!(manifest.format_version, FORMAT_VERSION);
         assert_eq!(manifest.data.events.len(), 1);
         assert_eq!(manifest.data.events[0].entity_ids, vec![ip]);
         let mut target = Store::open_in_memory().expect("target");
@@ -670,6 +691,7 @@ mod tests {
             name: "Bad".into(),
             description: String::new(),
             tags: Vec::new(),
+            marking: crate::model::Marking::Unmarked,
             created_at: now(),
             updated_at: now(),
         });
@@ -697,5 +719,100 @@ mod tests {
             crate::paths::AppPaths::new(directory.path().join("c"), directory.path().join("d"));
         paths.ensure_dirs().expect("dirs");
         assert!(import_investigation(&mut store, &export_dir, &paths, false).is_err());
+    }
+
+    #[test]
+    fn export_import_preserves_marking_and_audit_and_rename_remaps_them() {
+        let mut store = Store::open_in_memory().expect("store");
+        store.set_identity(crate::model::Identity {
+            user_id: "owner".into(),
+            machine_name: "lab".into(),
+        });
+        let investigation = store.create_investigation("Marked", "").expect("created");
+        store
+            .set_marking(investigation.id, crate::model::Marking::TlpAmber)
+            .expect("mark");
+        let domain = store
+            .add_entity(
+                investigation.id,
+                crate::model::EntityKind::Domain,
+                "example.com",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("domain");
+        let host = store
+            .add_entity(
+                investigation.id,
+                crate::model::EntityKind::Hostname,
+                "example.com",
+                crate::model::Provenance::Collected,
+                None,
+            )
+            .expect("host");
+        store
+            .resolve_entities(
+                investigation.id,
+                &[domain, host],
+                domain,
+                "same host",
+                "owner",
+            )
+            .expect("merge");
+        let directory = tempfile::tempdir().expect("tempdir");
+        let export_dir = directory.path().join("archive");
+        crate::exchange::export_investigation(
+            &mut store,
+            investigation.id,
+            directory.path(),
+            &export_dir,
+        )
+        .expect("export");
+        let text = fs::read_to_string(export_dir.join(MANIFEST_NAME)).expect("manifest");
+        let manifest: ArchiveManifest = serde_json::from_str(&text).expect("parse");
+        assert_eq!(manifest.format_version, 4);
+        assert_eq!(
+            manifest.data.investigation.marking,
+            crate::model::Marking::TlpAmber
+        );
+        assert!(
+            manifest
+                .data
+                .audit
+                .iter()
+                .any(|entry| entry.kind == crate::model::AuditKind::EntitiesMerged)
+        );
+        assert!(
+            manifest
+                .data
+                .audit
+                .iter()
+                .any(|entry| entry.kind == crate::model::AuditKind::Export)
+        );
+        let mut target = Store::open_in_memory().expect("target");
+        let paths = crate::paths::AppPaths::new(
+            directory.path().join("cfg"),
+            directory.path().join("data"),
+        );
+        paths.ensure_dirs().expect("dirs");
+        let imported =
+            import_investigation(&mut target, &export_dir, &paths, false).expect("import");
+        assert_eq!(
+            imported.investigation.marking,
+            crate::model::Marking::TlpAmber
+        );
+        assert!(!imported.audit.is_empty());
+        let renamed = import_investigation(&mut store, &export_dir, &paths, true).expect("rename");
+        assert_ne!(renamed.investigation.id, investigation.id);
+        assert_eq!(
+            renamed.investigation.marking,
+            crate::model::Marking::TlpAmber
+        );
+        assert!(
+            renamed
+                .audit
+                .iter()
+                .all(|entry| entry.investigation_id == renamed.investigation.id)
+        );
     }
 }

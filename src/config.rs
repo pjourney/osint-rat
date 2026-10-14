@@ -47,6 +47,8 @@ pub struct Config {
     pub collectors: CollectorConfig,
     /// Built-in tools to hide, and passive programs you add yourself.
     pub tools: ToolsConfig,
+    /// Local actor recorded on audit rows. Empty values fall back to the environment.
+    pub identity: IdentityConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -153,6 +155,15 @@ impl Default for NetworkConfig {
             allow_private_redirects: false,
         }
     }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IdentityConfig {
+    /// Recorded as `actor` on audit rows. Defaults to `$USER` / `$USERNAME` / `local`.
+    pub user_id: String,
+    /// Recorded as `machine` on audit rows. Defaults to the hostname.
+    pub machine_name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -425,6 +436,12 @@ max_ingest_bytes = 20971520
 # timeout_seconds = 120
 # parser = "hostnames"
 # activity = "passive"
+
+[identity]
+# Local user id written on audit rows (defaults to $USER / $USERNAME / "local").
+# user_id = "analyst"
+# Machine name written on audit rows (defaults to the hostname).
+# machine_name = "workstation"
 "#;
 
 /// The result of loading configuration.
@@ -624,6 +641,14 @@ parser = "hostnames"
         assert!(loaded.created);
         assert!(path.exists());
         assert_eq!(loaded.config, Config::default());
+    }
+
+    #[test]
+    fn identity_section_parses() {
+        let input = "[identity]\nuser_id = \"pat\"\nmachine_name = \"lab-1\"\n";
+        let actual = Config::parse(input).expect("parses");
+        assert_eq!(actual.identity.user_id, "pat");
+        assert_eq!(actual.identity.machine_name, "lab-1");
     }
 
     #[test]

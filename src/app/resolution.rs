@@ -4,7 +4,7 @@ use color_eyre::eyre::{Result, bail, eyre};
 use uuid::Uuid;
 
 use super::{Action, App, Overlay, View};
-use crate::model::{AgentAction, Entity, ResolutionSuggestion, local_actor, suggest_resolutions};
+use crate::model::{AgentAction, Entity, ResolutionSuggestion, suggest_resolutions};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingResolve {
@@ -131,7 +131,7 @@ impl App {
             .as_ref()
             .ok_or_else(|| eyre!("no investigation"))?;
         let investigation_id = workspace.id();
-        let actor = local_actor();
+        let actor = self.store.identity().user_id.clone();
         self.store.resolve_entities(
             investigation_id,
             &pending.entity_ids,
@@ -187,7 +187,7 @@ impl App {
             self.status = "Nothing to unresolve.".into();
             return Ok(());
         };
-        let actor = local_actor();
+        let actor = self.store.identity().user_id.clone();
         self.store.unresolve_entities(resolution_id, &actor)?;
         self.reload()?;
         self.remap_focus_after_resolution();
@@ -265,12 +265,13 @@ impl App {
                     bail!("PROPOSE_RESOLVE needs at least two entities");
                 }
                 let canonical_id = ids[0];
+                let actor = self.store.identity().user_id.clone();
                 self.store.resolve_entities(
                     investigation_id,
                     &ids,
                     canonical_id,
                     reason,
-                    &local_actor(),
+                    &actor,
                 )?;
             }
             AgentAction::ProposeUnresolve { entity, .. } => {
@@ -280,8 +281,8 @@ impl App {
                     .latest_active_resolution(id)
                     .ok_or_else(|| eyre!("{entity} is not resolved"))?;
                 let resolution_id = resolution.id;
-                self.store
-                    .unresolve_entities(resolution_id, &local_actor())?;
+                let actor = self.store.identity().user_id.clone();
+                self.store.unresolve_entities(resolution_id, &actor)?;
             }
             _ => bail!("not a resolution action"),
         }
