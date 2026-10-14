@@ -36,7 +36,7 @@ directories = "6.0.0"
 futures = { version = "0.3.34", default-features = false, features = ["std", "async-await"] }
 hex = "0.4.3"
 hickory-resolver = "0.26.3"
-maxminddb = "0.27"
+maxminddb = "0.32"
 infer = "0.22.0"
 ratatui = "0.30.2"
 regex = "1.13.1"
