@@ -106,6 +106,7 @@ fn map_normal_key(key: KeyEvent, view: View, ctrl: bool) -> Option<Action> {
         KeyCode::Char('n') => Some(Action::NewItem),
         KeyCode::Char('e') => Some(Action::Edit),
         KeyCode::Char('r') => Some(Action::Refresh),
+        KeyCode::Char('v') => Some(Action::OpenObjectView),
         KeyCode::Char('o') if view == View::Welcome => Some(Action::Command("open_investigation")),
         KeyCode::Char('d') if view == View::Welcome => Some(Action::Command("doctor")),
         KeyCode::Char('c') if view == View::Jobs => Some(Action::Command("cancel_job")),
@@ -135,11 +136,16 @@ os-int keyboard shortcuts
   a            Ask agent          n          new investigation, page, or finding
   e            Edit notes in $EDITOR (Overview) or open Settings
   r            Run default collectors for this page
+  v            Object View for the selected entity or page
   c            Cancel the selected job (Jobs view)
   ?            This help
 
   1 Overview  2 Pages  3 Sources  4 Findings  5 Entities
   6 Timeline  7 Agent  8 Jobs     9 Tools     0 Settings
+
+Enter on Entities opens Object View (properties, catalogued
+links, sources, findings). Esc returns. Unknown link verbs
+appear under Other.
 
 Notes and Artifacts are in the Navigate column. On the welcome
 screen, o opens a case and d runs doctor.
@@ -184,6 +190,10 @@ mod tests {
         assert!(matches!(
             map_key(press(KeyCode::Char('r')), &overlay, View::Overview, false),
             Some(Action::Refresh)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('v')), &overlay, View::Entities, false),
+            Some(Action::OpenObjectView)
         ));
     }
 

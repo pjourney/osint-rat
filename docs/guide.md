@@ -166,6 +166,7 @@ Press `p` or `Ctrl+P`, then type to filter.
 | Generate Report | Markdown or JSON |
 | Add Finding / Add Note | Analyst-authored records |
 | Open Entities, Sources, Findings, Timeline, Jobs, Tools, Artifacts, Agent History | Jump to that screen |
+| Object View | Typed properties, catalogued links, sources, and findings for the selected entity or page (`v`) |
 | Configure Agent | Agent profile and theme |
 | Doctor | Environment checks |
 | Help | Keyboard overlay |
@@ -178,7 +179,7 @@ Press `p` or `Ctrl+P`, then type to filter.
 1. `n` on the welcome screen. Enter a name and an optional description. The description is used as the executive summary of a Markdown report.
 2. `n` again. Pick a page type with `Left` / `Right` and enter the target. The form shows an example for that type (`example.com`, `192.0.2.15`, `AS13335`, …).
 3. `r` on that page to collect.
-4. Move through Sources, Findings, and Entities. The detail pane shows the selected record.
+4. Move through Sources, Findings, and Entities. The detail pane shows the selected record. Press `Enter` on an entity (or `v` from Pages) to open **Object View**.
 5. `e` on Overview edits the current page's notes in your editor (`ui.editor`, then `$VISUAL`, then `$EDITOR`, then `vi`). os-int suspends the terminal UI, runs the editor, and reloads the note when the editor exits.
 6. Add a finding from the palette when you want to record a conclusion. Cite sources by short id (`S-1, S-4`). A finding you add this way is provenance `analyst`.
 
@@ -193,6 +194,17 @@ os-int open "Example Corp"
 `open` and most investigation arguments accept the name, the UUID, or a unique UUID prefix. `os-int list` prints name, id prefix, and counts of pages, sources, findings, and entities.
 
 Search (`/` or `Ctrl+F`) matches pages (title, target, notes), entities, findings, sources, artifacts, and agent runs. `Enter` jumps to the hit.
+
+### Object View
+
+Object View is the typed reading of one entity or page: property groups from the [ontology](ontology.md), linked objects grouped by catalog verb, supporting sources, and findings.
+
+- From **Entities**, press `Enter` or `v`.
+- From **Pages** or Overview, press `v` (uses the page's primary entity when it has one).
+- Palette: **Object View**.
+- `Esc` returns to the screen you came from.
+
+Identity is always shown, so every object has at least one property group. Known relationship verbs use the link-type catalog (`resolves_to`, `subdomain_of`, …). Unknown snake_case verbs still store and appear under **Other**. Accepting an agent Action records who and when; reserved Action kinds (`PROPOSE_RESOLVE` and the playbook stubs) stay refused.
 
 ## Collectors
 
@@ -532,6 +544,8 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `n` | normal | New investigation, page, or finding |
 | `e` | normal | Edit notes, or open settings |
 | `r` | normal | Run collectors for this page |
+| `v` | normal | Object View for the selected entity or page |
+| `Enter` | Entities | Open Object View |
 | `c` | Jobs | Cancel the selected job |
 | `?` | normal, overlays | Help |
 | `1` … `6` | normal | Overview, Pages, Sources, Findings, Entities, Timeline |
@@ -576,6 +590,7 @@ To report a vulnerability in os-int itself, follow [SECURITY.md](../SECURITY.md)
 - [README](../README.md) — install and a first session
 - [Examples](examples.md) — copy-paste investigations, tools, agents, and export
 - [FAQ](faq.md) — pages versus entities, badges, paths, and the cases that look like failures
+- [Ontology](ontology.md) — object types, link verbs, Actions, Object View
 - [Database tables](schema.md) — what each SQLite table stores
 - [Ontology Exchange Format](ontology-exchange.md) — export JSON, EvidenceBatch, and version bumps
 - [ARCHITECTURE.md](ARCHITECTURE.md) — module map and design decisions

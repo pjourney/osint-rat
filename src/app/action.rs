@@ -63,6 +63,8 @@ pub enum Action {
     OpenAgent,
     /// Jump to Overview.
     OpenOverview,
+    /// Open Object View for the selected entity or page.
+    OpenObjectView,
     /// Run a command-palette id. The ids are declared in `app::commands`.
     Command(&'static str),
     /// Confirm the open form or send the agent prompt.

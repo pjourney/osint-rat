@@ -554,6 +554,40 @@ fn proposals_store_actions() {
     assert_eq!(data.agent_runs.len(), 1);
     assert_eq!(data.proposals[0].status, ProposalStatus::Accepted);
     assert!(data.proposals[0].decided_at.is_some());
+    assert!(data.proposals[0].decided_by.is_some());
+}
+
+#[test]
+fn apply_batch_catalogues_known_and_custom_link_types() {
+    let (mut store, investigation) = store_with_investigation();
+    let mut batch = dns_batch("hash-catalog");
+    batch.relate(
+        &crate::model::EntityKey::new(EntityKind::Domain, "example.com"),
+        "spotted_near",
+        &crate::model::EntityKey::new(EntityKind::Ip, "192.0.2.10"),
+        None,
+    );
+    store
+        .apply_batch(
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            &batch,
+        )
+        .expect("applies");
+    let catalogued = store.list_link_types(investigation.id).expect("catalogued");
+    assert!(
+        catalogued
+            .iter()
+            .any(|item| item.kind == "resolves_to" && !item.description.is_empty())
+    );
+    assert!(
+        catalogued
+            .iter()
+            .any(|item| item.kind == "spotted_near" && item.is_other())
+    );
 }
 
 #[test]

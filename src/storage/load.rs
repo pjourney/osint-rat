@@ -13,7 +13,7 @@ use super::evidence::{
     insert_artifact_record, insert_finding_record, insert_source_record, insert_timeline_record,
     list_artifacts, list_findings, list_sources, list_timeline,
 };
-use super::graph::{list_entities, list_page_entities, list_relationships};
+use super::graph::{catalogue_link_type, list_entities, list_page_entities, list_relationships};
 use super::pages::{insert_note, insert_page, list_notes, list_pages};
 use super::rows::{id, json, ts};
 use crate::model::InvestigationData;
@@ -120,6 +120,11 @@ impl Store {
                     params![id(&relationship.id), id(source_id)],
                 )?;
             }
+            catalogue_link_type(
+                &transaction,
+                relationship.investigation_id,
+                &relationship.kind,
+            )?;
         }
         for finding in &data.findings {
             insert_finding_record(&transaction, finding)?;

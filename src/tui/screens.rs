@@ -8,7 +8,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 
 use crate::app::{App, Pane, View};
 use crate::doctor::CheckStatus;
-use crate::model::{Workspace, now};
+use crate::model::{LinkDirection, Workspace, now};
 use crate::sanitize::{sanitize_line, sanitize_text};
 
 use super::theme::Theme;
@@ -134,6 +134,7 @@ fn draw_main(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         View::Jobs => jobs(frame, area, app, theme, focused),
         View::Tools => tools(frame, area, app, theme, focused),
         View::Settings => settings(frame, area, app, theme, focused),
+        View::Object => object_view(frame, area, app, theme, focused),
     }
 }
 
@@ -251,6 +252,94 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
     frame.render_widget(
         Paragraph::new(lines)
             .block(pane_block("Overview", focused, theme))
+            .wrap(Wrap { trim: false })
+            .scroll((app.scroll, 0)),
+        area,
+    );
+}
+
+fn object_view(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
+    let Some(view) = app.current_object_view() else {
+        frame.render_widget(
+            Paragraph::new("Select an entity or page, then press v or Enter.")
+                .block(pane_block("Object", focused, theme)),
+            area,
+        );
+        return;
+    };
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(format!("{}  ", view.short_ref), theme.muted),
+            Span::styled(view.title.clone(), theme.title),
+            Span::raw(format!("  {}", view.object_label)),
+        ]),
+        Line::from(Span::styled(
+            "Properties, catalogued links, sources, and findings. Esc returns.",
+            theme.muted,
+        )),
+    ];
+    for group in &view.groups {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(group.label.clone(), theme.header)));
+        for property in &group.properties {
+            lines.push(Line::from(format!(
+                "  {:<16}  {}",
+                property.label,
+                truncate(&property.value, 56)
+            )));
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("Linked objects", theme.header)));
+    if view.links.is_empty() {
+        lines.push(Line::from(Span::styled("  (none)", theme.muted)));
+    }
+    for group in &view.links {
+        let suffix = if group.catalogued { "" } else { "  (other)" };
+        lines.push(Line::from(Span::styled(
+            format!("  {}{suffix}", group.label),
+            theme.header,
+        )));
+        for link in &group.links {
+            let arrow = match link.direction {
+                LinkDirection::Outgoing => format!("--{}-->", link.relationship_kind),
+                LinkDirection::Incoming => format!("<--{}--", link.relationship_kind),
+            };
+            lines.push(Line::from(format!(
+                "    {arrow}  {}  {}  {}",
+                link.entity_ref, link.entity_kind, link.entity_label
+            )));
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("Sources", theme.header)));
+    if view.sources.is_empty() {
+        lines.push(Line::from(Span::styled("  (none)", theme.muted)));
+    }
+    for source in &view.sources {
+        lines.push(Line::from(format!(
+            "  {}  [{}]  {}",
+            source.reference,
+            source.provenance,
+            truncate(&source.title, 48)
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("Findings", theme.header)));
+    if view.findings.is_empty() {
+        lines.push(Line::from(Span::styled("  (none)", theme.muted)));
+    }
+    for finding in &view.findings {
+        lines.push(Line::from(format!(
+            "  {}  [{}]  {}",
+            finding.reference,
+            finding.provenance,
+            truncate(&finding.title, 48)
+        )));
+    }
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(pane_block("Object", focused, theme))
             .wrap(Wrap { trim: false })
             .scroll((app.scroll, 0)),
         area,

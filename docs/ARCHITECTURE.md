@@ -51,7 +51,7 @@ A useful order:
 
 | Module | Responsibility |
 | --- | --- |
-| `model/` | Domain types: `Investigation`, `Page`, `Source`, `Finding`, `Entity`, `Relationship`, `Note`, `Artifact`, `TimelineEvent`, `JobRecord`, `AgentRun`, `Proposal`. Short references (`S-12`, `E-4`, …). No UI or storage code. |
+| `model/` | Domain types: `Investigation`, `Page`, `Source`, `Finding`, `Entity`, `Relationship`, `Note`, `Artifact`, `TimelineEvent`, `JobRecord`, `AgentRun`, `Proposal`. Object/link/Action registries and Object View data in `ontology`. Short references (`S-12`, `E-4`, …). No UI or storage code. |
 | `storage/` | `Store` wraps a SQLite connection: migrations, CRUD, applying collector output transactionally, loading a full `Workspace`. |
 | `files.rs` | Investigation directory layout and content-addressed snapshot storage. |
 | `collectors/` | `Collector` trait plus built-ins: DNS, RDAP, HTTP, TLS, certificate transparency, IP intelligence, repository, file. `diagnose` turns observations into structured readings. Collectors return a `CollectionOutput` and never touch the database. |
@@ -74,9 +74,10 @@ A useful order:
 | Add a diagnostic reading | `collectors/diagnose.rs`. Record gaps with `record_findings` so a later good reading clears them |
 | Add a built-in external tool | `tools/registry.rs` (`builtin_tools`). Keep `activity` passive |
 | Change how processes are spawned | `exec/` only. Callers pass an argv. They do not build shell strings |
-| Change what the agent is allowed to propose | `model/agent.rs` (`AgentAction`) and the instructions in `agent/context.rs` |
+| Change what the agent is allowed to propose | `model/agent.rs` (`AgentAction`), the Action catalog in `model/ontology.rs`, and the instructions in `agent/context.rs`. Reserved kinds stay refused on accept |
+| Change an object type, property schema, or link verb | `model/ontology.rs` and [ontology.md](ontology.md). Prefer a JSON property bag field over a new column |
 | Change a key binding | `tui/keymap.rs`, including `HELP_TEXT`, and the keyboard tables in the user guide |
-| Change a screen | `tui/screens.rs`. Put the state change in `app/`, not in the widget |
+| Change a screen | `tui/screens.rs`. Put the state change in `app/`, not in the widget. Object View is `View::Object` |
 | Add a palette command | `app/commands.rs`, then handle the id in `App::run_command` |
 | Add a report section | `report/`. Keep AI-written text labelled as inference |
 | Change the on-disk export | `exchange/`. Follow the bump rules in [ontology-exchange.md](ontology-exchange.md#format_version-bump-rules). Bump `FORMAT_VERSION` if older archives would no longer import, or if a new collection must survive round-trip |
@@ -160,6 +161,7 @@ Database rows store **relative** paths inside the investigation directory, so an
 - [User guide](guide.md)
 - [Examples](examples.md)
 - [Database tables](schema.md)
+- [Ontology](ontology.md)
 - [Ontology Exchange Format](ontology-exchange.md)
 - [Vision](../VISION.md)
 - [Phased roadmap](../PHASED_ROADMAP.md)

@@ -6,7 +6,14 @@ use rusqlite::{Connection, params};
 use crate::model::now;
 
 /// `(version, description, SQL)`.
-pub const MIGRATIONS: &[(i64, &str, &str)] = &[(1, "initial schema", V1)];
+pub const MIGRATIONS: &[(i64, &str, &str)] = &[
+    (1, "initial schema", V1),
+    (
+        2,
+        "ontology runtime: proposal audit actor and link-type catalog",
+        V2,
+    ),
+];
 
 const V1: &str = r#"
 CREATE TABLE investigations (
@@ -240,6 +247,21 @@ CREATE TABLE ui_state (
 );
 "#;
 
+/// Action audit actor on proposals, plus first-seen link verbs per investigation.
+/// Forward-only: do not edit. Property bags stay on `entities.fields`.
+const V2: &str = r#"
+ALTER TABLE proposals ADD COLUMN decided_by TEXT;
+
+CREATE TABLE link_types (
+    investigation_id TEXT NOT NULL REFERENCES investigations (id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    inverse TEXT,
+    first_seen_at TEXT NOT NULL,
+    PRIMARY KEY (investigation_id, kind)
+);
+"#;
+
 /// Applies all pending migrations inside individual transactions. Returns the number applied.
 pub fn migrate(connection: &mut Connection) -> rusqlite::Result<usize> {
     connection.execute_batch(
@@ -300,6 +322,77 @@ mod tests {
     }
 
     #[test]
+    fn v2_is_forward_only_and_preserves_v1_rows() {
+        let mut connection = Connection::open_in_memory().expect("in-memory db");
+        connection
+            .execute_batch(
+                "CREATE TABLE schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    description TEXT NOT NULL,
+                    applied_at TEXT NOT NULL
+                );",
+            )
+            .expect("migrations table");
+        connection.execute_batch(V1).expect("v1");
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, description, applied_at) VALUES (1, 'initial schema', ?1)",
+                params![now().to_rfc3339()],
+            )
+            .expect("record v1");
+        connection
+            .execute(
+                "INSERT INTO investigations (id, name, description, tags, created_at, updated_at)
+                 VALUES ('11111111-1111-4111-8111-111111111111', 'V1 Case', '', '[]', ?1, ?1)",
+                params![now().to_rfc3339()],
+            )
+            .expect("v1 investigation");
+        connection
+            .execute(
+                "INSERT INTO agent_runs (id, investigation_id, seq, thread_id, page_id, agent_name, program, args, question, response, status, error, focus, context_artifact_id, job_id, model, cost_usd, created_at, finished_at)
+                 VALUES ('22222222-2222-4222-8222-222222222222', '11111111-1111-4111-8111-111111111111', 1, '33333333-3333-4333-8333-333333333333', NULL, 'test', 'claude', '[]', 'q', '', 'succeeded', NULL, NULL, NULL, NULL, NULL, NULL, ?1, NULL)",
+                params![now().to_rfc3339()],
+            )
+            .expect("v1 run");
+        connection
+            .execute(
+                "INSERT INTO proposals (id, investigation_id, agent_run_id, seq, action, status, error, created_at, decided_at)
+                 VALUES ('44444444-4444-4444-8444-444444444444', '11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222', 1, '{\"action\":\"ADD_NOTE\",\"body\":\"hi\"}', 'accepted', NULL, ?1, ?1)",
+                params![now().to_rfc3339()],
+            )
+            .expect("v1 proposal");
+        assert_eq!(current_version(&connection).expect("v1 version"), 1);
+        let applied = migrate(&mut connection).expect("applies v2");
+        assert_eq!(applied, 1);
+        assert_eq!(current_version(&connection).expect("v2 version"), 2);
+        assert_eq!(migrate(&mut connection).expect("idempotent"), 0);
+        let decided_by: Option<String> = connection
+            .query_row(
+                "SELECT decided_by FROM proposals WHERE id = '44444444-4444-4444-8444-444444444444'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("survives");
+        assert!(decided_by.is_none());
+        let count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'link_types'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("link_types");
+        assert_eq!(count, 1);
+        let down: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version > 2",
+                [],
+                |row| row.get(0),
+            )
+            .expect("no down migration");
+        assert_eq!(down, 0);
+    }
+
+    #[test]
     fn schema_contains_core_tables() {
         let mut connection = Connection::open_in_memory().expect("in-memory db");
         migrate(&mut connection).expect("migrates");
@@ -310,6 +403,7 @@ mod tests {
             "findings",
             "entities",
             "relationships",
+            "link_types",
             "jobs",
             "agent_runs",
         ];

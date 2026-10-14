@@ -55,7 +55,7 @@ Paths inside `data` stay **relative** to the investigation directory. Export doe
 | `timeline` | Point-in-time events (`timeline_events`). |
 | `jobs` | Background work. `investigation_id` is optional on the struct; arguments are redacted. |
 | `agent_runs` | Questions sent to a local agent CLI and the replies. |
-| `proposals` | Structured `AgentAction` values with `pending` / `accepted` / `rejected` / `invalid`. |
+| `proposals` | Structured `AgentAction` values with `pending` / `accepted` / `rejected` / `invalid`. Optional `decided_by` (local actor) is present after accept/reject on current binaries; missing on version-1 archives. |
 | `page_entities` | `{ "page_id", "entity_id" }` links (`page_entities` table). A page’s `entity_id` is the primary subject and may be omitted from this list. |
 
 **Not exported:** `ui_state` (last view, last page, agent thread). That is local workbench chrome, not case evidence.
@@ -90,7 +90,7 @@ Timeline kinds today: `registration`, `expiration`, `updated`, `certificate_issu
 
 Built-in relationship verbs (`src/model/relationship.rs` `kinds`) include `resolves_to`, `alias_of`, `uses_nameserver`, `mail_handled_by`, `spf_includes`, `reverse_dns`, `announced_by`, `operated_by`, `registered_with`, `registered_to`, `redirects_to`, `serves`, `links_to`, `mentions`, `presents_certificate`, `issued_by`, `covers`, `subdomain_of`, `references`, `contributed_to`, `hosted_on`, `associated_with`, `contains`. Other `snake_case` verbs are stored as-is.
 
-Agent actions today: `ADD_FINDING`, `ADD_NOTE`, `CREATE_PAGE`, `LINK_ENTITY`, `RUN_COLLECTOR`, `GENERATE_REPORT`. Reserved future kinds (`PROPOSE_RESOLVE`, `PROPOSE_UNRESOLVE`, playbook steps) are not in the enum yet.
+Agent actions today: `ADD_FINDING`, `ADD_NOTE`, `CREATE_PAGE`, `LINK_ENTITY`, `RUN_COLLECTOR`, `GENERATE_REPORT`. Reserved kinds `PROPOSE_RESOLVE`, `PROPOSE_UNRESOLVE`, `RUN_PLAYBOOK`, and `ASSERT_FINDING_TEMPLATE` are in the enum and the Action catalog so they can be stored if parsed; accept is refused until those phases ship. Do not emit reserved kinds from collectors or the agent prompt. Catalog: [ontology.md](ontology.md).
 
 ### Import behavior (v1)
 
@@ -135,14 +135,14 @@ This is the ingest shape Phase 4 connectors will emit as JSON. It is **not** `in
 
 ## Today → intended v2 ontology
 
-v1 already stores a cited graph. Later phases promote that graph to first-class ontology types. Map existing fields; do not invent a second parallel model.
+v1 already stores a cited graph. Phase 1 registers object types, link verbs, and Action kinds against those existing fields. Later phases still map; do not invent a second parallel model.
 
 | v2 concept | Phase | v1 field(s) to extend | Reserved addition (not shipped) |
 | --- | --- | --- | --- |
-| **Object** | 1 | `data.entities`, `data.pages` | Typed property schemas on `kind`; required/optional fields documented in `docs/ontology.md`. Prefer JSON property bags over new columns. Keep UUIDs and `seq`. |
-| **Link** | 1 | `data.relationships` (`kind` is a free `snake_case` string) | Catalog metadata: description, inverse, allowed endpoint kinds. Unknown verbs still store, grouped as “Other”. |
+| **Object** | 1 | `data.entities`, `data.pages` | Typed property schemas on `kind` in `docs/ontology.md` and `model/ontology.rs`. Property bags stay `entities.fields`. UUIDs and `seq` unchanged. |
+| **Link** | 1 | `data.relationships` (`kind` is still a free `snake_case` string) | Catalog metadata: description, inverse, allowed endpoint kinds. Unknown verbs still store, grouped as “Other”. First-use rows go in SQLite `link_types` (not exported). |
 | **Event** | 6 | `data.timeline` (instant `occurred_at`) | Interval or instant Event objects; links from entities to events; co-occurrence. Do not replace `timeline` without a bump + import of v1 events. |
-| **Action** | 1, 5 | `data.proposals` + `AgentAction` | Catalog of action kinds (existing six plus reserved `PROPOSE_RESOLVE` / `PROPOSE_UNRESOLVE` / playbook steps). Audit fields (who / when). Automations propose; they do not silently write. |
+| **Action** | 1, 5 | `data.proposals` + `AgentAction` | Catalog of action kinds (existing six plus reserved resolve / playbook kinds). Optional `decided_by` plus existing `decided_at`. Automations propose; they do not silently write. |
 | **Resolution bag** | 3 | *(none)* | Canonical object + constituents; property writes tracked for unresolve. Never auto-merge. |
 | **Markings** | 7 | `investigation.tags` (free strings) | TLP (or confidentiality labels) on the investigation and optionally on objects. Visible in the UI and the manifest. |
 | **Audit** | 7 | *(none; jobs/proposals are not an audit log)* | Append-only merge / accept / playbook / export / marking events. |
@@ -167,7 +167,9 @@ Reserved **`EvidenceBatch` keys** for a future connector protocol: `objects`, `l
 
 ## `FORMAT_VERSION` bump rules
 
-`FORMAT_VERSION` lives in `src/exchange.rs`. Import rejects any archive whose `format_version` is **greater** than the running binary. Older archives must keep importing.
+`FORMAT_VERSION` lives in `src/exchange.rs` and remains **`1`**. Phase 1 added optional `proposals.decided_by` with `#[serde(default)]` and did not add a required collection, so the bump rules say stay at 1. Import still rejects any archive whose `format_version` is **greater** than the running binary. Older archives must keep importing.
+
+Checked-in proof: `tests/fixtures/archives/v1-minimal/investigation.osint.json` (no `decided_by`) plus `export_then_import_round_trips`. `--rename` ID behavior is unchanged: only the investigation UUID is rewritten.
 
 Cross-phase rule (roadmap): a format bump **and** import compatibility notes land in the same PR as the behavior change.
 
@@ -209,6 +211,7 @@ In the same PR:
 
 ## See also
 
+- [Ontology](ontology.md)
 - [Database tables](schema.md)
 - [Architecture — storage layout](ARCHITECTURE.md#storage-layout)
 - [Examples — export and import](examples.md#write-a-report-and-hand-the-case-over)

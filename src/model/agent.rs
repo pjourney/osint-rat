@@ -85,6 +85,28 @@ pub enum AgentAction {
         #[serde(default)]
         format: Option<String>,
     },
+    /// Reserved until entity resolution ships. Stored if parsed; accept is refused.
+    ProposeResolve {
+        entities: Vec<String>,
+        #[serde(default)]
+        reason: String,
+    },
+    /// Reserved until entity resolution ships. Stored if parsed; accept is refused.
+    ProposeUnresolve {
+        entity: String,
+        #[serde(default)]
+        reason: String,
+    },
+    /// Reserved until playbooks ship. Stored if parsed; accept is refused.
+    RunPlaybook {
+        playbook: String,
+    },
+    /// Reserved until playbooks ship. Stored if parsed; accept is refused.
+    AssertFindingTemplate {
+        title: String,
+        #[serde(default)]
+        details: String,
+    },
 }
 
 impl AgentAction {
@@ -96,7 +118,22 @@ impl AgentAction {
             AgentAction::LinkEntity { .. } => "LINK_ENTITY",
             AgentAction::RunCollector { .. } => "RUN_COLLECTOR",
             AgentAction::GenerateReport { .. } => "GENERATE_REPORT",
+            AgentAction::ProposeResolve { .. } => "PROPOSE_RESOLVE",
+            AgentAction::ProposeUnresolve { .. } => "PROPOSE_UNRESOLVE",
+            AgentAction::RunPlaybook { .. } => "RUN_PLAYBOOK",
+            AgentAction::AssertFindingTemplate { .. } => "ASSERT_FINDING_TEMPLATE",
         }
+    }
+
+    /// Reserved Action kinds are catalogued and may be stored, but must not apply yet.
+    pub fn is_reserved(&self) -> bool {
+        matches!(
+            self,
+            AgentAction::ProposeResolve { .. }
+                | AgentAction::ProposeUnresolve { .. }
+                | AgentAction::RunPlaybook { .. }
+                | AgentAction::AssertFindingTemplate { .. }
+        )
     }
 
     /// A one-line human description used in proposal lists.
@@ -126,6 +163,18 @@ impl AgentAction {
                     "▶ Generate {} report",
                     format.as_deref().unwrap_or("markdown")
                 )
+            }
+            AgentAction::ProposeResolve { entities, .. } => {
+                format!("◇ Propose resolve {}", entities.join(", "))
+            }
+            AgentAction::ProposeUnresolve { entity, .. } => {
+                format!("◇ Propose unresolve {entity}")
+            }
+            AgentAction::RunPlaybook { playbook } => {
+                format!("◇ Run playbook {playbook}")
+            }
+            AgentAction::AssertFindingTemplate { title, .. } => {
+                format!("◇ Finding template: {title}")
             }
         }
     }
@@ -182,6 +231,10 @@ pub struct Proposal {
     pub error: Option<String>,
     pub created_at: Timestamp,
     pub decided_at: Option<Timestamp>,
+    /// Who accepted or rejected the Action. Local user name for now; absent on pending rows
+    /// and on archives exported before this field existed.
+    #[serde(default)]
+    pub decided_by: Option<String>,
 }
 
 impl Proposal {

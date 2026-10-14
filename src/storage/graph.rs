@@ -9,8 +9,8 @@ use uuid::Uuid;
 use super::rows::{RowExt, id, json, ts};
 use super::{SeqTable, Store, next_seq, touch_investigation};
 use crate::model::{
-    Confidence, Entity, EntityKey, EntityKind, Fields, PageEntityLink, Provenance, Relationship,
-    normalize_relationship_kind, now,
+    CataloguedLink, Confidence, Entity, EntityKey, EntityKind, Fields, PageEntityLink, Provenance,
+    Relationship, normalize_relationship_kind, now,
 };
 
 /// Inserts an entity or returns the existing one with the same kind and canonical value.
@@ -163,7 +163,58 @@ pub(crate) fn upsert_relationship(
             ts(&now()),
         ],
     )?;
+    catalogue_link_type(connection, investigation_id, &kind)?;
     Ok((relationship_id, true))
+}
+
+/// Records a verb the first time it is used in an investigation. Built-in catalog
+/// metadata is copied; unknown snake_case verbs are stored with an empty description.
+pub(crate) fn catalogue_link_type(
+    connection: &Connection,
+    investigation_id: Uuid,
+    kind: &str,
+) -> rusqlite::Result<()> {
+    let recorded = CataloguedLink::from_first_use(kind);
+    connection.execute(
+        "INSERT OR IGNORE INTO link_types (investigation_id, kind, description, inverse, first_seen_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            id(&investigation_id),
+            recorded.kind,
+            recorded.description,
+            recorded.inverse,
+            ts(&now()),
+        ],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn backfill_link_catalog(connection: &Connection) -> rusqlite::Result<()> {
+    let mut statement =
+        connection.prepare("SELECT DISTINCT investigation_id, kind FROM relationships")?;
+    let rows = statement.query_map([], |row| Ok((row.uuid(0)?, row.get::<_, String>(1)?)))?;
+    for row in rows {
+        let (investigation_id, kind) = row?;
+        catalogue_link_type(connection, investigation_id, &kind)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn list_link_types(
+    connection: &Connection,
+    investigation_id: Uuid,
+) -> rusqlite::Result<Vec<CataloguedLink>> {
+    let mut statement = connection.prepare(
+        "SELECT kind, description, inverse FROM link_types WHERE investigation_id = ?1 ORDER BY kind",
+    )?;
+    let rows = statement.query_map(params![id(&investigation_id)], |row| {
+        Ok(CataloguedLink {
+            kind: row.get(0)?,
+            description: row.get(1)?,
+            inverse: row.get(2)?,
+        })
+    })?;
+    rows.collect()
 }
 
 pub(crate) fn link_relationship_source(

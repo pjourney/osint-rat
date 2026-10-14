@@ -32,7 +32,7 @@ It orchestrates information, tools, sources, and agents. Built-in collectors cov
 | **New here** | [Install](#install), then [your first investigation](#your-first-investigation) |
 | **Day to day** | [How a case is organized](#how-a-case-is-organized), [keyboard](#keyboard), [command line](#command-line) |
 | **Going further** | [Vision](VISION.md) · [Phased roadmap](PHASED_ROADMAP.md) · [User guide](docs/guide.md) · [Examples](docs/examples.md) · [FAQ](docs/faq.md) · [Ontology exchange](docs/ontology-exchange.md) |
-| **Contributing** | [Architecture](docs/ARCHITECTURE.md) · [Database tables](docs/schema.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) |
+| **Contributing** | [Architecture](docs/ARCHITECTURE.md) · [Ontology](docs/ontology.md) · [Database tables](docs/schema.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) |
 
 ---
 
@@ -142,7 +142,7 @@ Investigation
   └── Pages          one subject each (domain, IP, URL, file, …)
         ├── Sources        raw observations, with provenance
         ├── Entities       normalized identifiers (example.com, 93.184.216.34)
-        ├── Relationships  typed links between entities (resolves_to, redirects_to, …)
+        ├── Relationships  typed links from the link-type catalog (resolves_to, redirects_to, …)
         ├── Findings       claims, each citing the sources that support them
         ├── Notes          your writing, or a note accepted from an agent
         ├── Artifacts      saved bodies, context packs, reports
@@ -175,6 +175,7 @@ The screen has a navigation column, a main pane, and (on a wide terminal) a deta
 | `n` | New investigation, page, or finding, depending on the screen |
 | `e` | Edit the current page notes in `$EDITOR`, or open agent and theme settings |
 | `r` | Run the default collectors for the current page |
+| `v` | Object View for the selected entity or page |
 | `c` | Cancel the selected job (Jobs screen) |
 | `?` | Help |
 | `1`–`6` | Overview, Pages, Sources, Findings, Entities, Timeline |

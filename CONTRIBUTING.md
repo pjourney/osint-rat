@@ -46,6 +46,7 @@ These three commands stay required. Phase work is merge-gated: do not start phas
 | Task | Location |
 | --- | --- |
 | A new record field | `src/model/`, then `src/storage/` |
+| An object type, property, or link verb | `src/model/ontology.rs` and [docs/ontology.md](docs/ontology.md) |
 | A passive collector or diagnostic | `src/collectors/` |
 | A built-in external tool | `src/tools/registry.rs` |
 | Process spawning, timeouts, redaction | `src/exec/` |

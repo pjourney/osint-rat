@@ -156,8 +156,8 @@ pub(crate) fn insert_proposal_record(
     proposal: &Proposal,
 ) -> rusqlite::Result<()> {
     connection.execute(
-        "INSERT INTO proposals (id, investigation_id, agent_run_id, seq, action, status, error, created_at, decided_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO proposals (id, investigation_id, agent_run_id, seq, action, status, error, created_at, decided_at, decided_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             id(&proposal.id),
             id(&proposal.investigation_id),
@@ -168,6 +168,7 @@ pub(crate) fn insert_proposal_record(
             proposal.error,
             ts(&proposal.created_at),
             opt_ts(&proposal.decided_at),
+            proposal.decided_by,
         ],
     )?;
     Ok(())
@@ -178,7 +179,7 @@ pub(crate) fn list_proposals(
     investigation_id: Uuid,
 ) -> rusqlite::Result<Vec<Proposal>> {
     let mut statement = connection.prepare(
-        "SELECT id, investigation_id, agent_run_id, seq, action, status, error, created_at, decided_at
+        "SELECT id, investigation_id, agent_run_id, seq, action, status, error, created_at, decided_at, decided_by
          FROM proposals WHERE investigation_id = ?1 ORDER BY seq",
     )?;
     let rows = statement.query_map(params![id(&investigation_id)], |row| {
@@ -192,6 +193,7 @@ pub(crate) fn list_proposals(
             error: row.get(6)?,
             created_at: row.timestamp(7)?,
             decided_at: row.opt_timestamp(8)?,
+            decided_by: row.get(9)?,
         })
     })?;
     rows.collect()
@@ -294,6 +296,7 @@ impl Store {
                 error,
                 created_at: now(),
                 decided_at: None,
+                decided_by: None,
             };
             insert_proposal_record(&transaction, &proposal)?;
             proposals.push(proposal);
@@ -308,14 +311,17 @@ impl Store {
         status: ProposalStatus,
         error: Option<&str>,
     ) -> Result<()> {
-        let decided_at = (status != ProposalStatus::Pending).then(now);
+        let decided = status != ProposalStatus::Pending;
+        let decided_at = decided.then(now);
+        let decided_by = decided.then(crate::model::local_actor);
         self.connection().execute(
-            "UPDATE proposals SET status = ?2, error = ?3, decided_at = ?4 WHERE id = ?1",
+            "UPDATE proposals SET status = ?2, error = ?3, decided_at = ?4, decided_by = ?5 WHERE id = ?1",
             params![
                 id(&proposal_id),
                 status.as_str(),
                 error,
-                opt_ts(&decided_at)
+                opt_ts(&decided_at),
+                decided_by,
             ],
         )?;
         Ok(())

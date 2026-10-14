@@ -301,6 +301,42 @@ mod tests {
     }
 
     #[test]
+    fn imports_checked_in_v1_archive_without_format_bump_fields() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/archives/v1-minimal/investigation.osint.json");
+        let mut store = Store::open_in_memory().expect("store");
+        let paths = crate::paths::AppPaths::new(
+            directory.path().join("cfg"),
+            directory.path().join("data"),
+        );
+        paths.ensure_dirs().expect("dirs");
+        let imported =
+            import_investigation(&mut store, &fixture, &paths, false).expect("import v1");
+        assert_eq!(imported.investigation.name, "v1 fixture");
+        assert_eq!(imported.pages.len(), 1);
+        assert_eq!(imported.entities.len(), 2);
+        assert_eq!(imported.relationships[0].kind, "resolves_to");
+        assert!(imported.proposals.is_empty());
+        let catalogued = store
+            .list_link_types(imported.investigation.id)
+            .expect("catalogued");
+        assert!(catalogued.iter().any(|item| item.kind == "resolves_to"));
+        let view = crate::model::ObjectView::for_entity(
+            &crate::model::Workspace::new(imported.clone()),
+            &imported.entities[0],
+        );
+        assert!(view.groups.iter().any(|group| group.id == "identity"));
+        assert!(view.links.iter().any(|group| group.catalogued));
+        let export_dir = directory.path().join("re-export");
+        export_data(&imported, directory.path(), &export_dir).expect("re-export");
+        let text = fs::read_to_string(export_dir.join(MANIFEST_NAME)).expect("manifest");
+        let manifest: ArchiveManifest = serde_json::from_str(&text).expect("parse");
+        assert_eq!(manifest.format_version, FORMAT_VERSION);
+        assert_eq!(FORMAT_VERSION, 1);
+    }
+
+    #[test]
     fn import_rejects_path_escape() {
         let directory = tempfile::tempdir().expect("tempdir");
         let mut data = InvestigationData::empty(Investigation {

@@ -16,7 +16,7 @@
 | Phase | Name | Status |
 | --- | --- | --- |
 | 0 | Foundation & vision freeze | Done ([#4](https://github.com/pjourney/osint-rat/pull/4)) |
-| 1 | Ontology runtime v1 | Not started |
+| 1 | Ontology runtime v1 | In progress |
 | 2 | Graph & Search Around | Not started |
 | 3 | Entity resolution | Not started |
 | 4 | Ingest plane & connectors | Not started |
