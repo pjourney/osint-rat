@@ -104,6 +104,7 @@ async fn collect(target: &Target, context: &CollectorContext) -> CollectResult {
     let options = FetchOptions {
         max_body_bytes: context.net.settings.max_body_bytes,
         accept: Some("application/json"),
+        extra_headers: Vec::new(),
     };
     let response = fetch(&context.net, &url, &options, &context.job.cancel)
         .await

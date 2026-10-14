@@ -268,8 +268,8 @@ Press `r` or run `os-int collect` without `--collector` to run the **default** s
 | `ip` | ip | yes | Reverse DNS, origin ASN, prefix, and registry country, using Team Cymru's public DNS interface. |
 | `repository` | repository | yes, if `git` is on `PATH` | Remotes, commits, contributors, and referenced hosts. `gh` is used for GitHub metadata when it is installed. Clones are shallow and stored inside the investigation. |
 | `file` | file | yes | SHA-256, MIME type, and timestamps. ExifTool metadata when `exiftool` is installed. |
-| `email` | email | yes | Hosted domain, local-part username, `hosted_on` / `associated_with`. No network. |
-| `username` | username | yes | Public profile URL checks (GitHub, GitLab, Codeberg, Reddit, Hacker News, Keybase). Present URLs become `associated_with`. |
+| `email` | email | yes | Hosted domain, local-part username, `hosted_on` / `associated_with`. No invented website URL. No network. |
+| `username` | username | yes | Public profile URL checks (GitHub, GitLab, Codeberg, Reddit, Hacker News, Keybase). 2xx responses become `associated_with`; 3xx is not a hit. |
 | `subdomain` | domain | yes | Passive expansion (common prefixes plus optional `subfinder` / `amass -passive`) with `subdomain_of` / `resolves_to` under `max_subdomains`. |
 
 When RDAP is missing or thin, the RDAP collector merges a structured WHOIS parse if `whois` is installed.
@@ -306,11 +306,11 @@ The repository collector runs `git` with an empty credential helper. It does not
 
 Warnings (a single DNS query timed out, `robots.txt` returned an error) are attached to the job and printed by `collect`. They do not discard the rest of the batch.
 
-Sidecars that print Evidence Batch JSON are `[[collectors.external]]`. Optional URLScan / OTX wrappers are `[[collectors.api]]` and stay off until enabled. See [connectors.md](connectors.md).
+Sidecars that print Evidence Batch JSON are `[[collectors.external]]`. Optional URLScan / OTX wrappers are `[[collectors.api]]`; they stay off until enabled and are never in the default collector set. See [connectors.md](connectors.md).
 
 ## Ingest
 
-`os-int ingest` (workbench: `i`) parses a STIX 2.1 bundle, a MISP event, a CSV/JSON observable list, or an Evidence Batch file and applies it through the same transaction as a collector. Every imported record cites a source with provenance `external`. Identical re-ingest is idempotent.
+`os-int ingest` (workbench: `i`) parses a STIX 2.1 bundle, a MISP event, a CSV/JSON observable list, or an Evidence Batch file and applies it through the same transaction as a collector. Every imported source and finding is provenance `external`. A batch cannot claim `agent` provenance or clear collected diagnostics with `resolved_findings`. Identical re-ingest is idempotent.
 
 ```bash
 os-int ingest tests/fixtures/ingest/stix-bundle.json --format stix --investigation "Example Corp"
@@ -318,7 +318,7 @@ os-int ingest tests/fixtures/ingest/misp-event.json --format misp
 os-int ingest tests/fixtures/ingest/observables.csv --format csv
 ```
 
-`--format` is guessed from the file name when omitted. `--map kind=type,value=indicator` and `--kind domain` cover bulk CSV/JSON. Esc on the ingest form restores the entity selection; Enter applies and keeps that selection (canonical id after a merge). Caps, encoding, and the sidecar protocol: [connectors.md](connectors.md).
+`--format` is guessed from the file name when omitted. `--map kind=type,value=indicator` and `--kind domain` cover bulk CSV/JSON. Esc on the ingest form restores the entity selection; Enter applies and keeps that selection (canonical id after a merge). An empty path or a parse error leaves the form open. Caps, encoding, and the sidecar protocol: [connectors.md](connectors.md).
 
 The in-repo sidecar example is [`examples/connectors/hello-batch/`](../examples/connectors/hello-batch/).
 

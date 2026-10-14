@@ -147,8 +147,8 @@ This is the ingest shape connectors emit as JSON. It is **not** `investigation.o
 | `relationships` | `NewRelationship`: `from` / `to` (`EntityKey`), `kind`, `sources` (indexes), `confidence`. |
 | `timeline` | `NewTimelineEvent`: `occurred_at`, `kind`, `title`, `description`, `source`, `entity`. |
 | `artifacts` | `NewArtifact`: `kind`, `name`, relative `path`, `mime`, `size_bytes`, `sha256`, `fields`, `source`. |
-| `findings` | `NewCollectedFinding`: `title`, `details`, `confidence`, `source`. Provenance is always `collected` when applied. |
-| `resolved_findings` | Titles of collected findings that no longer apply (a later `present` reading). |
+| `findings` | `NewCollectedFinding`: `title`, `details`, `confidence`, `source`, `provenance`. Built-in diagnostics are `collected` (upsert / clear). File and sidecar ingest forces `external` and does not use the collected-diagnostic upsert path. |
+| `resolved_findings` | Titles of collected findings that no longer apply (a later `present` reading). Honored only when every source in the batch is `collected`. File/sidecar ingest ignores this field. |
 | `summary` | One-line human summary for the job result. |
 
 `SourceKey` is a `usize` index into `sources`, not a UUID. Entity identity in a batch is `EntityKey` (kind + normalized value), not a UUID. Apply upserts entities on `(kind, canonical value)` and relationships on `(from, kind, to)`. A source with the same collector, title, URL, and content hash is marked seen again instead of inserted (`find_duplicate_source`). A new hash of a prior observation (same collector, title, and URL) inserts a `changed` timeline event.

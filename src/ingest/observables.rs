@@ -181,6 +181,8 @@ fn ingest_rows(
             break;
         }
         if row.iter().all(|cell| cell.trim().is_empty()) {
+            report.skipped += 1;
+            report.warnings.push(format!("row {index}: empty row"));
             continue;
         }
         let value = spec
@@ -329,11 +331,7 @@ fn parse_csv(text: &str) -> Result<Vec<Vec<String>>, IngestError> {
             }
             '\n' => {
                 row.push(std::mem::take(&mut field));
-                if row.iter().any(|cell| !cell.is_empty()) {
-                    rows.push(std::mem::take(&mut row));
-                } else {
-                    row.clear();
-                }
+                rows.push(std::mem::take(&mut row));
             }
             '\r' => {}
             other => field.push(other),
@@ -427,5 +425,31 @@ mod tests {
     #[test]
     fn unterminated_quote_is_an_error() {
         assert!(parse_csv("\"hello").is_err());
+    }
+
+    #[test]
+    fn csv_skip_count_includes_empty_rows() {
+        let input = "kind,value\ndomain,ok.example\n,\n\n  ,  \nip,192.0.2.9\n";
+        let actual =
+            parse_csv_observables(input, &ObservableMapping::default(), "skip.csv").expect("parse");
+        assert!(
+            actual
+                .batch
+                .entities
+                .iter()
+                .any(|entity| entity.key.value == "ok.example")
+        );
+        assert!(
+            actual
+                .batch
+                .entities
+                .iter()
+                .any(|entity| entity.key.value == "192.0.2.9")
+        );
+        assert!(
+            actual.skipped >= 2,
+            "empty and blank value rows must count as skipped, got {}",
+            actual.skipped
+        );
     }
 }

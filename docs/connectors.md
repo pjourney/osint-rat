@@ -2,7 +2,7 @@
 
 Anything an analyst already has can become cited ontology objects and links. Collectors still return an [`EvidenceBatch`](ontology-exchange.md#evidence-batch-collector--future-connector-payload). `storage::apply` writes it in one transaction. This page is the external / file ingest contract.
 
-Built-in collectors stay **passive-only**. Sidecars and tools marked `active` are refused. AI only proposes Actions. Provenance on ingested records is `external` unless the batch sets another value; collected findings stay `collected`.
+Built-in collectors stay **passive-only**. Sidecars and tools marked `active` are refused. AI only proposes Actions. File and sidecar ingest always stores sources and findings as provenance `external`. A batch cannot claim `agent`, `analyst`, or `collected`. `resolved_findings` is ignored on this path (built-in collectors still use it to clear collected diagnostics). Unsafe `snapshot_path` / artifact `path` values are rejected.
 
 ## Evidence Batch envelope
 
@@ -89,7 +89,7 @@ In the workbench: `i` or palette **Ingest file**. Left/Right cycles the format. 
 | CSV / JSON | Observables with column mapping. Email rows also emit `hosted_on`. |
 | Batch | Envelope or raw `EvidenceBatch`. |
 
-Every imported source is cited on the objects and links it produced. Provenance is `external`.
+Every imported source and finding is cited on the objects and links it produced. Provenance is `external` (never `collected` or `agent`).
 
 Sample fixtures: [`tests/fixtures/ingest/`](../tests/fixtures/ingest/).
 
@@ -99,8 +99,8 @@ Still passive. They return a batch; they do not write SQLite.
 
 | Id | Accepts | Default | What it records |
 | --- | --- | --- | --- |
-| `email` | email | yes | Local-part username, hosted domain, `hosted_on` / `associated_with`. No network. |
-| `username` | username | yes | Public profile URL GETs (GitHub, GitLab, Codeberg, Reddit, Hacker News, Keybase). 2xx/3xx → `associated_with`. Cap: `collectors.max_username_profiles` (8). |
+| `email` | email | yes | Local-part username, hosted domain, `hosted_on` / `associated_with`. No invented website URL. No network. |
+| `username` | username | yes | Public profile URL GETs (GitHub, GitLab, Codeberg, Reddit, Hacker News, Keybase). 2xx → `associated_with`. 3xx is not a hit. Cap: `collectors.max_username_profiles` (8). |
 | `subdomain` | domain | yes | Common prefixes plus optional `subfinder` / `amass -passive` via the tool registry. DNS A/AAAA. Catalog verbs `subdomain_of` and `resolves_to` (not `mentions`). Cap: `collectors.max_subdomains` (80). |
 | RDAP | domain, ip, asn | yes | Unchanged. When RDAP is missing or thin (no nameservers / contacts / registration edges), a structured `whois` parse is merged if `whois` is on `PATH`. |
 
@@ -108,7 +108,7 @@ Custom tool parsers (`hostnames`, `ips`, `urls`, `lines`) promote the same catal
 
 ## Optional API connectors
 
-Off until enabled. Keys from `api_key_env` (preferred) or `api_key`. Keys are redacted in source content and job command lines.
+Off until enabled, and never in the default “run all” set even when enabled. Fetches go through the shared `NetContext` client (cancel + public-to-private redirect policy). Keys from `api_key_env` (preferred) or `api_key`. Keys are redacted in source content and job command lines.
 
 ```toml
 [[collectors.api]]

@@ -18,6 +18,7 @@ use crate::model::{
     NewEntity, NewRelationship, NewSource, NewTimelineEvent, Provenance, SourceKind, TimelineKind,
     now,
 };
+use crate::paths::is_safe_relative_path;
 use crate::sanitize::sanitize_text;
 
 pub const BATCH_FORMAT: &str = "os-int-evidence-batch";
@@ -142,12 +143,15 @@ fn read_batch(value: &Value, origin: &str, report: &mut IngestReport) -> Result<
             }
         }
     }
-    if let Some(resolved) = object.get("resolved_findings").and_then(Value::as_array) {
-        for title in resolved {
-            if let Some(title) = title.as_str().filter(|title| !title.trim().is_empty()) {
-                report.batch.resolved_findings.push(title.to_string());
-            }
-        }
+    if let Some(resolved) = object.get("resolved_findings").and_then(Value::as_array)
+        && resolved
+            .iter()
+            .any(|title| title.as_str().is_some_and(|title| !title.trim().is_empty()))
+    {
+        report.warnings.push(
+            "ignored resolved_findings on file/sidecar ingest (honored only from built-in collectors)"
+                .into(),
+        );
     }
     if let Some(summary) = object.get("summary").and_then(Value::as_str) {
         report.batch.summary = sanitize_text(summary).into_owned();
@@ -184,15 +188,16 @@ fn read_source(value: &Value, origin: &str) -> Result<NewSource, IngestError> {
             Some(sha256_hex(source.content.as_bytes()))
         }
     });
-    source.snapshot_path = string_field(value, "snapshot_path");
-    source.fields = read_fields(value.get("fields"));
-    if let Some(provenance) = value
-        .get("provenance")
-        .and_then(Value::as_str)
-        .and_then(Provenance::parse)
-    {
-        source.provenance = provenance;
+    if let Some(path) = string_field(value, "snapshot_path") {
+        if !is_safe_relative_path(&path) {
+            return Err(IngestError::new(format!(
+                "source snapshot_path {path:?} is not a safe relative path"
+            )));
+        }
+        source.snapshot_path = Some(path);
     }
+    source.fields = read_fields(value.get("fields"));
+    source.provenance = Provenance::External;
     if let Some(retrieved) = value
         .get("retrieved_at")
         .and_then(Value::as_str)
@@ -286,6 +291,11 @@ fn read_artifact(value: &Value) -> Result<NewArtifact, IngestError> {
     let name = string_field(value, "name").unwrap_or_else(|| "artifact".into());
     let path = string_field(value, "path")
         .ok_or_else(|| IngestError::new("artifact is missing a relative path"))?;
+    if !is_safe_relative_path(&path) {
+        return Err(IngestError::new(format!(
+            "artifact path {path:?} is not a safe relative path"
+        )));
+    }
     Ok(NewArtifact {
         kind: value
             .get("kind")
@@ -324,6 +334,7 @@ fn read_finding(value: &Value) -> Result<NewCollectedFinding, IngestError> {
             .get("source")
             .and_then(Value::as_u64)
             .map(|key| key as usize),
+        provenance: Provenance::External,
     })
 }
 
@@ -450,5 +461,50 @@ mod tests {
         let huge_rel = r#"{"relationships":[{"from":{"kind":"domain"}}]}"#;
         let actual = parse_batch_json(huge_rel.as_bytes(), "x").expect("partial");
         assert_eq!(actual.skipped, 1);
+    }
+
+    #[test]
+    fn untrusted_batch_cannot_set_agent_provenance() {
+        let input = r#"{
+            "sources": [{"kind": "document", "title": "claimed", "provenance": "agent", "content": "x"}],
+            "findings": [{"title": "AI finding", "provenance": "agent"}]
+        }"#;
+        let actual = parse_batch_json(input.as_bytes(), "evil.json").expect("parse");
+        assert_eq!(actual.batch.sources[0].provenance, Provenance::External);
+        assert_eq!(actual.batch.findings[0].provenance, Provenance::External);
+    }
+
+    #[test]
+    fn untrusted_resolved_findings_are_ignored() {
+        let input = r#"{
+            "sources": [{"title": "s", "content": "body"}],
+            "resolved_findings": ["example.com spf"]
+        }"#;
+        let actual = parse_batch_json(input.as_bytes(), "evil.json").expect("parse");
+        assert!(actual.batch.resolved_findings.is_empty());
+        assert!(
+            actual
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("resolved_findings"))
+        );
+    }
+
+    #[test]
+    fn unsafe_snapshot_and_artifact_paths_are_rejected() {
+        let snapshot = r#"{"sources":[{"title":"s","snapshot_path":"../../etc/passwd"}]}"#;
+        let actual = parse_batch_json(snapshot.as_bytes(), "x.json").expect("source skipped");
+        assert_eq!(actual.skipped, 1);
+        assert!(actual.batch.sources.is_empty());
+        let artifact = r#"{"artifacts":[{"name":"passwd","path":"../../etc/passwd"}]}"#;
+        let actual = parse_batch_json(artifact.as_bytes(), "x.json").expect("artifact skipped");
+        assert_eq!(actual.skipped, 1);
+        assert!(actual.batch.artifacts.is_empty());
+        let safe = r#"{"sources":[{"title":"s","snapshot_path":"snapshots/ab/abcdef.bin"}]}"#;
+        let actual = parse_batch_json(safe.as_bytes(), "x.json").expect("safe");
+        assert_eq!(
+            actual.batch.sources[0].snapshot_path.as_deref(),
+            Some("snapshots/ab/abcdef.bin")
+        );
     }
 }

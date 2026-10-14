@@ -33,14 +33,13 @@ pub fn parse_stix(text: &str, origin: &str) -> Result<IngestReport, IngestError>
         .push("object_count", objects.len().to_string());
     let key = report.batch.add_source(source);
     let mut id_to_key: Vec<(String, EntityKey)> = Vec::new();
-    for (index, object) in objects.iter().enumerate() {
-        if index >= MAX_OBJECTS {
-            report.skipped += objects.len() - MAX_OBJECTS;
-            report
-                .warnings
-                .push(format!("truncated STIX objects at {MAX_OBJECTS}"));
-            break;
-        }
+    if objects.len() > MAX_OBJECTS {
+        report.skipped += objects.len() - MAX_OBJECTS;
+        report
+            .warnings
+            .push(format!("truncated STIX objects at {MAX_OBJECTS}"));
+    }
+    for object in objects.iter().take(MAX_OBJECTS) {
         let type_name = object
             .get("type")
             .and_then(Value::as_str)
@@ -50,14 +49,18 @@ pub fn parse_stix(text: &str, origin: &str) -> Result<IngestReport, IngestError>
             "observed-data" => ingest_observed_data(object, key, &mut report, &mut id_to_key),
             "malware" => ingest_malware(object, key, &mut report, &mut id_to_key),
             "identity" => ingest_identity(object, key, &mut report, &mut id_to_key),
-            "relationship" => ingest_relationship(object, key, &mut report, &id_to_key),
-            "bundle" | "marking-definition" | "" => {}
+            "relationship" | "bundle" | "marking-definition" | "" => {}
             other => {
                 report.skipped += 1;
                 report
                     .warnings
                     .push(format!("skipped STIX object type {other}"));
             }
+        }
+    }
+    for object in objects.iter().take(MAX_OBJECTS) {
+        if object.get("type").and_then(Value::as_str) == Some("relationship") {
+            ingest_relationship(object, key, &mut report, &id_to_key);
         }
     }
     report.batch.summary = format!(
@@ -114,7 +117,7 @@ fn ingest_indicator(
         "{}\npattern: {pattern}",
         string(object, "description").unwrap_or_default()
     );
-    report.batch.add_finding(
+    report.batch.add_external_finding(
         sanitize_line(&name).into_owned(),
         sanitize_text(&details).into_owned(),
         Confidence::Medium,
@@ -133,20 +136,20 @@ fn ingest_observed_data(
     ids: &mut Vec<(String, EntityKey)>,
 ) {
     let sco = object.get("objects").and_then(Value::as_object);
+    let mut first_sco = None;
     if let Some(map) = sco {
         for nested in map.values() {
             if let Some(key) = sco_to_entity(nested, source, report) {
+                if first_sco.is_none() {
+                    first_sco = Some(key.clone());
+                }
                 remember_id(nested, key, ids);
             }
         }
     }
-    remember_id(
-        object,
-        report
-            .batch
-            .entity(EntityKind::Unknown, &fallback_id(object), Some(source)),
-        ids,
-    );
+    if let Some(first) = first_sco {
+        remember_id(object, first, ids);
+    }
 }
 
 fn ingest_malware(
@@ -164,7 +167,7 @@ fn ingest_malware(
         report.batch.annotate(&key, "description", description);
     }
     report.batch.label(&key, name.clone());
-    report.batch.add_finding(
+    report.batch.add_external_finding(
         format!("malware: {name}"),
         string(object, "description").unwrap_or_default(),
         Confidence::Medium,
@@ -421,7 +424,44 @@ mod tests {
                 .batch
                 .findings
                 .iter()
-                .any(|finding| finding.title.contains("bad domain"))
+                .any(|finding| finding.title.contains("bad domain")
+                    && finding.provenance == Provenance::External)
+        );
+        assert!(
+            actual
+                .batch
+                .findings
+                .iter()
+                .all(|finding| finding.provenance == Provenance::External)
+        );
+        assert!(
+            !actual
+                .batch
+                .entities
+                .iter()
+                .any(|entity| entity.key.kind == EntityKind::Unknown
+                    && entity.key.value.starts_with("observed-data--"))
+        );
+    }
+
+    #[test]
+    fn relationship_before_sdos_still_resolves() {
+        let input = r#"{
+          "type": "bundle",
+          "objects": [
+            {"type": "relationship", "id": "relationship--1", "source_ref": "malware--x",
+             "target_ref": "identity--org", "relationship_type": "attributed-to"},
+            {"type": "identity", "id": "identity--org", "name": "Example Org", "identity_class": "organization"},
+            {"type": "malware", "id": "malware--x", "name": "example-malware"}
+          ]
+        }"#;
+        let actual = parse_stix(input, "order.json").expect("parse");
+        assert!(
+            actual
+                .batch
+                .relationships
+                .iter()
+                .any(|relationship| relationship.kind == relation::OPERATED_BY)
         );
     }
 

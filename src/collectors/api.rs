@@ -109,7 +109,7 @@ impl Collector for ApiConnector {
     }
 
     fn runs_by_default(&self) -> bool {
-        true
+        false
     }
 
     fn collect<'a>(
@@ -202,47 +202,25 @@ async fn fetch_with_key(
     api_key: Option<&str>,
     header_name: &str,
 ) -> Result<Vec<u8>, String> {
+    let mut extra_headers = Vec::new();
+    if let Some(key) = api_key {
+        extra_headers.push((header_name.to_string(), key.to_string()));
+    }
     let options = FetchOptions {
         max_body_bytes: context.net.settings.max_body_bytes,
         accept: Some("application/json"),
+        extra_headers,
     };
-    let _ = (api_key, header_name);
-    // Header injection for API keys goes through reqwest on the shared client. When a key is
-    // present we append it as a query-less header via a one-off request builder.
-    if let Some(key) = api_key {
-        let request = context
-            .net
-            .http
-            .get(url.as_str())
-            .header(header_name, key)
-            .header("accept", "application/json");
-        context.job.command("GET", &[redact_value(url.as_str())]);
-        let response = request
-            .send()
-            .await
-            .map_err(|error| format!("API request failed: {error}"))?;
-        let status = response.status().as_u16();
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| format!("API response failed: {error}"))?;
-        if status == 401 || status == 403 {
-            return Err(format!(
-                "API connector refused the configured key (HTTP {status})"
-            ));
-        }
-        if !(200..300).contains(&status) {
-            return Err(format!("API connector failed: HTTP {status}"));
-        }
-        let cap = context.net.settings.max_body_bytes;
-        let body = if bytes.len() > cap {
-            bytes[..cap].to_vec()
-        } else {
-            bytes.to_vec()
-        };
-        return Ok(body);
-    }
     let response = fetch(context.net.as_ref(), url, &options, &context.job.cancel).await?;
+    if let Some(reason) = response.blocked_redirect {
+        return Err(reason);
+    }
+    if response.status == 401 || response.status == 403 {
+        return Err(format!(
+            "API connector refused the configured key (HTTP {})",
+            response.status
+        ));
+    }
     if !response.is_success() {
         return Err(format!("API connector failed: HTTP {}", response.status));
     }
@@ -336,6 +314,7 @@ fn redact_secrets(text: &str, api_key: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::collectors::Collector;
 
     #[test]
     fn urlscan_results_become_references() {
@@ -394,5 +373,34 @@ mod tests {
                 .expect_err("id")
                 .contains("unknown")
         );
+    }
+
+    #[test]
+    fn enabled_connectors_are_not_run_by_default() {
+        let config = ApiConnectorConfig {
+            id: "urlscan".into(),
+            enabled: true,
+            ..ApiConnectorConfig::default()
+        };
+        let connector = ApiConnector::from_config(&config).expect("enabled");
+        assert!(!connector.runs_by_default());
+        let tools = crate::tools::ToolRegistry::detect(&crate::config::ToolsConfig::default());
+        let mut config = crate::config::Config::default();
+        config.collectors.api.push(ApiConnectorConfig {
+            id: "urlscan".into(),
+            enabled: true,
+            ..ApiConnectorConfig::default()
+        });
+        let registry = crate::collectors::CollectorRegistry::from_config(&config);
+        let default_collectors = registry.defaults_for(crate::model::TargetKind::Domain, &tools);
+        let defaults: Vec<&str> = default_collectors
+            .iter()
+            .map(|collector| collector.id())
+            .collect();
+        assert!(
+            !defaults.contains(&"urlscan"),
+            "enabled API connectors must stay out of the default set: {defaults:?}"
+        );
+        assert!(registry.find("urlscan").is_some());
     }
 }

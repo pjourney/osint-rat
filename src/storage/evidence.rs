@@ -8,9 +8,10 @@ use super::graph::load_links;
 use super::rows::{RowExt, id, json, opt_id, opt_ts, ts};
 use super::{SeqTable, Store, next_seq, touch_investigation};
 use crate::model::{
-    Artifact, ArtifactKind, Confidence, Finding, NewArtifact, NewSource, Provenance, Source,
-    SourceKind, TimelineEvent, TimelineKind, Timestamp, now,
+    Artifact, ArtifactKind, Confidence, Finding, NewArtifact, NewCollectedFinding, NewSource,
+    Provenance, Source, SourceKind, TimelineEvent, TimelineKind, Timestamp, now,
 };
+use crate::paths::is_safe_relative_path;
 
 /// A source to be inserted, with its investigation context.
 #[derive(Clone, Debug)]
@@ -88,7 +89,11 @@ pub(crate) fn insert_source(
         author: input.author.clone(),
         collector: input.collector.clone(),
         content_hash: input.content_hash.clone(),
-        snapshot_path: input.snapshot_path.clone(),
+        snapshot_path: input
+            .snapshot_path
+            .as_deref()
+            .filter(|path| is_safe_relative_path(path))
+            .map(ToString::to_string),
         content: input.content.clone(),
         fields: input.fields.clone(),
         notes: String::new(),
@@ -263,6 +268,58 @@ pub(crate) fn sync_collected_finding(
     Ok(FindingSync::Created)
 }
 
+/// Inserts an ingested (non-collected) finding. Never updates or deletes collected diagnostics.
+pub(crate) fn insert_ingested_finding(
+    connection: &Connection,
+    investigation_id: Uuid,
+    page_id: Option<Uuid>,
+    finding: &NewCollectedFinding,
+    source_ids: &[Uuid],
+) -> rusqlite::Result<FindingSync> {
+    if finding_by_title_and_provenance(
+        connection,
+        investigation_id,
+        &finding.title,
+        finding.provenance,
+    )?
+    .is_some()
+    {
+        return Ok(FindingSync::LeftAlone);
+    }
+    let timestamp = now();
+    let record = Finding {
+        id: Uuid::new_v4(),
+        investigation_id,
+        seq: next_seq(connection, SeqTable::Findings, investigation_id)?,
+        page_id,
+        title: finding.title.trim().to_string(),
+        details: finding.details.trim_end().to_string(),
+        confidence: finding.confidence,
+        provenance: finding.provenance,
+        source_ids: source_ids.to_vec(),
+        created_at: timestamp,
+        updated_at: timestamp,
+    };
+    insert_finding_record(connection, &record)?;
+    Ok(FindingSync::Created)
+}
+
+fn finding_by_title_and_provenance(
+    connection: &Connection,
+    investigation_id: Uuid,
+    title: &str,
+    provenance: Provenance,
+) -> rusqlite::Result<Option<Uuid>> {
+    connection
+        .query_row(
+            "SELECT id FROM findings WHERE investigation_id = ?1 AND title = ?2 AND provenance = ?3
+             ORDER BY seq DESC LIMIT 1",
+            params![id(&investigation_id), title, provenance.as_str()],
+            |row| row.uuid(0),
+        )
+        .optional()
+}
+
 /// Deletes a collected finding with this title. Other provenances are kept.
 pub(crate) fn clear_collected_finding(
     connection: &Connection,
@@ -422,6 +479,9 @@ pub(crate) fn insert_artifact(
         .optional()?;
     if let Some(existing_id) = existing.and_then(|value| Uuid::parse_str(&value).ok()) {
         return Ok((existing_id, false));
+    }
+    if !is_safe_relative_path(&input.path) {
+        return Ok((Uuid::nil(), false));
     }
     let artifact = Artifact {
         id: Uuid::new_v4(),

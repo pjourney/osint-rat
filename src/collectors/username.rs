@@ -86,10 +86,11 @@ async fn collect(target: &Target, context: &CollectorContext) -> CollectResult {
         let options = FetchOptions {
             max_body_bytes: 8 * 1024,
             accept: Some("text/html,application/json;q=0.8,*/*;q=0.1"),
+            extra_headers: Vec::new(),
         };
         match fetch(&context.net, &url, &options, &context.job.cancel).await {
             Ok(response) => {
-                let present = (200..400).contains(&response.status);
+                let present = profile_is_present(response.status);
                 hits.push(ProfileHit {
                     site: (*site).to_string(),
                     url: response.final_url.to_string(),
@@ -108,6 +109,11 @@ async fn collect(target: &Target, context: &CollectorContext) -> CollectResult {
     let mut output = CollectionOutput::new(build_batch(target, &hits));
     output.warnings = warnings;
     Ok(output)
+}
+
+/// A public profile is present only on a 2xx response. 3xx redirects are not treated as a hit.
+pub fn profile_is_present(status: u16) -> bool {
+    (200..300).contains(&status)
 }
 
 /// Builds the evidence batch from profile hits. Pure and unit-tested.
@@ -206,6 +212,28 @@ mod tests {
             PROFILE_TEMPLATES
                 .iter()
                 .any(|(site, url)| *site == "GitHub" && url.contains("{username}"))
+        );
+    }
+
+    #[test]
+    fn redirects_are_not_present_profiles() {
+        assert!(profile_is_present(200));
+        assert!(!profile_is_present(302));
+        assert!(!profile_is_present(301));
+        assert!(!profile_is_present(404));
+        let target = Target::Username("octocat".into());
+        let hits = vec![ProfileHit {
+            site: "GitHub".into(),
+            url: "https://github.com/octocat".into(),
+            status: 302,
+            present: profile_is_present(302),
+        }];
+        let actual = build_batch(&target, &hits);
+        assert!(
+            !actual
+                .relationships
+                .iter()
+                .any(|relationship| relationship.kind == "associated_with")
         );
     }
 }

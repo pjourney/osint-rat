@@ -68,9 +68,6 @@ pub fn build_batch(target: &Target) -> EvidenceBatch {
     if !domain.is_empty() {
         let domain_key = batch.entity(EntityKind::Domain, &domain, Some(key));
         batch.relate(&subject, relation::HOSTED_ON, &domain_key, Some(key));
-        let mx_hint = format!("https://{domain}/");
-        let url = batch.entity(EntityKind::Url, &mx_hint, Some(key));
-        batch.relate(&domain_key, relation::SERVES, &url, Some(key));
     }
     if crate::model::Target::parse(TargetKind::Username, &local).is_ok() {
         let username = batch.entity(EntityKind::Username, &local, Some(key));
@@ -109,6 +106,18 @@ mod tests {
                 .as_deref()
                 .unwrap_or("")
                 .is_empty()
+        );
+        assert!(
+            !actual
+                .relationships
+                .iter()
+                .any(|relationship| relationship.kind == relation::SERVES)
+        );
+        assert!(
+            !actual
+                .entities
+                .iter()
+                .any(|entity| entity.key.kind == EntityKind::Url)
         );
     }
 }

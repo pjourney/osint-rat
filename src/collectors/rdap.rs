@@ -140,6 +140,7 @@ async fn collect_rdap(target: &Target, context: &CollectorContext) -> CollectRes
     let options = FetchOptions {
         max_body_bytes: RESPONSE_MAX_BYTES,
         accept: Some(RDAP_ACCEPT),
+        extra_headers: Vec::new(),
     };
     let response = fetch(&context.net, &url, &options, &context.job.cancel).await?;
     if response.status == 404 {
@@ -193,6 +194,7 @@ async fn load_bootstrap(
     let options = FetchOptions {
         max_body_bytes: BOOTSTRAP_MAX_BYTES,
         accept: Some("application/json"),
+        extra_headers: Vec::new(),
     };
     let response = match fetch(&context.net, &url, &options, &context.job.cancel).await {
         Ok(response) if response.is_success() => response,

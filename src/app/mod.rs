@@ -1101,6 +1101,10 @@ impl App {
                 self.overlay = Overlay::None;
                 self.ask_agent(&question)?;
             }
+            Overlay::Form(form) if form.kind == FormKind::Ingest => {
+                let form = form.clone();
+                self.submit_ingest_form(form)?;
+            }
             Overlay::Form(form) => {
                 let form = form.clone();
                 self.overlay = Overlay::None;
@@ -1196,7 +1200,7 @@ impl App {
                 self.reload()?;
             }
             FormKind::Ingest => {
-                self.submit_ingest(&values)?;
+                self.submit_ingest_form(form)?;
             }
             FormKind::SettingsAgent => {
                 self.config.agent.active = values[0].clone();
@@ -2369,7 +2373,30 @@ impl App {
         self.overlay = Overlay::Form(ingest_form());
     }
 
-    fn submit_ingest(&mut self, values: &[String]) -> Result<()> {
+    fn submit_ingest_form(&mut self, form: FormState) -> Result<()> {
+        let values: Vec<String> = form
+            .fields
+            .iter()
+            .map(|field| field.value.value.trim().to_string())
+            .collect();
+        let path = values.get(1).map(String::as_str).unwrap_or("");
+        if path.is_empty() {
+            self.status = "Ingest needs a file path.".into();
+            return Ok(());
+        }
+        match self.apply_ingest(&values) {
+            Ok(()) => {
+                self.overlay = Overlay::None;
+                Ok(())
+            }
+            Err(error) => {
+                self.status = error.to_string();
+                Ok(())
+            }
+        }
+    }
+
+    fn apply_ingest(&mut self, values: &[String]) -> Result<()> {
         let workspace = self
             .workspace
             .as_ref()
@@ -2379,10 +2406,6 @@ impl App {
         )
         .ok_or_else(|| eyre!("unknown ingest format"))?;
         let path = values.get(1).map(String::as_str).unwrap_or("").trim();
-        if path.is_empty() {
-            bail_status(&mut self.status, "Ingest needs a file path.");
-            return Ok(());
-        }
         let selected = self.selected;
         let entity_id = self.entity_id;
         let max_bytes = self.config.collectors.max_ingest_bytes;
@@ -3782,5 +3805,40 @@ mod tests {
         if let Some(id) = focused {
             assert_eq!(app.entity_id, Some(workspace.canonical_id(id)));
         }
+    }
+
+    #[test]
+    fn ingest_form_keeps_overlay_on_empty_path_and_invalid_file() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let paths = AppPaths::new(
+            directory.path().join("config.toml"),
+            directory.path().join("data"),
+        );
+        paths.ensure_dirs().expect("dirs");
+        let store = Store::open(&paths.database()).expect("store");
+        let mut app = App::new(Config::default(), paths, store);
+        create_named_investigation(&mut app, "Ingest Valid");
+        app.dispatch(Action::Command("ingest")).expect("i");
+        app.dispatch(Action::Submit).expect("empty enter");
+        assert!(
+            matches!(
+                app.overlay,
+                Overlay::Form(ref form) if form.kind == FormKind::Ingest
+            ),
+            "empty path must leave the ingest form open"
+        );
+        assert!(app.status.to_lowercase().contains("path"));
+        if let Overlay::Form(form) = &mut app.overlay {
+            form.fields[1].value.set("/no/such/ingest-file.json");
+        }
+        app.dispatch(Action::Submit).expect("missing enter");
+        assert!(
+            matches!(
+                app.overlay,
+                Overlay::Form(ref form) if form.kind == FormKind::Ingest
+            ),
+            "a missing ingest file must leave the form open"
+        );
+        assert!(!app.status.is_empty());
     }
 }

@@ -296,6 +296,13 @@ mod tests {
             stix_report.batch.sources[0].provenance,
             crate::model::Provenance::External
         );
+        assert!(
+            stix_report
+                .batch
+                .findings
+                .iter()
+                .all(|finding| finding.provenance == crate::model::Provenance::External)
+        );
         assert!(!stix_report.batch.entities.is_empty());
         assert!(
             !stix_report.batch.sources[0]
@@ -327,6 +334,15 @@ mod tests {
         store
             .apply_batch(context, &stix_report.batch)
             .expect("stix apply");
+        let after_stix = store
+            .load_investigation(investigation.id)
+            .expect("stix load");
+        assert!(
+            after_stix
+                .findings
+                .iter()
+                .all(|finding| finding.provenance == crate::model::Provenance::External)
+        );
         store
             .apply_batch(context, &misp_report.batch)
             .expect("misp apply");

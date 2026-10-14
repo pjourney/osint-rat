@@ -64,7 +64,7 @@ The new page shares the investigation with the domain, so relationships such as 
 
 ## Collect an email or a username
 
-The email pack is local (hosted domain + local-part username, `hosted_on` / `associated_with`). The username pack GETs well-known public profile URLs; 2xx/3xx responses become `associated_with` links.
+The email pack is local (hosted domain + local-part username, `hosted_on` / `associated_with`). The username pack GETs well-known public profile URLs; 2xx responses become `associated_with` links (3xx is not a hit).
 
 ```bash
 os-int-learn collect email alice@example.com --investigation "Example Corp"
