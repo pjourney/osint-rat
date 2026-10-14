@@ -17,7 +17,7 @@
 | --- | --- | --- |
 | 0 | Foundation & vision freeze | Done ([#4](https://github.com/pjourney/osint-rat/pull/4)) |
 | 1 | Ontology runtime v1 | Done ([#5](https://github.com/pjourney/osint-rat/pull/5)) |
-| 2 | Graph & Search Around | Not started |
+| 2 | Graph & Search Around | Done ([#6](https://github.com/pjourney/osint-rat/pull/6)) |
 | 3 | Entity resolution | Not started |
 | 4 | Ingest plane & connectors | Not started |
 | 5 | Playbooks & automations | Not started |
@@ -115,11 +115,11 @@ Deliver a commercial link-analysis graph surface: explore the ontology visually 
 
 ### Success criteria
 
-- [ ] From a domain investigation with real relationships, user can open Graph, see connected infra, and Search Around ≥2 hops without crashing.
-- [ ] Caps enforced; facet filter changes visible set.
-- [ ] Keyboard + palette documented; `?` help updated.
-- [ ] Search Around pure logic unit-tested (hop counts, filters, caps).
-- [ ] No regression in table Entities view; CI green.
+- [x] From a domain investigation with real relationships, user can open Graph, see connected infra, and Search Around ≥2 hops without crashing.
+- [x] Caps enforced; facet filter changes visible set.
+- [x] Keyboard + palette documented; `?` help updated.
+- [x] Search Around pure logic unit-tested (hop counts, filters, caps).
+- [x] No regression in table Entities view; CI green.
 
 ### How to complete
 

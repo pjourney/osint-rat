@@ -8,7 +8,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 
 use crate::app::{App, Pane, View};
 use crate::doctor::CheckStatus;
-use crate::model::{LinkDirection, Workspace, now};
+use crate::model::{FacetAxis, GraphFilters, LinkDirection, Workspace, layout_columns, now};
 use crate::sanitize::{sanitize_line, sanitize_text};
 
 use super::theme::Theme;
@@ -135,6 +135,7 @@ fn draw_main(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         View::Tools => tools(frame, area, app, theme, focused),
         View::Settings => settings(frame, area, app, theme, focused),
         View::Object => object_view(frame, area, app, theme, focused),
+        View::Graph => graph(frame, area, app, theme, focused),
     }
 }
 
@@ -344,6 +345,196 @@ fn object_view(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused:
             .scroll((app.scroll, 0)),
         area,
     );
+}
+
+fn graph(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
+    let rows = Layout::vertical([
+        Constraint::Length(4),
+        Constraint::Min(8),
+        Constraint::Length(area.height.saturating_div(3).max(6)),
+    ])
+    .split(area);
+    let visible = app.visible_graph();
+    let chips = app.graph_facet_chips();
+    let mut facet_lines = vec![Line::from(Span::styled(graph_title(app), theme.header))];
+    facet_lines.push(graph_facet_line(app, &chips, theme));
+    facet_lines.push(Line::from(Span::styled(
+        graph_filter_line(&app.graph.filters),
+        theme.muted,
+    )));
+    frame.render_widget(
+        Paragraph::new(facet_lines)
+            .block(pane_block("Facets", focused, theme))
+            .wrap(Wrap { trim: false }),
+        rows[0],
+    );
+    frame.render_widget(
+        Paragraph::new(graph_canvas_lines(app, &visible, theme))
+            .block(pane_block("Neighborhood", focused, theme))
+            .wrap(Wrap { trim: false }),
+        rows[1],
+    );
+    let items: Vec<String> = visible
+        .nodes
+        .iter()
+        .map(|node| graph_node_row(app, node.id, node.hop))
+        .collect();
+    let selected = if visible.nodes.is_empty() {
+        0
+    } else {
+        app.graph
+            .selected
+            .min(visible.nodes.len().saturating_sub(1))
+    };
+    frame.render_widget(
+        list_from(items, selected, theme).block(pane_block("Nodes", focused, theme)),
+        rows[2],
+    );
+}
+
+fn graph_title(app: &App) -> String {
+    let result = &app.graph.result;
+    let cap = if result.truncated { " · capped" } else { "" };
+    format!(
+        "{} hop(s) · {} nodes · {} edges · cap {}/{}{cap}",
+        app.graph.hops,
+        result.nodes.len(),
+        result.edges.len(),
+        result.node_cap,
+        result.edge_cap
+    )
+}
+
+fn graph_facet_line(app: &App, chips: &[crate::model::FacetChip], theme: &Theme) -> Line<'static> {
+    if chips.is_empty() {
+        return Line::from(Span::styled("No facets yet.", theme.muted));
+    }
+    let mut spans = Vec::new();
+    let mut last_axis = None;
+    for (index, chip) in chips.iter().enumerate() {
+        if last_axis.is_some() && last_axis != Some(chip.axis) {
+            spans.push(Span::styled(" │ ", theme.muted));
+        } else if index > 0 {
+            spans.push(Span::raw("  "));
+        }
+        last_axis = Some(chip.axis);
+        let active = match chip.axis {
+            FacetAxis::Kind => app.graph.filters.kind.as_deref() == Some(chip.key.as_str()),
+            FacetAxis::Link => app.graph.filters.link_type.as_deref() == Some(chip.key.as_str()),
+            FacetAxis::Provenance => app
+                .graph
+                .filters
+                .provenance
+                .is_some_and(|provenance| provenance.as_str() == chip.key),
+        };
+        let cursor = index == app.graph.facet_index;
+        let label = format!("{}:{}", chip.label, chip.count);
+        let style = if cursor {
+            theme.selected
+        } else if active {
+            theme.header
+        } else {
+            Style::default()
+        };
+        spans.push(Span::styled(label, style));
+    }
+    Line::from(spans)
+}
+
+fn graph_filter_line(filters: &GraphFilters) -> String {
+    if filters.is_empty() {
+        return "[ ]/] facet   f apply   x clear   +/- hops   s Search Around".into();
+    }
+    let mut parts = Vec::new();
+    if let Some(kind) = &filters.kind {
+        parts.push(format!("kind={kind}"));
+    }
+    if let Some(link) = &filters.link_type {
+        parts.push(format!("link={link}"));
+    }
+    if let Some(provenance) = filters.provenance {
+        parts.push(format!("prov={}", provenance.badge()));
+    }
+    format!("Filter {}   x clear", parts.join(" · "))
+}
+
+fn graph_canvas_lines(
+    app: &App,
+    visible: &crate::model::VisibleGraph,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
+    let _ = theme;
+    if visible.nodes.is_empty() {
+        return vec![Line::from(
+            "No nodes. Collect on a domain page, then press g or s.".to_string(),
+        )];
+    }
+    let Some(workspace) = app.workspace.as_ref() else {
+        return vec![Line::from("No investigation.".to_string())];
+    };
+    let selected = visible.nodes.get(app.graph.selected).map(|node| node.id);
+    let columns = layout_columns(&visible.nodes);
+    let mut lines = Vec::new();
+    let header: String = columns
+        .iter()
+        .map(|(hop, _)| format!("Hop {hop:<12}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    lines.push(Line::from(header));
+    let height = columns
+        .iter()
+        .map(|(_, ids)| ids.len())
+        .max()
+        .unwrap_or(0)
+        .min(12);
+    for row in 0..height {
+        let mut cells = Vec::new();
+        for (_, ids) in &columns {
+            let cell = ids
+                .get(row)
+                .and_then(|id| workspace.entity(*id))
+                .map(|entity| {
+                    let mark = if selected == Some(entity.id) {
+                        "*"
+                    } else {
+                        " "
+                    };
+                    format!(
+                        "{mark}{:<14}",
+                        truncate(
+                            &format!("{} {}", entity.short_ref(), entity.display_name()),
+                            14
+                        )
+                    )
+                })
+                .unwrap_or_else(|| " ".repeat(16));
+            cells.push(cell);
+        }
+        lines.push(Line::from(cells.join(" ")));
+    }
+    let extra = columns
+        .iter()
+        .map(|(_, ids)| ids.len().saturating_sub(height))
+        .sum::<usize>();
+    if extra > 0 {
+        lines.push(Line::from(format!("  +{extra} more in the node list")));
+    }
+    lines
+}
+
+fn graph_node_row(app: &App, id: uuid::Uuid, hop: u32) -> String {
+    let Some(workspace) = app.workspace.as_ref() else {
+        return format!("hop {hop}");
+    };
+    let Some(entity) = workspace.entity(id) else {
+        return format!("hop {hop}  (missing entity)");
+    };
+    format!(
+        "{}  {:<10}  hop {hop}  {}",
+        entity.short_ref(),
+        entity.kind.label(),
+        entity.display_name()
+    )
 }
 
 fn pages(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
@@ -814,7 +1005,7 @@ fn detail_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'st
                 return lines;
             }
         }
-        View::Entities => {
+        View::Entities | View::Graph => {
             let entity = app
                 .entity_id
                 .and_then(|id| workspace.entity(id))

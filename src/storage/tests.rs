@@ -1,7 +1,7 @@
 use super::*;
 use crate::model::{
     AgentAction, Confidence, EntityKey, EntityKind, EvidenceBatch, JobRecord, JobStatus, NewSource,
-    PageKind, ProposalStatus, Provenance, SourceKind, TimelineKind, Workspace,
+    PageKind, ProposalStatus, Provenance, SearchAroundQuery, SourceKind, TimelineKind, Workspace,
 };
 use rusqlite::params;
 
@@ -681,4 +681,74 @@ fn integrity_check_reports_ok() {
         store.schema_version().expect("version"),
         migrations::latest_version()
     );
+}
+
+fn infra_batch() -> EvidenceBatch {
+    let mut batch = EvidenceBatch::new();
+    let mut source =
+        NewSource::collected(SourceKind::Dns, "dns", "DNS and routing for example.com");
+    source.content = "example.com A 192.0.2.10".into();
+    source.content_hash = Some("infra-hash".into());
+    let key = batch.add_source(source);
+    let domain = EntityKey::new(EntityKind::Domain, "example.com");
+    let ip = EntityKey::new(EntityKind::Ip, "192.0.2.10");
+    let nameserver = EntityKey::new(EntityKind::Hostname, "ns1.example.net");
+    let asn = EntityKey::new(EntityKind::Asn, "AS64496");
+    let ns_ip = EntityKey::new(EntityKind::Ip, "192.0.2.53");
+    batch.relate(&domain, "resolves_to", &ip, Some(key));
+    batch.relate(&domain, "uses_nameserver", &nameserver, Some(key));
+    batch.relate(&ip, "announced_by", &asn, Some(key));
+    batch.relate(&nameserver, "resolves_to", &ns_ip, Some(key));
+    batch
+}
+
+#[test]
+fn search_around_sqlite_fixture_matches_hop_counts_and_caps() {
+    let (mut store, investigation) = store_with_investigation();
+    store
+        .apply_batch(
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            &infra_batch(),
+        )
+        .expect("applies");
+    let data = store.load_investigation(investigation.id).expect("loads");
+    let domain = data
+        .entities
+        .iter()
+        .find(|entity| entity.kind == EntityKind::Domain)
+        .expect("domain");
+    let asn = data
+        .entities
+        .iter()
+        .find(|entity| entity.kind == EntityKind::Asn)
+        .expect("asn");
+    let one = store
+        .search_around(
+            investigation.id,
+            &SearchAroundQuery::new(vec![domain.id], 1),
+        )
+        .expect("one hop");
+    assert_eq!(one.nodes.len(), 3);
+    assert!(!one.node_ids().any(|id| id == asn.id));
+    let two = store
+        .search_around(
+            investigation.id,
+            &SearchAroundQuery::new(vec![domain.id], 2),
+        )
+        .expect("two hops");
+    assert_eq!(two.nodes.len(), 5);
+    assert!(two.node_ids().any(|id| id == asn.id));
+    let mut capped = SearchAroundQuery::new(vec![domain.id], 2);
+    capped.node_cap = 2;
+    let limited = store
+        .search_around(investigation.id, &capped)
+        .expect("capped");
+    assert_eq!(limited.nodes.len(), 2);
+    assert!(limited.truncated);
+    assert!(limited.requires_confirm());
+    assert_eq!(limited.uncapped_node_count, 5);
 }

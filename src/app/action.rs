@@ -65,6 +65,18 @@ pub enum Action {
     OpenOverview,
     /// Open Object View: highlighted entity on Entities, otherwise the current page.
     OpenObjectView,
+    /// Open the Graph screen from the current entity (or the first entity).
+    OpenGraph,
+    /// Search Around from the current selection (default 2 hops).
+    SearchAround,
+    /// Change Search Around depth on the Graph screen.
+    GraphHops(i32),
+    /// Move the facet-strip cursor.
+    GraphFacetMove(i32),
+    /// Apply (or toggle) the highlighted facet as a graph filter.
+    GraphApplyFacet,
+    /// Clear kind / link / provenance filters on the Graph screen.
+    GraphClearFilters,
     /// Run a command-palette id. The ids are declared in `app::commands`.
     Command(&'static str),
     /// Confirm the open form or send the agent prompt.

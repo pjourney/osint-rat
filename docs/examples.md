@@ -30,6 +30,7 @@ Inside the workbench:
 | `3` | Sources. `S-1` onward are the raw observations |
 | `4` | Findings. `[COL]` marks a collected diagnostic |
 | `5` | Entities such as the domain, its addresses, and its nameservers. `Enter` opens Object View |
+| `g` | Graph of those entities. `s` Search Around two hops (addresses, nameservers, then ASNs) |
 | `6` | Timeline, including registration dates and later observation changes |
 | `8` | Jobs, if a collector is still running or a previous one failed |
 | `/` | Search. Try `example.com` or a short id such as `E-1` |

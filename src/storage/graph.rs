@@ -10,7 +10,8 @@ use super::rows::{RowExt, id, json, ts};
 use super::{SeqTable, Store, next_seq, touch_investigation};
 use crate::model::{
     CataloguedLink, Confidence, Entity, EntityKey, EntityKind, Fields, PageEntityLink, Provenance,
-    Relationship, normalize_relationship_kind, now,
+    Relationship, SearchAroundQuery, SearchAroundResult, normalize_relationship_kind, now,
+    search_around,
 };
 
 /// Inserts an entity or returns the existing one with the same kind and canonical value.
@@ -440,5 +441,15 @@ impl Store {
             params![id(&relationship_id)],
         )?;
         Ok(())
+    }
+
+    /// Search Around over the stored investigation snapshot (same algorithm as the in-memory path).
+    pub fn search_around(
+        &self,
+        investigation_id: Uuid,
+        query: &SearchAroundQuery,
+    ) -> Result<SearchAroundResult> {
+        let data = self.load_investigation(investigation_id)?;
+        Ok(search_around(&data, query))
     }
 }

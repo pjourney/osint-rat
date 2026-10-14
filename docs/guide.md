@@ -8,6 +8,7 @@ This is the complete guide to using os-int: the workbench, the collectors, the a
 - [Where files live](#where-files-live)
 - [The workbench](#the-workbench)
 - [Building a case](#building-a-case)
+- [Graph and Search Around](#graph-and-search-around)
 - [Collectors](#collectors)
 - [Diagnostics](#diagnostics)
 - [External tools](#external-tools)
@@ -144,7 +145,7 @@ A wide investigation screen has three columns: **Navigate**, the current section
 The footer is always:
 
 ```text
-[a] Ask   [/] Search   [p] Palette   [r] Collect   [?] Help
+[a] Ask   [/] Search   [p] Palette   [r] Collect   [g] Graph   [s] Around   [?] Help
 ```
 
 Background work (HTTP, DNS, TLS, subprocesses, agent calls, report rendering) runs on a job queue. The interface never waits on that I/O. Open **Jobs** (`8`) to watch or cancel a job. Open **Tools** (`9`) to see which external programs were found. Open **Settings** (`0`) or press `e` there to change the active agent, an optional program override, the agent timeout, and the theme (`default`, `high-contrast`, `monochrome`).
@@ -167,6 +168,8 @@ Press `p` or `Ctrl+P`, then type to filter.
 | Add Finding / Add Note | Analyst-authored records |
 | Open Entities, Sources, Findings, Timeline, Jobs, Tools, Artifacts, Agent History | Jump to that screen |
 | Object View | Typed properties, catalogued links, sources, and findings for the selected entity or page (`v`) |
+| Graph | Link-analysis canvas of entities and relationships (`g`) |
+| Search Around | Expand 1–N hops from the selection and merge into Graph (`s`) |
 | Configure Agent | Agent profile and theme |
 | Doctor | Environment checks |
 | Help | Keyboard overlay |
@@ -179,7 +182,7 @@ Press `p` or `Ctrl+P`, then type to filter.
 1. `n` on the welcome screen. Enter a name and an optional description. The description is used as the executive summary of a Markdown report.
 2. `n` again. Pick a page type with `Left` / `Right` and enter the target. The form shows an example for that type (`example.com`, `192.0.2.15`, `AS13335`, …).
 3. `r` on that page to collect.
-4. Move through Sources, Findings, and Entities. The detail pane shows the selected record. Press `Enter` on an entity (or `v` from Pages) to open **Object View**.
+4. Move through Sources, Findings, and Entities. The detail pane shows the selected record. Press `Enter` on an entity (or `v` from Pages) to open **Object View**. Press `g` to open **Graph**, then `s` to Search Around.
 5. `e` on Overview edits the current page's notes in your editor (`ui.editor`, then `$VISUAL`, then `$EDITOR`, then `vi`). os-int suspends the terminal UI, runs the editor, and reloads the note when the editor exits.
 6. Add a finding from the palette when you want to record a conclusion. Cite sources by short id (`S-1, S-4`). A finding you add this way is provenance `analyst`.
 
@@ -205,6 +208,19 @@ Object View is the typed reading of one entity or page: property groups from the
 - `Esc` returns to the screen you came from.
 
 Identity is always shown, so every object has at least one property group. Known relationship verbs use the link-type catalog (`resolves_to`, `subdomain_of`, …). Unknown snake_case verbs still store and appear under **Other**. Accepting an agent Action records who and when; reserved Action kinds (`PROPOSE_RESOLVE` and the playbook stubs) stay refused.
+
+## Graph and Search Around
+
+Graph is a terminal link-analysis canvas (TUI-first; there is no embedded webview). Nodes are entities. Edges are relationships. The detail pane reuses Object View data for the selected node.
+
+- Press `g`, pick **Graph** in Navigate, or run the palette command **Graph**. The seed is the current entity (Entities highlight, Object View, or the page's primary entity). If none is focused, the first entity is used. Opening Graph expands **1 hop**.
+- Press `s` or the palette command **Search Around** to expand **2 hops** from the current selection. On an open Graph, those hops **merge** into the canvas. From any other screen, Search Around opens Graph at 2 hops.
+- `+` / `-` change hop depth and re-query from the original seed (0–8). `hops` follows the last result's `hops_used`.
+- The **facet strip** counts the unfiltered set by entity kind, top link types, and provenance. `[` / `]` move the cursor. `f` applies (or toggles) that facet; the visible set updates immediately. `x` clears filters.
+- Render caps are **200 nodes** and **400 edges**. Crossing either threshold warns and asks for confirm before the first 200 / 400 are drawn. A capped result is labelled in the status line.
+- `Enter` opens Object View for the selected node. `Esc` returns to the screen that opened Graph. The Entities table is unchanged: `Enter` there still opens Object View.
+
+Empty investigations do not crash: Graph shows an empty neighborhood and a collect hint.
 
 ## Collectors
 
@@ -545,7 +561,14 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `e` | normal | Edit notes, or open settings |
 | `r` | normal | Run collectors for this page |
 | `v` | normal | Object View: highlighted entity, or the current page |
+| `g` | normal | Graph for the current entity (1 hop) |
+| `s` | normal | Search Around (default 2 hops; merges on Graph) |
+| `+` `-` | Graph | More / fewer hops |
+| `[` `]` | Graph | Move the facet cursor |
+| `f` | Graph | Apply or toggle the highlighted facet |
+| `x` | Graph | Clear facet filters |
 | `Enter` | Entities | Open Object View |
+| `Enter` | Graph | Open Object View for the selected node |
 | `c` | Jobs | Cancel the selected job |
 | `?` | normal, overlays | Help |
 | `1` … `6` | normal | Overview, Pages, Sources, Findings, Entities, Timeline |
