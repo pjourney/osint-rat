@@ -6,6 +6,8 @@ use ratatui::layout::{Constraint, Layout};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
+use color_eyre::eyre::{Result, eyre};
+
 use crate::config::Config;
 
 use super::glyphs::Glyphs;
@@ -16,7 +18,12 @@ use super::theme::{
 };
 
 /// Renders one theme, or all five, as plain text (no TTY required).
-pub fn render_preview(config: &Config, env: &TerminalEnv, name: Option<&str>, all: bool) -> String {
+pub fn render_preview(
+    config: &Config,
+    env: &TerminalEnv,
+    name: Option<&str>,
+    all: bool,
+) -> Result<String> {
     let color_mode = ColorMode::parse(&config.ui.color).unwrap_or(ColorMode::Auto);
     let detected = detect_color_depth(env, color_mode);
     let ascii = config.ui.ascii;
@@ -35,13 +42,21 @@ pub fn render_preview(config: &Config, env: &TerminalEnv, name: Option<&str>, al
         }
     } else {
         let requested = match name {
-            Some(value) => ThemeName::parse(value)
-                .unwrap_or_else(|| resolve_theme_name(&config.ui.theme, env, detected.depth)),
+            Some(value) => ThemeName::parse(value).ok_or_else(|| {
+                eyre!(
+                    "unknown theme {value:?}; valid themes: {}",
+                    ThemeName::ALL
+                        .iter()
+                        .map(|theme| theme.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })?,
             None => resolve_theme_name(&config.ui.theme, env, detected.depth),
         };
         chunks.push(render_one(requested, detected, ascii));
     }
-    chunks.join("\n")
+    Ok(chunks.join("\n"))
 }
 
 fn render_one(requested: ThemeName, detected: DetectedDepth, ascii: bool) -> String {
@@ -321,7 +336,7 @@ mod tests {
         config.ui.theme = "auto".into();
         config.ui.color = "truecolor".into();
         config.ui.ascii = false;
-        let actual = render_preview(&config, &fixture_env(), None, true);
+        let actual = render_preview(&config, &fixture_env(), None, true).expect("preview");
         let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         path.push("tests/golden/theme_preview_all.txt");
         let expected = std::fs::read_to_string(&path).unwrap_or_default();
@@ -344,7 +359,7 @@ mod tests {
         let mut config = Config::default();
         config.ui.color = "truecolor".into();
         config.ui.ascii = true;
-        let actual = render_preview(&config, &fixture_env(), None, true);
+        let actual = render_preview(&config, &fixture_env(), None, true).expect("preview");
         let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         path.push("tests/golden/theme_preview_all_ascii.txt");
         let expected = std::fs::read_to_string(&path).unwrap_or_default();
@@ -376,8 +391,24 @@ mod tests {
             no_color: false,
             colorfgbg: None,
         };
-        let actual = render_preview(&config, &env, Some("phosphor"), false);
+        let actual = render_preview(&config, &env, Some("phosphor"), false).expect("preview");
         assert!(actual.contains("phosphor needs 256 colours"), "{actual}");
         assert!(actual.contains("Mono"), "{actual}");
+    }
+
+    #[test]
+    fn preview_unknown_and_retired_names_error() {
+        let config = Config::default();
+        for name in ["unknown", "default", "high-contrast"] {
+            let error = render_preview(&config, &fixture_env(), Some(name), false)
+                .expect_err(name)
+                .to_string();
+            assert!(error.contains("unknown theme"), "{error}");
+            assert!(error.contains("dark"), "{error}");
+            assert!(error.contains("light"), "{error}");
+            assert!(error.contains("mono"), "{error}");
+            assert!(error.contains("phosphor"), "{error}");
+            assert!(error.contains("amber"), "{error}");
+        }
     }
 }

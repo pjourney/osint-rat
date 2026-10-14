@@ -485,7 +485,8 @@ pub fn detect_color_depth(env: &TerminalEnv, color_override: ColorMode) -> Detec
     if let Some(value) = colorterm.filter(|value| is_truecolor_token(value)) {
         depth = ColorDepth::TrueColor;
         reason = format!("COLORTERM={value}");
-    } else if let Some(value) = term.filter(|value| value.contains("256color")) {
+    } else if let Some(value) = term.filter(|value| value.to_ascii_lowercase().contains("256color"))
+    {
         depth = ColorDepth::Ansi256;
         reason = format!("TERM={value}");
     } else {
@@ -1167,6 +1168,31 @@ mod tests {
         let detected = detect_color_depth(&env, ColorMode::Ansi256);
         assert_eq!(detected.depth, ColorDepth::Ansi256);
         assert_eq!(detected.reason, "ui.color=256");
+        let env = TerminalEnv {
+            colorterm: None,
+            term: Some("XTERM-256COLOR".into()),
+            no_color: false,
+            colorfgbg: None,
+        };
+        let detected = detect_color_depth(&env, ColorMode::Auto);
+        assert_eq!(detected.depth, ColorDepth::Ansi256);
+        assert!(detected.reason.to_ascii_lowercase().contains("256color"));
+    }
+
+    #[test]
+    fn old_theme_names_warn_and_fall_back() {
+        for name in ["default", "high-contrast"] {
+            let config = config_with(name, "auto", false);
+            assert!(
+                config
+                    .warnings()
+                    .iter()
+                    .any(|warning| warning.contains("unknown theme")),
+                "{name}"
+            );
+            let theme = Theme::resolve(&config, &TerminalEnv::default());
+            assert_eq!(theme.name, ThemeName::Dark, "{name}");
+        }
     }
 
     #[test]

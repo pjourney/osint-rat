@@ -173,8 +173,12 @@ pub enum Overlay {
     },
     /// The same checks `os-int doctor` prints.
     Doctor,
-    /// Actions proposed by one agent run. Accept and reject apply one at a time.
-    Proposals { run_id: Uuid, selected: usize },
+    /// Actions proposed by one agent run. Shift+A arms; `y` accepts.
+    Proposals {
+        run_id: Uuid,
+        selected: usize,
+        armed: bool,
+    },
     /// Scored resolution suggestions. Enter proposes; nothing auto-merges.
     Suggestions { selected: usize },
 }
@@ -661,6 +665,16 @@ impl App {
             Action::Cycle(delta) => self.cycle_form(delta),
             Action::Accept => self.decide_proposal(ProposalStatus::Accepted)?,
             Action::Reject => self.decide_proposal(ProposalStatus::Rejected)?,
+            Action::Arm => {
+                if let Overlay::Proposals { armed, .. } = &mut self.overlay {
+                    *armed = true;
+                }
+            }
+            Action::Disarm => {
+                if let Overlay::Proposals { armed, .. } = &mut self.overlay {
+                    *armed = false;
+                }
+            }
             Action::Job(event) => self.handle_job(event)?,
             Action::InsertChar(ch) => self.insert_char(ch),
             Action::Backspace => self.backspace(),
@@ -1368,6 +1382,13 @@ impl App {
                     self.config.agent.timeout_seconds = timeout;
                 }
                 if let Some(theme) = values.get(3).filter(|value| !value.is_empty()) {
+                    let known = theme.eq_ignore_ascii_case("auto")
+                        || crate::tui::ThemeName::parse(theme).is_some();
+                    if !known {
+                        return Err(eyre!(
+                            "unknown theme {theme:?}; valid themes: auto, dark, light, mono, phosphor, amber"
+                        ));
+                    }
                     self.config.ui.theme = theme.clone();
                 }
                 self.config.save(&self.paths.config_file)?;
@@ -1379,33 +1400,7 @@ impl App {
     }
 
     fn command_requires_write(id: &str) -> bool {
-        matches!(
-            id,
-            "new_page"
-                | "run_collectors"
-                | "run_dns"
-                | "run_rdap"
-                | "run_http"
-                | "run_tls"
-                | "run_ct"
-                | "run_ip"
-                | "run_email"
-                | "run_username"
-                | "run_subdomain"
-                | "ingest"
-                | "run_playbook"
-                | "playbook_prompt"
-                | "watch_playbook"
-                | "ask_agent"
-                | "generate_report"
-                | "add_finding"
-                | "add_note"
-                | "merge_entities"
-                | "unresolve_entity"
-                | "confirm_resolve"
-                | "confirm_unresolve"
-                | "cancel_job"
-        ) || id.starts_with("run_tool:")
+        commands::command_writes(id)
     }
 
     fn require_open_write(&self) -> Result<()> {
@@ -1437,7 +1432,7 @@ impl App {
             self.require_open_marking()?;
         } else if id == "add_member" {
             self.require_open_team()?;
-        } else if Self::command_requires_write(id) {
+        } else if id != "new_investigation" && Self::command_requires_write(id) {
             self.require_open_write()?;
         }
         match id {
@@ -2080,6 +2075,7 @@ impl App {
             self.overlay = Overlay::Proposals {
                 run_id,
                 selected: 0,
+                armed: false,
             };
         }
         if let Some(stream) = self.streaming.get_mut(&job_id) {
@@ -2114,7 +2110,12 @@ impl App {
     }
 
     fn decide_proposal(&mut self, status: ProposalStatus) -> Result<()> {
-        let Overlay::Proposals { run_id, selected } = self.overlay else {
+        let Overlay::Proposals {
+            run_id,
+            selected,
+            armed: _,
+        } = self.overlay
+        else {
             return Ok(());
         };
         let Some(proposal) = self.pending_proposals(run_id).get(selected).cloned() else {
@@ -2141,10 +2142,14 @@ impl App {
         let pending_len = self.pending_proposals(run_id).len();
         if pending_len == 0 {
             self.overlay = Overlay::None;
-        } else if let Overlay::Proposals { selected, .. } = &mut self.overlay
-            && *selected >= pending_len
+        } else if let Overlay::Proposals {
+            selected, armed, ..
+        } = &mut self.overlay
         {
-            *selected = pending_len - 1;
+            *armed = false;
+            if *selected >= pending_len {
+                *selected = pending_len - 1;
+            }
         }
         Ok(())
     }
@@ -2782,7 +2787,7 @@ impl App {
         self.overlay = Overlay::AgentPrompt {
             input: Input::new(&question),
         };
-        self.status = "Playbook prompt seeded. Edit if needed, then Enter to send.".into();
+        self.status = "Playbook prompt seeded. Edit if needed, then Ctrl+S to send.".into();
         Ok(())
     }
 
@@ -3008,6 +3013,7 @@ impl App {
             self.overlay = Overlay::Proposals {
                 run_id,
                 selected: 0,
+                armed: false,
             };
         }
         Ok(())
@@ -3556,6 +3562,7 @@ mod tests {
         app.overlay = Overlay::Proposals {
             run_id: run.id,
             selected: 0,
+            armed: false,
         };
         app.dispatch(Action::Accept).expect("accept");
         let data = app
@@ -3578,6 +3585,55 @@ mod tests {
                 .notes
                 .iter()
                 .any(|note| note.body.contains("already saved"))
+        );
+    }
+
+    #[test]
+    fn proposal_arming_is_required_before_accept_via_keys() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Arm Case");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let mut run = sample_run(investigation_id, Uuid::new_v4(), Uuid::new_v4(), "Find?");
+        app.store.insert_agent_run(&mut run).expect("run");
+        app.store
+            .insert_proposals(
+                investigation_id,
+                run.id,
+                vec![(
+                    AgentAction::AddNote {
+                        body: "armed accept".into(),
+                    },
+                    ProposalStatus::Pending,
+                    None,
+                )],
+            )
+            .expect("proposals");
+        app.reload().expect("reload");
+        app.overlay = Overlay::Proposals {
+            run_id: run.id,
+            selected: 0,
+            armed: false,
+        };
+        app.dispatch(Action::Arm).expect("arm");
+        assert!(matches!(
+            app.overlay,
+            Overlay::Proposals { armed: true, .. }
+        ));
+        app.dispatch(Action::Disarm).expect("disarm");
+        assert!(matches!(
+            app.overlay,
+            Overlay::Proposals { armed: false, .. }
+        ));
+        app.dispatch(Action::Arm).expect("re-arm");
+        app.dispatch(Action::Accept).expect("accept");
+        let data = app
+            .store
+            .load_investigation(investigation_id)
+            .expect("loads");
+        assert!(
+            data.notes
+                .iter()
+                .any(|note| note.body.contains("armed accept"))
         );
     }
 
@@ -3621,6 +3677,7 @@ mod tests {
         app.overlay = Overlay::Proposals {
             run_id: run.id,
             selected: 0,
+            armed: false,
         };
         let error = app.dispatch(Action::Accept).expect_err("reader accept");
         assert!(
@@ -4164,6 +4221,7 @@ mod tests {
         app.overlay = Overlay::Proposals {
             run_id: run.id,
             selected: 0,
+            armed: false,
         };
         app.dispatch(Action::Accept).expect("accept");
         let data = app
@@ -4236,6 +4294,7 @@ mod tests {
         app.overlay = Overlay::Proposals {
             run_id: run.id,
             selected: 0,
+            armed: false,
         };
         app.dispatch(Action::Accept).expect("accept");
         let workspace = app.workspace.as_ref().expect("workspace");
@@ -4898,5 +4957,30 @@ mod tests {
                 .and_then(|value| value.as_str())
                 == Some("192.0.2.0/24")
         }));
+    }
+
+    #[test]
+    fn settings_rejects_unknown_theme() {
+        let (_directory, mut app) = test_app();
+        app.view = View::Settings;
+        app.dispatch(Action::Edit).expect("form");
+        if let Overlay::Form(form) = &mut app.overlay {
+            form.fields[3].value.set("neon");
+        }
+        let error = app.dispatch(Action::Submit).expect_err("invalid theme");
+        assert!(error.to_string().contains("unknown theme"), "{error}");
+        assert_eq!(app.config.ui.theme, "auto");
+    }
+
+    #[test]
+    fn settings_accepts_known_theme() {
+        let (_directory, mut app) = test_app();
+        app.view = View::Settings;
+        app.dispatch(Action::Edit).expect("form");
+        if let Overlay::Form(form) = &mut app.overlay {
+            form.fields[3].value.set("phosphor");
+        }
+        app.dispatch(Action::Submit).expect("save");
+        assert_eq!(app.config.ui.theme, "phosphor");
     }
 }

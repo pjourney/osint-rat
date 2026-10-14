@@ -237,6 +237,9 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
 }
 
 fn truncate_width(text: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
     if UnicodeWidthStr::width(text) <= max_width {
         return text.to_string();
     }
@@ -262,7 +265,12 @@ fn draw_status(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
     } else {
         theme.fg
     };
-    let text = format!(" {}    {jobs}", sanitize_line(&app.status));
+    let hint = theme.degrade_hint.unwrap_or("");
+    let text = if hint.is_empty() {
+        format!(" {}    {jobs}", sanitize_line(&app.status))
+    } else {
+        format!(" {}    {jobs}    {hint}", sanitize_line(&app.status))
+    };
     frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
 }
 
@@ -406,13 +414,39 @@ mod tests {
 
     #[test]
     fn header_spacer_uses_display_width_not_bytes() {
+        let (_directory, mut app) = test_app();
+        app.dispatch(Action::Command("new_investigation"))
+            .expect("form");
+        if let crate::app::Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set("café");
+        }
+        app.dispatch(Action::Submit).expect("create");
+        let backend = TestBackend::new(80, 3);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| {
+                let theme = Theme::from_config(&app.config);
+                draw_header(frame, frame.area(), &app, &theme);
+            })
+            .expect("draw");
+        let text = visible_text(&terminal);
+        assert!(text.contains("os-int"), "{text}");
+        assert!(text.contains("café"), "{text}");
         let title = " os-int ─ Investigation: café  [TLP:AMBER] ";
-        let right = " claude ● ";
         assert!(title.len() > UnicodeWidthStr::width(title));
-        let title_width = UnicodeWidthStr::width(title);
-        let right_width = UnicodeWidthStr::width(right);
-        let available = 80usize;
-        let spacer = available.saturating_sub(title_width.saturating_add(right_width));
-        assert_eq!(title_width + spacer + right_width, 80);
+        assert_eq!(truncate_width("hello", 0), "");
+    }
+
+    #[test]
+    fn status_shows_degrade_hint_when_phosphor_falls_back() {
+        let (_directory, mut app) = test_app();
+        app.config.ui.theme = "phosphor".into();
+        app.config.ui.color = "16".into();
+        app.status = "ready".into();
+        let backend = TestBackend::new(100, 8);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal.draw(|frame| draw(frame, &app)).expect("draw");
+        let text = visible_text(&terminal);
+        assert!(text.contains("phosphor needs 256 colours"), "{text}");
     }
 }

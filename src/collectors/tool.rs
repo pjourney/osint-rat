@@ -284,8 +284,8 @@ mod tests {
         assert!(secret.sources[0].content.contains("[REDACTED]"));
         assert!(!secret.sources[0].content.contains("sk-secret"));
         assert!(actual.relationships.iter().any(|relationship| {
-            relationship.kind == "subdomain_of" && relationship.to.value == "ns1.example.net"
-                || relationship.kind == "mentions" && relationship.to.value == "ns1.example.net"
+            (relationship.kind == "subdomain_of" && relationship.to.value == "ns1.example.net")
+                || (relationship.kind == "mentions" && relationship.to.value == "ns1.example.net")
         }));
         // ns1.example.net is not a subdomain of example.com (different registrable name).
         let mut subfinder_tool = tool.clone();

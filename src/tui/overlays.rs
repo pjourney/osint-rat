@@ -31,9 +31,11 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         Overlay::AgentPrompt { input } => agent_prompt(frame, area, app, input, theme),
         Overlay::Form(form) => form_modal(frame, area, form, theme),
         Overlay::Confirm { title, message, .. } => confirm(frame, area, title, message, theme),
-        Overlay::Proposals { run_id, selected } => {
-            proposals(frame, area, app, *run_id, *selected, theme)
-        }
+        Overlay::Proposals {
+            run_id,
+            selected,
+            armed,
+        } => proposals(frame, area, app, *run_id, *selected, *armed, theme),
         Overlay::Suggestions { selected } => suggestions(frame, area, app, *selected, theme),
     }
 }
@@ -156,7 +158,7 @@ fn agent_prompt(
         .as_ref()
         .map(|_| {
             format!(
-                "Agent: {}   page context included   Enter to send, Esc to cancel",
+                "Agent: {}   page context included   Ctrl+S to send, Esc to cancel",
                 app.agent.profile.name
             )
         })
@@ -195,7 +197,7 @@ fn form_modal(frame: &mut Frame, area: Rect, form: &crate::app::FormState, theme
         lines.push(Line::from(""));
     }
     lines.push(Line::from(Span::styled(
-        "Enter submit   Esc cancel   Tab next field",
+        "Ctrl+S submit   Esc cancel   Tab next field",
         theme.muted,
     )));
     let title = match form.kind {
@@ -224,7 +226,7 @@ fn confirm(frame: &mut Frame, area: Rect, title: &str, message: &str, theme: &Th
     let lines = vec![
         Line::from(message.to_string()),
         Line::from(""),
-        Line::from(Span::styled("Enter confirm   Esc cancel", theme.muted)),
+        Line::from(Span::styled("y confirm   Esc cancel", theme.muted)),
     ];
     frame.render_widget(
         Paragraph::new(lines).block(pane_block(title, true, theme)),
@@ -238,6 +240,7 @@ fn proposals(
     app: &App,
     run_id: uuid::Uuid,
     selected: usize,
+    armed: bool,
     theme: &Theme,
 ) {
     let proposals: Vec<_> = app
@@ -270,7 +273,11 @@ fn proposals(
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "[A] Accept   [R] Reject   Esc close",
+        if armed {
+            "Armed — y accept   any other key cancels"
+        } else {
+            "Shift+A arm   [R] Reject   Esc close"
+        },
         theme.muted,
     )));
     let popup = centered(area, 70, 16);

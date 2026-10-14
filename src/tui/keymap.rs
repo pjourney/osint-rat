@@ -14,11 +14,14 @@ pub fn map_key(key: KeyEvent, overlay: &Overlay, view: View, editing: bool) -> O
     if ctrl && matches!(key.code, KeyCode::Char('c')) {
         return Some(Action::Quit);
     }
-    if matches!(overlay, Overlay::Proposals { .. }) {
-        return map_proposal_key(key);
+    if let Overlay::Proposals { armed, .. } = overlay {
+        return map_proposal_key(key, *armed);
     }
     if editing {
         return map_editing_key(key, overlay);
+    }
+    if matches!(overlay, Overlay::Confirm { .. }) {
+        return map_confirm_key(key);
     }
     if !matches!(overlay, Overlay::None) {
         return map_overlay_key(key);
@@ -29,14 +32,21 @@ pub fn map_key(key: KeyEvent, overlay: &Overlay, view: View, editing: bool) -> O
     map_registered_key(key.code, view, ctrl, overlay)
 }
 
-fn map_proposal_key(key: KeyEvent) -> Option<Action> {
+fn map_proposal_key(key: KeyEvent, armed: bool) -> Option<Action> {
+    if armed {
+        return match key.code {
+            KeyCode::Char('y') => Some(Action::Accept),
+            _ => Some(Action::Disarm),
+        };
+    }
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
     match key.code {
         KeyCode::Esc => Some(Action::Cancel),
         KeyCode::Up | KeyCode::Char('k') => Some(Action::Move(-1)),
         KeyCode::Down | KeyCode::Char('j') => Some(Action::Move(1)),
-        KeyCode::Char('A' | 'a' | 'y') => Some(Action::Accept),
+        KeyCode::Char('A') | KeyCode::Char('a') if shift => Some(Action::Arm),
+        KeyCode::Char('A') => Some(Action::Arm),
         KeyCode::Char('R' | 'r' | 'n') => Some(Action::Reject),
-        KeyCode::Enter => Some(Action::Accept),
         _ => None,
     }
 }
@@ -45,7 +55,11 @@ fn map_editing_key(key: KeyEvent, overlay: &Overlay) -> Option<Action> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
         KeyCode::Esc => Some(Action::Cancel),
-        KeyCode::Enter => Some(Action::Submit),
+        KeyCode::Enter => match overlay {
+            Overlay::Palette { .. } | Overlay::Search { .. } => Some(Action::Select),
+            _ => None,
+        },
+        KeyCode::Char('s') if ctrl => Some(Action::Submit),
         KeyCode::Tab => Some(if key.modifiers.contains(KeyModifiers::SHIFT) {
             Action::Move(-1)
         } else {
@@ -64,6 +78,18 @@ fn map_editing_key(key: KeyEvent, overlay: &Overlay) -> Option<Action> {
         KeyCode::Delete => Some(Action::Delete),
         KeyCode::Char('p') if ctrl => Some(Action::Palette),
         KeyCode::Char(ch) if !ctrl => Some(Action::InsertChar(ch)),
+        _ => None,
+    }
+}
+
+fn map_confirm_key(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q' | 'n') => Some(Action::Cancel),
+        KeyCode::Char('y' | 'Y') => Some(Action::Select),
+        KeyCode::Enter => None,
+        KeyCode::Up | KeyCode::Char('k') => Some(Action::Move(-1)),
+        KeyCode::Down | KeyCode::Char('j') => Some(Action::Move(1)),
+        KeyCode::Char('?') => Some(Action::Help),
         _ => None,
     }
 }
@@ -220,13 +246,96 @@ mod tests {
             map_key(press(KeyCode::Esc), &overlay, View::Agent, true),
             Some(Action::Cancel)
         ));
+        assert!(map_key(press(KeyCode::Enter), &overlay, View::Agent, true).is_none());
+        let save = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
         assert!(matches!(
-            map_key(press(KeyCode::Enter), &overlay, View::Agent, true),
+            map_key(save, &overlay, View::Agent, true),
             Some(Action::Submit)
         ));
         assert!(matches!(
             map_key(press(KeyCode::Char('i')), &overlay, View::Entities, true),
             Some(Action::InsertChar('i'))
+        ));
+    }
+
+    fn proposals(armed: bool) -> Overlay {
+        Overlay::Proposals {
+            run_id: uuid::Uuid::nil(),
+            selected: 0,
+            armed,
+        }
+    }
+
+    #[test]
+    fn proposals_require_shift_a_then_y() {
+        let overlay = proposals(false);
+        assert!(map_key(press(KeyCode::Enter), &overlay, View::Agent, false).is_none());
+        assert!(map_key(press(KeyCode::Char('a')), &overlay, View::Agent, false).is_none());
+        assert!(map_key(press(KeyCode::Char('y')), &overlay, View::Agent, false).is_none());
+        let shift_a = KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT);
+        assert!(matches!(
+            map_key(shift_a, &overlay, View::Agent, false),
+            Some(Action::Arm)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('A')), &overlay, View::Agent, false),
+            Some(Action::Arm)
+        ));
+        let armed = proposals(true);
+        assert!(matches!(
+            map_key(press(KeyCode::Char('y')), &armed, View::Agent, false),
+            Some(Action::Accept)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Enter), &armed, View::Agent, false),
+            Some(Action::Disarm)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('a')), &armed, View::Agent, false),
+            Some(Action::Disarm)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('j')), &armed, View::Agent, false),
+            Some(Action::Disarm)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('r')), &overlay, View::Agent, false),
+            Some(Action::Reject)
+        ));
+    }
+
+    #[test]
+    fn confirm_overlay_requires_y_not_enter() {
+        let overlay = Overlay::Confirm {
+            title: "Confirm".into(),
+            message: "Write?".into(),
+            command: "confirm_resolve".into(),
+        };
+        assert!(map_key(press(KeyCode::Enter), &overlay, View::Entities, false).is_none());
+        assert!(matches!(
+            map_key(press(KeyCode::Char('y')), &overlay, View::Entities, false),
+            Some(Action::Select)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Esc), &overlay, View::Entities, false),
+            Some(Action::Cancel)
+        ));
+    }
+
+    #[test]
+    fn palette_enter_selects_without_submitting_a_write() {
+        let overlay = Overlay::Palette {
+            query: crate::app::Input::default(),
+            selected: 0,
+        };
+        assert!(matches!(
+            map_key(press(KeyCode::Enter), &overlay, View::Overview, true),
+            Some(Action::Select)
+        ));
+        let save = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
+        assert!(matches!(
+            map_key(save, &overlay, View::Overview, true),
+            Some(Action::Submit)
         ));
     }
 

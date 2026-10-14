@@ -292,7 +292,7 @@ A shared `--data-dir` plus roles is optional. Empty membership is single-user ow
 
 ### Keys
 
-- **Entities:** `Space` marks or unmarks. `m` proposes a merge of the marked set (the highlighted marked row is the canonical). Enter confirms; Esc cancels.
+- **Entities:** `Space` marks or unmarks. `m` proposes a merge of the marked set (the highlighted marked row is the canonical). `y` confirms; Esc cancels.
 - **Object View / Entities:** `u` proposes unresolve of the active bag on the canonical.
 - Palette: **Merge selected entities**, **Unresolve entity**, **Resolution suggestions**.
 
@@ -365,7 +365,7 @@ os-int ingest tests/fixtures/ingest/observables.csv --format csv
 os-int ingest tests/fixtures/ingest/events-batch.json --format batch
 ```
 
-`--format` is guessed from the file name when omitted. `--map kind=type,value=indicator` and `--kind domain` cover bulk CSV/JSON. Esc on the ingest form restores the entity selection; Enter applies and keeps that selection (canonical id after a merge). An empty path or a parse error leaves the form open. Caps, encoding, and the sidecar protocol: [connectors.md](connectors.md).
+`--format` is guessed from the file name when omitted. `--map kind=type,value=indicator` and `--kind domain` cover bulk CSV/JSON. Esc on the ingest form restores the entity selection; Ctrl+S applies and keeps that selection (canonical id after a merge). An empty path or a parse error leaves the form open. Caps, encoding, and the sidecar protocol: [connectors.md](connectors.md).
 
 The in-repo sidecar example is [`examples/connectors/hello-batch/`](../examples/connectors/hello-batch/).
 
@@ -373,7 +373,7 @@ The in-repo sidecar example is [`examples/connectors/hello-batch/`](../examples/
 
 A playbook is a YAML document: a seed object type plus ordered steps (`collect`, `search_around`, `run_tool`, `assert_finding_template`, `propose_resolve`). Collect and tool steps run; Search Around is a graph query; finding templates and merges become **pending proposals**. Nothing from a template is written until you accept it.
 
-From the workbench, press `b` (or palette **Run playbook**). Left/Right cycles bundled ids (`domain-infra`, `mail-policy`, `cert-estate`, `repo-surface`). Mode `run` / `dry-run`. Esc closes the form and leaves the entity selection in place. Enter on dry-run shows the plan as text; Enter on run queues a job you can cancel from Jobs with `c`. Palette **Playbook prompt** seeds the agent question with suggested Actions — the agent still only proposes. Palette **Watch playbook** re-runs collect steps (`dry-run` / `once`) and opens proposals on changes.
+From the workbench, press `b` (or palette **Run playbook**). Left/Right cycles bundled ids (`domain-infra`, `mail-policy`, `cert-estate`, `repo-surface`). Mode `run` / `dry-run`. Esc closes the form and leaves the entity selection in place. Ctrl+S on dry-run shows the plan as text; Ctrl+S on run queues a job you can cancel from Jobs with `c`. Palette **Playbook prompt** seeds the agent question with suggested Actions — the agent still only proposes. Palette **Watch playbook** re-runs collect steps (`dry-run` / `once`) and opens proposals on changes.
 
 From the shell:
 
@@ -471,7 +471,7 @@ os-int does not ship a model and does not call a provider API. It runs a local C
 
 `--tools ""` on Claude Code disables that CLI's built-in tools, so text inside a web page cannot make the agent run commands or read files. Codex is launched with `--sandbox read-only`.
 
-Press `a`, type a question, and press `Enter`. os-int writes a context pack that includes the investigation, the page you are on, related entities, findings, and sources. Untrusted material (HTTP bodies, DNS TXT, tool output, repository text) is sanitized for the terminal and wrapped like this:
+Press `a`, type a question, and press `Ctrl+S`. os-int writes a context pack that includes the investigation, the page you are on, related entities, findings, and sources. Untrusted material (HTTP bodies, DNS TXT, tool output, repository text) is sanitized for the terminal and wrapped like this:
 
 ```text
 <<<UNTRUSTED source=S-12 nonce=…>>>
@@ -771,9 +771,10 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | Palette | normal | **Open Audit**, **Set marking**, **Add team member** |
 | `o` | welcome | Open investigation |
 | `d` | welcome | Doctor |
-| `A` `y` `Enter` | proposals | Accept the selected proposal |
+| `Shift+A` then `y` | proposals | Arm, then accept. Any other key disarms. Enter never accepts. |
 | `R` `n` | proposals | Reject the selected proposal |
-| `Enter` | editing | Submit the form or the question |
+| `y` | confirm | Confirm a write. Enter never writes. |
+| `Ctrl+S` | editing | Submit the form or the agent question. Enter never writes. |
 | `Left` `Right` | forms | Cycle a choice (page type, and similar fields) |
 
 Inside a text field, letters insert text. They are not treated as commands until you leave the field.

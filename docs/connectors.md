@@ -81,7 +81,7 @@ os-int ingest batch.json --format batch
 
 `--format` is `stix`, `misp`, `csv`, `json`, or `batch`. When omitted, the file name is guessed (`stix` / `misp` in the name, `.csv`, `batch` / `.osint.json`, otherwise `.json` as observables). `--kind` is the default entity kind for a single-column CSV. `--map` is `kind=COLUMN,value=COLUMN` (names or 0-based indexes).
 
-In the workbench: `i` or palette **Ingest file**. Left/Right cycles the format. Esc closes the form and leaves the entity selection in place. Enter applies through `storage::apply` and restores that selection (canonical id after a merge).
+In the workbench: `i` or palette **Ingest file**. Left/Right cycles the format. Esc closes the form and leaves the entity selection in place. Ctrl+S applies through `storage::apply` and restores that selection (canonical id after a merge).
 
 | Format | What is imported |
 | --- | --- |

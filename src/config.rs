@@ -549,7 +549,9 @@ impl Config {
                 | "phosphor"
                 | "amber"
                 | "cockpit-dark"
+                | "cockpit_dark"
                 | "cockpit-light"
+                | "cockpit_light"
         ) {
             warnings.push(format!("unknown theme {:?}; using \"auto\"", self.ui.theme));
         }
@@ -733,5 +735,20 @@ parser = "hostnames"
         input.ui.theme = "neon".into();
         input.network.request_timeout_seconds = 0;
         assert_eq!(input.warnings().len(), 2);
+    }
+
+    #[test]
+    fn old_theme_names_warn() {
+        for name in ["default", "high-contrast"] {
+            let mut input = Config::default();
+            input.ui.theme = name.into();
+            let warnings = input.warnings();
+            assert!(
+                warnings
+                    .iter()
+                    .any(|warning| warning.contains("unknown theme")),
+                "{name}: {warnings:?}"
+            );
+        }
     }
 }

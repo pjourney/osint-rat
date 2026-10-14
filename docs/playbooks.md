@@ -67,7 +67,7 @@ os-int watch --playbook domain-infra --investigation "Example Corp" --interval 3
 
 ## Workbench
 
-- `b` or palette **Run playbook**. Left/Right cycles bundled ids. Mode `run` / `dry-run`. Esc closes the form and leaves the entity selection in place. Enter on dry-run shows the plan as text; Enter on run queues a job (cancel from Jobs with `c`).
+- `b` or palette **Run playbook**. Left/Right cycles bundled ids. Mode `run` / `dry-run`. Esc closes the form and leaves the entity selection in place. Ctrl+S on dry-run shows the plan as text; Ctrl+S on run queues a job (cancel from Jobs with `c`).
 - Palette **Playbook prompt** seeds the agent question with the playbook's suggested Actions. The agent still only proposes.
 - Palette **Watch playbook** is the same form with mode `dry-run` / `once`.
 

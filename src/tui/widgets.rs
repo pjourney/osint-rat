@@ -31,6 +31,9 @@ pub fn pane_block<'a>(title: &'a str, focused: bool, theme: &Theme) -> Block<'a>
 }
 
 pub fn truncate(text: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
     let clean = sanitize_line(text);
     if UnicodeWidthStr::width(clean.as_ref()) <= max_width {
         return clean.into_owned();
@@ -115,5 +118,16 @@ fn short_hint_label(title: &str) -> String {
         "Run Collectors" => "Collect".into(),
         "Search Around" => "Around".into(),
         other => other.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate;
+
+    #[test]
+    fn truncate_width_zero_emits_nothing() {
+        assert_eq!(truncate("hello", 0), "");
+        assert_eq!(truncate("café", 0), "");
     }
 }

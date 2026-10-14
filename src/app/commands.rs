@@ -1,6 +1,6 @@
 //! Command registry: palette entries, hint-bar keys, and generated help.
 //!
-//! The keymap consults [`map_registered_key`] for documented bindings. Overlay and
+//! [`map_registered_key`] walks [`COMMANDS`] and matches [`Command::hint`]. Overlay and
 //! editing still live in `tui/keymap.rs`. Help is generated from this table so it
 //! cannot drift from the keys the TUI actually binds.
 
@@ -20,6 +20,8 @@ pub struct Command {
     pub on_hint_bar: bool,
     /// True when the command writes case data. Enter must never be this.
     pub writes: bool,
+    /// Empty means the key is bound on every view.
+    pub views: &'static [View],
 }
 
 const fn cmd(
@@ -39,7 +41,50 @@ const fn cmd(
         in_palette,
         on_hint_bar,
         writes,
+        views: &[],
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+const fn cmd_views(
+    id: &'static str,
+    title: &'static str,
+    hint: &'static str,
+    summary: &'static str,
+    in_palette: bool,
+    on_hint_bar: bool,
+    writes: bool,
+    views: &'static [View],
+) -> Command {
+    Command {
+        id,
+        title,
+        hint,
+        summary,
+        in_palette,
+        on_hint_bar,
+        writes,
+        views,
+    }
+}
+
+impl Command {
+    pub fn applies_to(self, view: View) -> bool {
+        self.views.is_empty() || self.views.contains(&view)
+    }
+}
+
+/// Whether this palette/registry id writes case data.
+///
+/// [`Command::writes`] is the source of truth for registered ids. Internal confirm
+/// ids and `run_tool:*` are treated as writes too.
+pub fn command_writes(id: &str) -> bool {
+    if id.starts_with("run_tool:") || matches!(id, "confirm_resolve" | "confirm_unresolve") {
+        return true;
+    }
+    COMMANDS
+        .iter()
+        .any(|command| command.id == id && command.writes)
 }
 
 pub const COMMANDS: &[Command] = &[
@@ -142,7 +187,7 @@ pub const COMMANDS: &[Command] = &[
         false,
         true,
     ),
-    cmd(
+    cmd_views(
         "open_investigation",
         "Open Investigation",
         "o",
@@ -150,6 +195,7 @@ pub const COMMANDS: &[Command] = &[
         true,
         false,
         false,
+        &[View::Welcome],
     ),
     cmd(
         "new_page",
@@ -167,7 +213,7 @@ pub const COMMANDS: &[Command] = &[
         "Run the default passive collectors for this page.",
         true,
         true,
-        false,
+        true,
     ),
     cmd(
         "run_dns",
@@ -176,7 +222,7 @@ pub const COMMANDS: &[Command] = &[
         "Run the DNS collector only.",
         true,
         false,
-        false,
+        true,
     ),
     cmd(
         "run_rdap",
@@ -185,7 +231,7 @@ pub const COMMANDS: &[Command] = &[
         "Run the RDAP collector only.",
         true,
         false,
-        false,
+        true,
     ),
     cmd(
         "run_http",
@@ -194,7 +240,7 @@ pub const COMMANDS: &[Command] = &[
         "Run the HTTP collector only.",
         true,
         false,
-        false,
+        true,
     ),
     cmd(
         "run_tls",
@@ -203,7 +249,7 @@ pub const COMMANDS: &[Command] = &[
         "Run the TLS collector only.",
         true,
         false,
-        false,
+        true,
     ),
     cmd(
         "run_ct",
@@ -212,7 +258,7 @@ pub const COMMANDS: &[Command] = &[
         "Run the certificate-transparency collector only.",
         true,
         false,
-        false,
+        true,
     ),
     cmd(
         "run_ip",
@@ -221,7 +267,7 @@ pub const COMMANDS: &[Command] = &[
         "Run the IP intelligence collector only.",
         true,
         false,
-        false,
+        true,
     ),
     cmd(
         "run_email",
@@ -230,7 +276,7 @@ pub const COMMANDS: &[Command] = &[
         "Run the email identity pack only.",
         true,
         false,
-        false,
+        true,
     ),
     cmd(
         "run_username",
@@ -239,7 +285,7 @@ pub const COMMANDS: &[Command] = &[
         "Run the username pack only.",
         true,
         false,
-        false,
+        true,
     ),
     cmd(
         "run_subdomain",
@@ -248,7 +294,7 @@ pub const COMMANDS: &[Command] = &[
         "Run passive subdomain expansion only.",
         true,
         false,
-        false,
+        true,
     ),
     cmd(
         "ingest",
@@ -266,7 +312,7 @@ pub const COMMANDS: &[Command] = &[
         "Run a bundled YAML playbook. Active tools are refused.",
         true,
         false,
-        false,
+        true,
     ),
     cmd(
         "playbook_prompt",
@@ -275,7 +321,7 @@ pub const COMMANDS: &[Command] = &[
         "Seed the agent question with suggested playbook Actions.",
         true,
         false,
-        false,
+        true,
     ),
     cmd(
         "watch_playbook",
@@ -284,7 +330,7 @@ pub const COMMANDS: &[Command] = &[
         "Re-run collect steps. Automations propose; they do not write findings.",
         true,
         false,
-        false,
+        true,
     ),
     cmd(
         "ask_agent",
@@ -293,7 +339,7 @@ pub const COMMANDS: &[Command] = &[
         "Ask the agent about the selection. Results land as proposals.",
         true,
         true,
-        false,
+        true,
     ),
     cmd(
         "generate_report",
@@ -302,7 +348,7 @@ pub const COMMANDS: &[Command] = &[
         "Write a Markdown or JSON report.",
         true,
         false,
-        false,
+        true,
     ),
     cmd(
         "add_finding",
@@ -439,7 +485,7 @@ pub const COMMANDS: &[Command] = &[
         false,
         true,
     ),
-    cmd(
+    cmd_views(
         "toggle_nearby",
         "Nearby (country / prefix)",
         "l",
@@ -447,6 +493,7 @@ pub const COMMANDS: &[Command] = &[
         true,
         false,
         false,
+        &[View::Timeline, View::Entities],
     ),
     cmd(
         "open_artifacts",
@@ -484,7 +531,7 @@ pub const COMMANDS: &[Command] = &[
         true,
         false,
     ),
-    cmd(
+    cmd_views(
         "merge_entities",
         "Merge selected entities",
         "m",
@@ -492,8 +539,9 @@ pub const COMMANDS: &[Command] = &[
         true,
         false,
         true,
+        &[View::Entities],
     ),
-    cmd(
+    cmd_views(
         "unresolve_entity",
         "Unresolve entity",
         "u",
@@ -501,6 +549,7 @@ pub const COMMANDS: &[Command] = &[
         true,
         false,
         true,
+        &[View::Entities, View::Object],
     ),
     cmd(
         "resolution_suggestions",
@@ -511,7 +560,7 @@ pub const COMMANDS: &[Command] = &[
         false,
         false,
     ),
-    cmd(
+    cmd_views(
         "doctor",
         "Doctor",
         "d",
@@ -519,17 +568,19 @@ pub const COMMANDS: &[Command] = &[
         true,
         false,
         false,
+        &[View::Welcome],
     ),
-    cmd(
+    cmd_views(
         "cancel_job",
         "Cancel Running Job",
         "c",
         "Cancel the selected job (Jobs view).",
         true,
         false,
-        false,
+        true,
+        &[View::Jobs],
     ),
-    cmd(
+    cmd_views(
         "graph_hops_inc",
         "More hops",
         "+",
@@ -537,8 +588,9 @@ pub const COMMANDS: &[Command] = &[
         false,
         false,
         false,
+        &[View::Graph],
     ),
-    cmd(
+    cmd_views(
         "graph_hops_dec",
         "Fewer hops",
         "-",
@@ -546,8 +598,49 @@ pub const COMMANDS: &[Command] = &[
         false,
         false,
         false,
+        &[View::Graph],
     ),
-    cmd(
+    cmd_views(
+        "facet_prev",
+        "Previous facet",
+        "[",
+        "Graph / Timeline: move the facet cursor left.",
+        false,
+        false,
+        false,
+        &[View::Graph, View::Timeline],
+    ),
+    cmd_views(
+        "facet_next",
+        "Next facet",
+        "]",
+        "Graph / Timeline: move the facet cursor right.",
+        false,
+        false,
+        false,
+        &[View::Graph, View::Timeline],
+    ),
+    cmd_views(
+        "apply_facet",
+        "Apply facet",
+        "f",
+        "Graph / Timeline: apply the highlighted facet.",
+        false,
+        false,
+        false,
+        &[View::Graph, View::Timeline],
+    ),
+    cmd_views(
+        "clear_filters",
+        "Clear filters",
+        "x",
+        "Graph / Timeline: clear facet filters.",
+        false,
+        false,
+        false,
+        &[View::Graph, View::Timeline],
+    ),
+    cmd_views(
         "mark",
         "Mark row",
         "Space",
@@ -555,6 +648,7 @@ pub const COMMANDS: &[Command] = &[
         false,
         false,
         false,
+        &[View::Entities],
     ),
 ];
 
@@ -606,6 +700,8 @@ pub fn help_text() -> String {
     lines.push("  Graph and Audit are in the Navigate column (g or palette).".into());
     lines.push(String::new());
     lines.push("Enter opens. It never writes.".into());
+    lines.push("Shift+A then y accepts a proposal. Any other key disarms.".into());
+    lines.push("y confirms a write prompt. Ctrl+S submits a form or agent prompt.".into());
     lines.push("Palette commands that write still require a confirm form.".into());
     lines.push(String::new());
     lines.push("Provenance glyphs: ● collected  ◇ original material".into());
@@ -616,7 +712,75 @@ pub fn help_text() -> String {
     lines.join("\n")
 }
 
+/// Parses a registry hint into the key it documents.
+pub fn hint_key(hint: &str) -> Option<KeyCode> {
+    match hint {
+        "Esc" => Some(KeyCode::Esc),
+        "Tab" => Some(KeyCode::Tab),
+        "Shift+Tab" => Some(KeyCode::BackTab),
+        "Enter" => Some(KeyCode::Enter),
+        "Space" => Some(KeyCode::Char(' ')),
+        other if other.chars().count() == 1 => other.chars().next().map(KeyCode::Char),
+        _ => None,
+    }
+}
+
+fn action_for_command(id: &str, view: View) -> Option<Action> {
+    Some(match id {
+        "quit" => Action::Quit,
+        "back" => Action::Back,
+        "next_pane" => Action::NextPane,
+        "prev_pane" => Action::PrevPane,
+        "move_down" => Action::Move(1),
+        "move_up" => Action::Move(-1),
+        "select" => Action::Select,
+        "search" => Action::Search,
+        "palette" => Action::Palette,
+        "help" => Action::Help,
+        "new_investigation" | "new_page" => Action::NewItem,
+        "open_investigation" => Action::Command("open_investigation"),
+        "run_collectors" => Action::Refresh,
+        "ingest" => Action::Command("ingest"),
+        "run_playbook" => Action::Command("run_playbook"),
+        "ask_agent" => Action::AskAgent,
+        "add_note" => Action::Edit,
+        "open_overview" => Action::OpenOverview,
+        "open_pages" => Action::OpenPages,
+        "open_sources" => Action::OpenSources,
+        "open_findings" => Action::OpenFindings,
+        "open_entities" => Action::OpenEntities,
+        "open_timeline" => Action::OpenTimeline,
+        "open_agent" => Action::OpenAgent,
+        "open_jobs" => Action::OpenJobs,
+        "open_tools" => Action::OpenTools,
+        "open_settings" => Action::OpenSettings,
+        "toggle_nearby" => Action::ToggleNearby,
+        "open_object" => Action::OpenObjectView,
+        "open_graph" => Action::OpenGraph,
+        "search_around" => Action::SearchAround,
+        "merge_entities" => Action::ProposeMerge,
+        "unresolve_entity" => Action::Unresolve,
+        "doctor" => Action::Command("doctor"),
+        "cancel_job" => Action::Command("cancel_job"),
+        "graph_hops_inc" => Action::GraphHops(1),
+        "graph_hops_dec" => Action::GraphHops(-1),
+        "facet_prev" if view == View::Graph => Action::GraphFacetMove(-1),
+        "facet_prev" => Action::TimelineFacetMove(-1),
+        "facet_next" if view == View::Graph => Action::GraphFacetMove(1),
+        "facet_next" => Action::TimelineFacetMove(1),
+        "apply_facet" if view == View::Graph => Action::GraphApplyFacet,
+        "apply_facet" => Action::TimelineApplyFilter,
+        "clear_filters" if view == View::Graph => Action::GraphClearFilters,
+        "clear_filters" => Action::TimelineClearFilter,
+        "mark" => Action::ToggleMergeMark,
+        _ => return None,
+    })
+}
+
 /// Lookup used by the keymap for documented normal-mode bindings.
+///
+/// Bindings come from [`COMMANDS`]. PageUp/PageDown, arrows, and `=` (alias of `+`)
+/// are the only extras not listed as hints.
 pub fn map_registered_key(
     code: KeyCode,
     view: View,
@@ -634,62 +798,23 @@ pub fn map_registered_key(
         };
     }
     match code {
-        KeyCode::Char('q') => Some(Action::Quit),
-        KeyCode::Esc => Some(Action::Back),
-        KeyCode::Tab => Some(Action::NextPane),
-        KeyCode::BackTab => Some(Action::PrevPane),
-        KeyCode::Up | KeyCode::Char('k') => Some(Action::Move(-1)),
-        KeyCode::Down | KeyCode::Char('j') => Some(Action::Move(1)),
-        KeyCode::PageUp => Some(Action::Move(-10)),
-        KeyCode::PageDown => Some(Action::Move(10)),
-        KeyCode::Enter => Some(Action::Select),
-        KeyCode::Char('/') => Some(Action::Search),
-        KeyCode::Char('?') => Some(Action::Help),
-        KeyCode::Char('a') => Some(Action::AskAgent),
-        KeyCode::Char('p') => Some(Action::Palette),
-        KeyCode::Char('n') => Some(Action::NewItem),
-        KeyCode::Char('e') => Some(Action::Edit),
-        KeyCode::Char('r') => Some(Action::Refresh),
-        KeyCode::Char('i') => Some(Action::Command("ingest")),
-        KeyCode::Char('b') => Some(Action::Command("run_playbook")),
-        KeyCode::Char('v') => Some(Action::OpenObjectView),
-        KeyCode::Char('g') => Some(Action::OpenGraph),
-        KeyCode::Char('s') => Some(Action::SearchAround),
-        KeyCode::Char('+') | KeyCode::Char('=') if view == View::Graph => {
-            Some(Action::GraphHops(1))
-        }
-        KeyCode::Char('-') if view == View::Graph => Some(Action::GraphHops(-1)),
-        KeyCode::Char('f') if view == View::Graph => Some(Action::GraphApplyFacet),
-        KeyCode::Char('[') if view == View::Graph => Some(Action::GraphFacetMove(-1)),
-        KeyCode::Char(']') if view == View::Graph => Some(Action::GraphFacetMove(1)),
-        KeyCode::Char('x') if view == View::Graph => Some(Action::GraphClearFilters),
-        KeyCode::Char('[') if view == View::Timeline => Some(Action::TimelineFacetMove(-1)),
-        KeyCode::Char(']') if view == View::Timeline => Some(Action::TimelineFacetMove(1)),
-        KeyCode::Char('f') if view == View::Timeline => Some(Action::TimelineApplyFilter),
-        KeyCode::Char('x') if view == View::Timeline => Some(Action::TimelineClearFilter),
-        KeyCode::Char('l') if matches!(view, View::Timeline | View::Entities) => {
-            Some(Action::ToggleNearby)
-        }
-        KeyCode::Char(' ') if view == View::Entities => Some(Action::ToggleMergeMark),
-        KeyCode::Char('m') if view == View::Entities => Some(Action::ProposeMerge),
-        KeyCode::Char('u') if matches!(view, View::Entities | View::Object) => {
-            Some(Action::Unresolve)
-        }
-        KeyCode::Char('o') if view == View::Welcome => Some(Action::Command("open_investigation")),
-        KeyCode::Char('d') if view == View::Welcome => Some(Action::Command("doctor")),
-        KeyCode::Char('c') if view == View::Jobs => Some(Action::Command("cancel_job")),
-        KeyCode::Char('1') => Some(Action::OpenOverview),
-        KeyCode::Char('2') => Some(Action::OpenPages),
-        KeyCode::Char('3') => Some(Action::OpenSources),
-        KeyCode::Char('4') => Some(Action::OpenFindings),
-        KeyCode::Char('5') => Some(Action::OpenEntities),
-        KeyCode::Char('6') => Some(Action::OpenTimeline),
-        KeyCode::Char('7') => Some(Action::OpenAgent),
-        KeyCode::Char('8') => Some(Action::OpenJobs),
-        KeyCode::Char('9') => Some(Action::OpenTools),
-        KeyCode::Char('0') => Some(Action::OpenSettings),
-        _ => None,
+        KeyCode::Up => return Some(Action::Move(-1)),
+        KeyCode::Down => return Some(Action::Move(1)),
+        KeyCode::PageUp => return Some(Action::Move(-10)),
+        KeyCode::PageDown => return Some(Action::Move(10)),
+        KeyCode::Char('=') if view == View::Graph => return Some(Action::GraphHops(1)),
+        _ => {}
     }
+    for command in COMMANDS {
+        let Some(bound) = hint_key(command.hint) else {
+            continue;
+        };
+        if bound != code || !command.applies_to(view) {
+            continue;
+        }
+        return action_for_command(command.id, view);
+    }
+    None
 }
 
 pub fn tab_action(modifiers: KeyModifiers) -> Action {
@@ -735,6 +860,77 @@ mod tests {
             .expect("select");
         assert!(!enter.writes);
         assert_eq!(enter.hint, "Enter");
+    }
+
+    #[test]
+    fn writes_flag_is_the_source_of_truth() {
+        for command in COMMANDS {
+            assert_eq!(command_writes(command.id), command.writes, "{}", command.id);
+        }
+        assert!(command_writes("run_tool:whois"));
+        assert!(command_writes("confirm_resolve"));
+        assert!(command_writes("confirm_unresolve"));
+        assert!(!command_writes("help"));
+        assert!(!command_writes("graph_confirm_cap"));
+    }
+
+    #[test]
+    fn every_bound_key_appears_in_the_registry() {
+        let registry: std::collections::HashSet<KeyCode> = COMMANDS
+            .iter()
+            .filter_map(|command| hint_key(command.hint))
+            .collect();
+        let extras = [
+            KeyCode::Up,
+            KeyCode::Down,
+            KeyCode::PageUp,
+            KeyCode::PageDown,
+            KeyCode::Char('='),
+        ];
+        let views = [
+            View::Welcome,
+            View::Overview,
+            View::Pages,
+            View::Sources,
+            View::Findings,
+            View::Entities,
+            View::Timeline,
+            View::Notes,
+            View::Agent,
+            View::Jobs,
+            View::Tools,
+            View::Settings,
+            View::Artifacts,
+            View::Object,
+            View::Graph,
+            View::Audit,
+        ];
+        let mut codes = vec![
+            KeyCode::Esc,
+            KeyCode::Tab,
+            KeyCode::BackTab,
+            KeyCode::Enter,
+            KeyCode::Up,
+            KeyCode::Down,
+            KeyCode::PageUp,
+            KeyCode::PageDown,
+            KeyCode::Char(' '),
+        ];
+        for byte in b'!'..=b'~' {
+            codes.push(KeyCode::Char(byte as char));
+        }
+        let overlay = Overlay::None;
+        for view in views {
+            for code in &codes {
+                if map_registered_key(*code, view, false, &overlay).is_none() {
+                    continue;
+                }
+                assert!(
+                    registry.contains(code) || extras.contains(code),
+                    "{code:?} on {view:?} is bound but missing from COMMANDS"
+                );
+            }
+        }
     }
 
     #[test]

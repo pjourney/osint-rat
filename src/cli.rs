@@ -609,7 +609,7 @@ fn theme_command(cli: &Cli, command: &ThemeCommand) -> Result<()> {
             let env = crate::tui::TerminalEnv::from_process();
             print!(
                 "{}",
-                crate::tui::render_preview(&config, &env, name.as_deref(), *all)
+                crate::tui::render_preview(&config, &env, name.as_deref(), *all)?
             );
             Ok(())
         }
@@ -1818,6 +1818,9 @@ fn parse_target(kind_or_target: &str, target: Option<&str>) -> Result<Target> {
 }
 
 fn truncate(text: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
     if text.chars().count() <= width {
         text.to_string()
     } else {
@@ -1908,6 +1911,17 @@ mod tests {
                 assert!(!all);
             }
             other => panic!("expected theme preview {other:?}"),
+        }
+        for name in ["unknown", "default", "high-contrast"] {
+            let cli = Cli::try_parse_from(["os-int", "theme", "preview", name]).expect("parse");
+            let error = match &cli.command {
+                Some(Command::Theme { command }) => theme_command(&cli, command).expect_err(name),
+                other => panic!("expected theme {other:?}"),
+            };
+            let text = error.to_string();
+            assert!(text.contains("unknown theme"), "{text}");
+            assert!(text.contains("dark"), "{text}");
+            assert!(text.contains("phosphor"), "{text}");
         }
         let exposed = Cli::try_parse_from([
             "os-int",
