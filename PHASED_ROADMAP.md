@@ -19,7 +19,7 @@
 | 1 | Ontology runtime v1 | Done ([#5](https://github.com/pjourney/osint-rat/pull/5)) |
 | 2 | Graph & Search Around | Done ([#6](https://github.com/pjourney/osint-rat/pull/6)) |
 | 3 | Entity resolution | Done ([#7](https://github.com/pjourney/osint-rat/pull/7)) |
-| 4 | Ingest plane & connectors | In progress |
+| 4 | Ingest plane & connectors | In progress ([#8](https://github.com/pjourney/osint-rat/pull/8)) |
 | 5 | Playbooks & automations | Not started |
 | 6 | Temporal & geospatial | Not started |
 | 7 | Team, markings & audit | Not started |
