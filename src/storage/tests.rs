@@ -752,3 +752,151 @@ fn search_around_sqlite_fixture_matches_hop_counts_and_caps() {
     assert!(limited.requires_confirm());
     assert_eq!(limited.uncapped_node_count, 5);
 }
+
+#[test]
+fn resolve_merges_sources_and_unresolve_restores_without_orphans() {
+    let (mut store, investigation) = store_with_investigation();
+    store
+        .apply_batch(
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            &dns_batch("hash-resolve"),
+        )
+        .expect("batch");
+    let host = store
+        .add_entity(
+            investigation.id,
+            EntityKind::Hostname,
+            "example.com",
+            Provenance::Collected,
+            None,
+        )
+        .expect("host");
+    let before = store.load_investigation(investigation.id).expect("load");
+    let domain = before
+        .entities
+        .iter()
+        .find(|entity| entity.kind == EntityKind::Domain)
+        .expect("domain")
+        .clone();
+    let host_entity = before
+        .entities
+        .iter()
+        .find(|entity| entity.id == host)
+        .expect("host row")
+        .clone();
+    store
+        .create_finding(NewFinding {
+            investigation_id: investigation.id,
+            page_id: None,
+            title: "Host observed".into(),
+            details: String::new(),
+            confidence: Confidence::Medium,
+            provenance: Provenance::Analyst,
+            source_ids: host_entity.source_ids.clone(),
+        })
+        .expect("finding");
+    let resolution = store
+        .resolve_entities(
+            investigation.id,
+            &[domain.id, host],
+            domain.id,
+            "same canonical host",
+            "tester",
+        )
+        .expect("merge");
+    let merged = store.load_investigation(investigation.id).expect("merged");
+    let workspace = Workspace::new(merged.clone());
+    assert_eq!(
+        workspace.visible_entities().len(),
+        merged.entities.len() - 1
+    );
+    assert!(merged.is_absorbed(host));
+    assert_eq!(merged.canonical_id(host), domain.id);
+    let view = crate::model::ObjectView::for_entity(
+        &workspace,
+        workspace.entity(domain.id).expect("canonical"),
+    );
+    assert!(
+        view.constituents
+            .iter()
+            .any(|constituent| constituent.value == "example.com")
+    );
+    let graph = store
+        .search_around(
+            investigation.id,
+            &SearchAroundQuery::new(vec![domain.id], 2),
+        )
+        .expect("graph");
+    assert!(!graph.node_ids().any(|id| id == host));
+    assert!(graph.node_ids().any(|id| id == domain.id));
+    assert!(
+        merged
+            .timeline
+            .iter()
+            .any(|event| event.kind == TimelineKind::EntitiesResolved)
+    );
+    let suggestions = crate::model::suggest_resolutions(&merged);
+    assert!(
+        suggestions
+            .iter()
+            .all(|item| !item.entity_ids.contains(&domain.id) || !item.entity_ids.contains(&host)),
+        "auto-merge must not occur; resolved pairs stay out of suggestions: {suggestions:?}"
+    );
+    store
+        .unresolve_entities(resolution.id, "tester")
+        .expect("split");
+    let restored = store
+        .load_investigation(investigation.id)
+        .expect("restored");
+    assert!(!restored.is_absorbed(host));
+    assert_eq!(store.integrity_check().expect("integrity"), "ok");
+    assert!(store.foreign_key_violations().expect("fk").is_empty());
+    assert!(
+        restored
+            .timeline
+            .iter()
+            .any(|event| event.kind == TimelineKind::EntitiesUnresolved)
+    );
+    let restored_workspace = Workspace::new(restored.clone());
+    assert_eq!(
+        restored_workspace.visible_entities().len(),
+        restored.entities.len()
+    );
+}
+
+#[test]
+fn suggestions_appear_for_known_duplicates_without_merging() {
+    let (mut store, investigation) = store_with_investigation();
+    store
+        .add_entity(
+            investigation.id,
+            EntityKind::Username,
+            "octocat",
+            Provenance::Analyst,
+            None,
+        )
+        .expect("user");
+    store
+        .add_entity(
+            investigation.id,
+            EntityKind::Url,
+            "https://github.com/octocat",
+            Provenance::External,
+            None,
+        )
+        .expect("url");
+    let data = store.load_investigation(investigation.id).expect("load");
+    let suggestions = crate::model::suggest_resolutions(&data);
+    assert!(
+        suggestions
+            .iter()
+            .any(|item| item.rule == crate::model::SuggestionRule::UsernameProfileUrl),
+        "{suggestions:?}"
+    );
+    assert!(data.resolutions.is_empty());
+    assert_eq!(data.entities.len(), 2);
+}

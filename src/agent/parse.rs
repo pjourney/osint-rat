@@ -343,6 +343,9 @@ mod tests {
         assert_eq!(actual[1].name(), "PROPOSE_UNRESOLVE");
         assert_eq!(actual[2].name(), "RUN_PLAYBOOK");
         assert_eq!(actual[3].name(), "ASSERT_FINDING_TEMPLATE");
-        assert!(actual.iter().all(AgentAction::is_reserved));
+        assert!(!actual[0].is_reserved());
+        assert!(!actual[1].is_reserved());
+        assert!(actual[2].is_reserved());
+        assert!(actual[3].is_reserved());
     }
 }

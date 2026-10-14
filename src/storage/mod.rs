@@ -11,6 +11,7 @@ mod graph;
 mod load;
 pub mod migrations;
 mod pages;
+mod resolution;
 mod rows;
 
 use std::path::{Path, PathBuf};
@@ -44,6 +45,7 @@ pub(crate) enum SeqTable {
     Timeline,
     AgentRuns,
     Proposals,
+    Resolutions,
 }
 
 impl SeqTable {
@@ -59,6 +61,7 @@ impl SeqTable {
             SeqTable::Timeline => "timeline_events",
             SeqTable::AgentRuns => "agent_runs",
             SeqTable::Proposals => "proposals",
+            SeqTable::Resolutions => "resolutions",
         }
     }
 }

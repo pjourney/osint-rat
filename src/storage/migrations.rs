@@ -13,6 +13,11 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
         "ontology runtime: proposal audit actor and link-type catalog",
         V2,
     ),
+    (
+        3,
+        "entity resolution bags with reversible property and source writes",
+        V3,
+    ),
 ];
 
 const V1: &str = r#"
@@ -262,6 +267,27 @@ CREATE TABLE link_types (
 );
 "#;
 
+/// Resolution bags. Forward-only: do not edit. Constituent entity rows stay in place.
+const V3: &str = r#"
+CREATE TABLE resolutions (
+    id TEXT PRIMARY KEY,
+    investigation_id TEXT NOT NULL REFERENCES investigations (id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    canonical_id TEXT NOT NULL REFERENCES entities (id) ON DELETE RESTRICT,
+    constituent_ids TEXT NOT NULL,
+    status TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    unresolved_by TEXT,
+    unresolved_at TEXT,
+    property_writes TEXT NOT NULL DEFAULT '[]',
+    source_writes TEXT NOT NULL DEFAULT '[]',
+    UNIQUE (investigation_id, seq)
+);
+CREATE INDEX resolutions_investigation ON resolutions (investigation_id, status);
+"#;
+
 /// Applies all pending migrations inside individual transactions. Returns the number applied.
 pub fn migrate(connection: &mut Connection) -> rusqlite::Result<usize> {
     connection.execute_batch(
@@ -390,9 +416,12 @@ mod tests {
             )
             .expect("v1 finding");
         assert_eq!(current_version(&connection).expect("v1 version"), 1);
-        let applied = migrate(&mut connection).expect("applies v2");
-        assert_eq!(applied, 1);
-        assert_eq!(current_version(&connection).expect("v2 version"), 2);
+        let applied = migrate(&mut connection).expect("applies later versions");
+        assert_eq!(applied, 2);
+        assert_eq!(
+            current_version(&connection).expect("latest"),
+            latest_version()
+        );
         assert_eq!(migrate(&mut connection).expect("idempotent"), 0);
         let decided_by: Option<String> = connection
             .query_row(
@@ -436,12 +465,73 @@ mod tests {
         assert_eq!(count, 1);
         let down: i64 = connection
             .query_row(
-                "SELECT COUNT(*) FROM schema_migrations WHERE version > 2",
+                "SELECT COUNT(*) FROM schema_migrations WHERE version > 3",
                 [],
                 |row| row.get(0),
             )
             .expect("no down migration");
         assert_eq!(down, 0);
+        let resolutions: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'resolutions'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("resolutions");
+        assert_eq!(resolutions, 1);
+    }
+
+    #[test]
+    fn v3_is_forward_only_and_preserves_v2_rows() {
+        let mut connection = Connection::open_in_memory().expect("in-memory db");
+        connection
+            .execute_batch(
+                "CREATE TABLE schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    description TEXT NOT NULL,
+                    applied_at TEXT NOT NULL
+                );",
+            )
+            .expect("migrations table");
+        connection.execute_batch(V1).expect("v1");
+        connection.execute_batch(V2).expect("v2");
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, description, applied_at) VALUES (1, 'initial schema', ?1), (2, 'ontology runtime', ?1)",
+                params![now().to_rfc3339()],
+            )
+            .expect("record v1+v2");
+        connection
+            .execute(
+                "INSERT INTO investigations (id, name, description, tags, created_at, updated_at)
+                 VALUES ('11111111-1111-4111-8111-111111111111', 'V2 Case', '', '[]', ?1, ?1)",
+                params![now().to_rfc3339()],
+            )
+            .expect("investigation");
+        connection
+            .execute(
+                "INSERT INTO entities (id, investigation_id, seq, kind, value, label, notes, provenance, fields, created_at, updated_at)
+                 VALUES ('55555555-5555-4555-8555-555555555555', '11111111-1111-4111-8111-111111111111', 1, 'domain', 'example.com', '', '', 'analyst', '[]', ?1, ?1)",
+                params![now().to_rfc3339()],
+            )
+            .expect("entity");
+        assert_eq!(current_version(&connection).expect("v2 version"), 2);
+        let applied = migrate(&mut connection).expect("applies v3");
+        assert_eq!(applied, 1);
+        assert_eq!(current_version(&connection).expect("v3 version"), 3);
+        assert_eq!(migrate(&mut connection).expect("idempotent"), 0);
+        let entity_value: String = connection
+            .query_row(
+                "SELECT value FROM entities WHERE id = '55555555-5555-4555-8555-555555555555'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("entity survives");
+        assert_eq!(entity_value, "example.com");
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM resolutions", [], |row| row.get(0))
+            .expect("empty resolutions");
+        assert_eq!(count, 0);
     }
 
     #[test]
@@ -458,6 +548,7 @@ mod tests {
             "link_types",
             "jobs",
             "agent_runs",
+            "resolutions",
         ];
         for table in expected {
             let count: i64 = connection

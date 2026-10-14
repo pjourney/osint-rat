@@ -27,17 +27,16 @@ pub fn run(
 ) -> Vec<Check> {
     let mut checks = Vec::new();
     match store {
-        Some(store) => match store.integrity_check() {
-            Ok(result) if result == "ok" => checks.push(ok(
+        Some(store) => match database_health(store) {
+            Ok(detail) => checks.push(ok(
                 "Database",
                 format!(
-                    "{} (schema {})",
+                    "{} (schema {}) {detail}",
                     paths.database().display(),
                     store.schema_version().unwrap_or(0)
                 ),
             )),
-            Ok(result) => checks.push(warn("Database", result)),
-            Err(error) => checks.push(warn("Database", error.to_string())),
+            Err(error) => checks.push(warn("Database", error)),
         },
         None => checks.push(Check {
             name: "Database".into(),
@@ -89,6 +88,23 @@ pub fn run(
     checks.push(ok("Network", network));
     checks.push(ok("Logs", paths.log_dir().display().to_string()));
     checks
+}
+
+fn database_health(store: &Store) -> Result<String, String> {
+    let integrity = store.integrity_check().map_err(|error| error.to_string())?;
+    if integrity != "ok" {
+        return Err(integrity);
+    }
+    let foreign_keys = store
+        .foreign_key_violations()
+        .map_err(|error| error.to_string())?;
+    if !foreign_keys.is_empty() {
+        return Err(format!(
+            "foreign key violations: {}",
+            foreign_keys.join("; ")
+        ));
+    }
+    Ok("integrity ok, foreign keys ok".into())
 }
 
 fn ok(name: &str, detail: impl Into<String>) -> Check {

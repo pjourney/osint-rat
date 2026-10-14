@@ -199,7 +199,12 @@ pub fn search_around(data: &InvestigationData, query: &SearchAroundQuery) -> Sea
     let node_cap = query.node_cap();
     let edge_cap = query.edge_cap();
     let entities = entity_index(data);
-    let seeds = resolve_seeds(&query.seed_ids, &entities);
+    let remapped: Vec<Uuid> = query
+        .seed_ids
+        .iter()
+        .map(|id| data.canonical_id(*id))
+        .collect();
+    let seeds = resolve_seeds(&remapped, &entities);
     if seeds.is_empty() {
         return SearchAroundResult {
             hops_used: hops,
@@ -508,14 +513,19 @@ fn build_adjacency<'a>(
         if !allowed.edge(relationship) {
             continue;
         }
+        let from_id = data.canonical_id(relationship.from_id);
+        let to_id = data.canonical_id(relationship.to_id);
+        if from_id == to_id {
+            continue;
+        }
         adjacency
-            .entry(relationship.from_id)
+            .entry(from_id)
             .or_default()
-            .push((relationship, relationship.to_id));
+            .push((relationship, to_id));
         adjacency
-            .entry(relationship.to_id)
+            .entry(to_id)
             .or_default()
-            .push((relationship, relationship.from_id));
+            .push((relationship, from_id));
     }
     for neighbors in adjacency.values_mut() {
         neighbors.sort_by_key(|(relationship, neighbor)| (relationship.seq, *neighbor));
@@ -588,16 +598,21 @@ fn induced_edges(
         if !allowed.edge(relationship) {
             continue;
         }
-        let Some(&from_hop) = hop_of.get(&relationship.from_id) else {
+        let from_id = data.canonical_id(relationship.from_id);
+        let to_id = data.canonical_id(relationship.to_id);
+        if from_id == to_id {
+            continue;
+        }
+        let Some(&from_hop) = hop_of.get(&from_id) else {
             continue;
         };
-        let Some(&to_hop) = hop_of.get(&relationship.to_id) else {
+        let Some(&to_hop) = hop_of.get(&to_id) else {
             continue;
         };
         edges.push(GraphEdge {
             id: relationship.id,
-            from_id: relationship.from_id,
-            to_id: relationship.to_id,
+            from_id,
+            to_id,
             kind: relationship.kind.clone(),
             discovered_at_hop: from_hop.max(to_hop),
         });
@@ -811,6 +826,7 @@ mod tests {
             agent_runs: Vec::new(),
             proposals: Vec::new(),
             page_entities: Vec::new(),
+            resolutions: Vec::new(),
         };
         (data, domain, ip, nameserver, asn, ns_ip, isolated)
     }
@@ -1047,6 +1063,7 @@ mod tests {
             agent_runs: Vec::new(),
             proposals: Vec::new(),
             page_entities: Vec::new(),
+            resolutions: Vec::new(),
         };
         let one = search_around(&data, &SearchAroundQuery::new(vec![domain.id], 1));
         assert_eq!(one.nodes.len(), 3);
@@ -1082,6 +1099,7 @@ mod tests {
             agent_runs: Vec::new(),
             proposals: Vec::new(),
             page_entities: Vec::new(),
+            resolutions: Vec::new(),
         };
         let one = search_around(&data, &SearchAroundQuery::new(vec![alpha.id], 1));
         assert_eq!(one.nodes.len(), 3);
@@ -1119,6 +1137,7 @@ mod tests {
             agent_runs: Vec::new(),
             proposals: Vec::new(),
             page_entities: Vec::new(),
+            resolutions: Vec::new(),
         };
         let mut query = SearchAroundQuery::new(vec![domain.id], 2);
         query.link_types = vec!["resolves_to".into()];

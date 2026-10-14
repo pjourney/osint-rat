@@ -77,6 +77,14 @@ pub enum Action {
     GraphApplyFacet,
     /// Clear kind / link / provenance filters on the Graph screen.
     GraphClearFilters,
+    /// Toggle the highlighted entity into the merge set (Entities).
+    ToggleMergeMark,
+    /// Propose merging the marked entities (confirm required).
+    ProposeMerge,
+    /// Propose unresolving the current object (confirm required).
+    Unresolve,
+    /// Open scored resolution suggestions. Nothing auto-merges.
+    OpenSuggestions,
     /// Run a command-palette id. The ids are declared in `app::commands`.
     Command(&'static str),
     /// Confirm the open form or send the agent prompt.

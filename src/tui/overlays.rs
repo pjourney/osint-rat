@@ -34,6 +34,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         Overlay::Proposals { run_id, selected } => {
             proposals(frame, area, app, *run_id, *selected, theme)
         }
+        Overlay::Suggestions { selected } => suggestions(frame, area, app, *selected, theme),
     }
 }
 
@@ -270,6 +271,60 @@ fn proposals(
     frame.render_widget(Clear, popup);
     frame.render_widget(
         Paragraph::new(lines).block(pane_block("Agent proposals", true, theme)),
+        popup,
+    );
+}
+
+fn suggestions(frame: &mut Frame, area: Rect, app: &App, selected: usize, theme: &Theme) {
+    let items: Vec<String> = app
+        .listed_suggestions()
+        .into_iter()
+        .map(|suggestion| {
+            let labels = suggestion
+                .entity_ids
+                .iter()
+                .filter_map(|id| {
+                    app.workspace
+                        .as_ref()
+                        .and_then(|workspace| workspace.entity(*id))
+                        .map(|entity| entity.short_ref().to_string())
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "{:>3}  {:<22}  {}  {}",
+                suggestion.score,
+                suggestion.rule.as_str(),
+                labels,
+                suggestion.reason
+            )
+        })
+        .collect();
+    let height = (items.len() as u16 + 4).clamp(8, 18);
+    let popup = centered(area, 72, height);
+    frame.render_widget(Clear, popup);
+    let mut lines = vec![
+        Line::from("Scored suggestions. Enter proposes a merge. Nothing auto-merges."),
+        Line::from(""),
+    ];
+    for (index, item) in items.iter().enumerate() {
+        let style = if index == selected {
+            theme.selected
+        } else {
+            Style::default()
+        };
+        lines.push(Line::from(Span::styled(item.clone(), style)));
+    }
+    if items.is_empty() {
+        lines.push(Line::from(Span::styled("(none)", theme.muted)));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Enter confirm   Esc close",
+        theme.muted,
+    )));
+    frame.render_widget(
+        Paragraph::new(lines).block(pane_block("Resolution suggestions", true, theme)),
         popup,
     );
 }

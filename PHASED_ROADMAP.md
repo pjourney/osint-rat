@@ -18,7 +18,7 @@
 | 0 | Foundation & vision freeze | Done ([#4](https://github.com/pjourney/osint-rat/pull/4)) |
 | 1 | Ontology runtime v1 | Done ([#5](https://github.com/pjourney/osint-rat/pull/5)) |
 | 2 | Graph & Search Around | Done ([#6](https://github.com/pjourney/osint-rat/pull/6)) |
-| 3 | Entity resolution | Not started |
+| 3 | Entity resolution | In progress |
 | 4 | Ingest plane & connectors | Not started |
 | 5 | Playbooks & automations | Not started |
 | 6 | Temporal & geospatial | Not started |
@@ -148,11 +148,11 @@ Entity resolution with reversible merge: merge records that are the same real-wo
 
 ### Success criteria
 
-- [ ] Merge two entities; Object View shows constituents; graph shows one node; sources from both remain cited on findings/links.
-- [ ] Unresolve restores constituents; no orphaned FKs in SQLite integrity check (`doctor` / pragma).
-- [ ] Suggestions appear for a fixture with known duplicates; auto-merge does not occur.
-- [ ] Export/import preserves resolution metadata (format bump if needed, with migration notes).
-- [ ] Tests for merge, unresolve, and suggestion scoring; CI green.
+- [x] Merge two entities; Object View shows constituents; graph shows one node; sources from both remain cited on findings/links.
+- [x] Unresolve restores constituents; no orphaned FKs in SQLite integrity check (`doctor` / pragma).
+- [x] Suggestions appear for a fixture with known duplicates; auto-merge does not occur.
+- [x] Export/import preserves resolution metadata (format bump if needed, with migration notes).
+- [x] Tests for merge, unresolve, and suggestion scoring; CI green.
 
 ### How to complete
 

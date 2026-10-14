@@ -80,12 +80,24 @@ Implemented agent Actions stay the six kinds the workbench already applies. Rese
 | `LINK_ENTITY` | yes | |
 | `RUN_COLLECTOR` | yes | Passive collectors only |
 | `GENERATE_REPORT` | yes | |
-| `PROPOSE_RESOLVE` | no | Entity resolution (later phase) |
-| `PROPOSE_UNRESOLVE` | no | Entity resolution (later phase) |
+| `PROPOSE_RESOLVE` | yes | Accept required; never auto-merge |
+| `PROPOSE_UNRESOLVE` | yes | Accept required |
 | `RUN_PLAYBOOK` | no | Playbooks (later phase) |
 | `ASSERT_FINDING_TEMPLATE` | no | Playbooks (later phase) |
 
-Accept and reject record `decided_at` and `decided_by` (the local user name from `$USER` / `$USERNAME`, or `local`). Pending rows leave both empty. `decided_by` is an optional archive field; format version stays **1**.
+Accept and reject record `decided_at` and `decided_by` (the local user name from `$USER` / `$USERNAME`, or `local`). Pending rows leave both empty. `decided_by` is an optional archive field. Resolution bags required a format bump: `FORMAT_VERSION` is **2**.
+
+## Entity resolution
+
+A **resolution bag** is a canonical entity plus the constituents absorbed into it. Constituent rows stay in SQLite. The bag records property writes (`entities.fields`, plus label/notes) and source citations copied onto the canonical so unresolve can restore them. Nothing is deleted.
+
+- Manual merge: on **Entities**, `Space` marks rows, `m` proposes, Enter confirms. Esc cancels. Winner is the highlighted marked row (else the first marked).
+- Unresolve: from Object View (or Entities) on the canonical, `u` then confirm.
+- Suggestions (rules v1): same canonical email/domain/IP/repo URL; username↔profile URL; shared certificate SAN clusters. Palette **Resolution suggestions**. Scored only — never auto-merge.
+- Agent Actions `PROPOSE_RESOLVE` / `PROPOSE_UNRESOLVE` apply only after accept. Timeline: `entities_resolved` / `entities_unresolved` with actor and constituents.
+- Graph and Search Around collapse constituents onto the canonical (one node). Object View lists constituents and the union of sources, links, and findings.
+
+Safe merge practices: [user guide](guide.md#entity-resolution).
 
 ## Graph and Search Around
 
@@ -98,9 +110,10 @@ From **Entities**, press `Enter` (or `v`, or the palette command **Object View**
 The screen shows:
 
 1. At least one **property group** (Identity is always present).
-2. **Linked objects** grouped by catalog link type (unknown verbs under Other).
-3. **Supporting sources** cited on the entity.
+2. **Linked objects** grouped by catalog link type (unknown verbs under Other), including edges from absorbed constituents remapped to the canonical.
+3. **Supporting sources** cited on the entity (union with constituents after a merge).
 4. **Findings** on pages that include the entity, or that share a cited source.
+5. **Constituents** when the object is the canonical of an active resolution bag. `u` unresolves.
 
 ## See also
 
@@ -109,3 +122,4 @@ The screen shows:
 - [Architecture — where to make a change](ARCHITECTURE.md#where-to-make-a-change)
 - [User guide — Object View](guide.md#object-view)
 - [User guide — Graph and Search Around](guide.md#graph-and-search-around)
+- [User guide — Entity resolution](guide.md#entity-resolution)

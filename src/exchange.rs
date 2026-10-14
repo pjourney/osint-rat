@@ -17,8 +17,8 @@ use crate::storage::Store;
 /// On-disk investigation archive version (`os-int-investigation`).
 ///
 /// Import rejects any archive whose `format_version` is greater than this value.
-/// Bump rules and reserved v2 keys: `docs/ontology-exchange.md`.
-pub const FORMAT_VERSION: u32 = 1;
+/// Version 2 adds `data.resolutions`. Bump rules: `docs/ontology-exchange.md`.
+pub const FORMAT_VERSION: u32 = 2;
 pub const MANIFEST_NAME: &str = "investigation.osint.json";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -206,6 +206,9 @@ fn reassign_ids(data: &mut InvestigationData) {
     for proposal in &mut data.proposals {
         proposal.investigation_id = new_id;
     }
+    for resolution in &mut data.resolutions {
+        resolution.investigation_id = new_id;
+    }
 }
 
 const MAX_COPY_DEPTH: u32 = 32;
@@ -328,12 +331,70 @@ mod tests {
         );
         assert!(view.groups.iter().any(|group| group.id == "identity"));
         assert!(view.links.iter().any(|group| group.catalogued));
+        assert!(imported.resolutions.is_empty());
         let export_dir = directory.path().join("re-export");
         export_data(&imported, directory.path(), &export_dir).expect("re-export");
         let text = fs::read_to_string(export_dir.join(MANIFEST_NAME)).expect("manifest");
         let manifest: ArchiveManifest = serde_json::from_str(&text).expect("parse");
         assert_eq!(manifest.format_version, FORMAT_VERSION);
-        assert_eq!(FORMAT_VERSION, 1);
+        assert_eq!(FORMAT_VERSION, 2);
+        assert!(manifest.data.resolutions.is_empty());
+    }
+
+    #[test]
+    fn export_import_preserves_resolution_bags() {
+        let mut store = Store::open_in_memory().expect("store");
+        let investigation = store
+            .create_investigation("Resolve Me", "")
+            .expect("created");
+        let domain = store
+            .add_entity(
+                investigation.id,
+                crate::model::EntityKind::Domain,
+                "example.com",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("domain");
+        let host = store
+            .add_entity(
+                investigation.id,
+                crate::model::EntityKind::Hostname,
+                "example.com",
+                crate::model::Provenance::Collected,
+                None,
+            )
+            .expect("host");
+        store
+            .resolve_entities(
+                investigation.id,
+                &[domain, host],
+                domain,
+                "same host",
+                "tester",
+            )
+            .expect("merge");
+        let data = store.load_investigation(investigation.id).expect("load");
+        assert_eq!(data.resolutions.len(), 1);
+        let directory = tempfile::tempdir().expect("tempdir");
+        let export_dir = directory.path().join("archive");
+        export_data(&data, directory.path(), &export_dir).expect("export");
+        let text = fs::read_to_string(export_dir.join(MANIFEST_NAME)).expect("manifest");
+        let manifest: ArchiveManifest = serde_json::from_str(&text).expect("parse");
+        assert_eq!(manifest.format_version, 2);
+        assert_eq!(manifest.data.resolutions.len(), 1);
+        let mut target = Store::open_in_memory().expect("target");
+        let paths = crate::paths::AppPaths::new(
+            directory.path().join("cfg"),
+            directory.path().join("data"),
+        );
+        paths.ensure_dirs().expect("dirs");
+        let imported =
+            import_investigation(&mut target, &export_dir, &paths, false).expect("import");
+        assert_eq!(imported.resolutions.len(), 1);
+        assert_eq!(imported.resolutions[0].canonical_id, domain);
+        assert!(imported.resolutions[0].constituent_ids.contains(&host));
+        assert!(imported.is_absorbed(host));
     }
 
     #[test]

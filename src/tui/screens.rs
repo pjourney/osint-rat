@@ -338,6 +338,26 @@ fn object_view(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused:
             truncate(&finding.title, 48)
         )));
     }
+    if !view.constituents.is_empty() {
+        lines.push(Line::from(""));
+        let heading = match &view.resolution_ref {
+            Some(reference) => format!("Constituents ({reference})"),
+            None => "Constituents".into(),
+        };
+        lines.push(Line::from(Span::styled(heading, theme.header)));
+        for constituent in &view.constituents {
+            lines.push(Line::from(format!(
+                "  {}  {:<10}  {}",
+                constituent.reference,
+                constituent.kind,
+                truncate(&constituent.label, 40)
+            )));
+        }
+        lines.push(Line::from(Span::styled(
+            "  u unresolve this bag",
+            theme.muted,
+        )));
+    }
     frame.render_widget(
         Paragraph::new(lines)
             .block(pane_block("Object", focused, theme))
@@ -620,26 +640,29 @@ fn findings(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
 }
 
 fn entities(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
-    let items = app
-        .workspace
-        .as_ref()
-        .map(|workspace| {
-            workspace
-                .data
-                .entities
-                .iter()
-                .map(|entity| {
-                    format!(
-                        "{}  {:<12}  {}  {}",
-                        entity.short_ref(),
-                        entity.kind.label(),
-                        entity.provenance.badge(),
-                        entity.display_name()
-                    )
-                })
-                .collect()
+    let items: Vec<String> = app
+        .listed_entities()
+        .into_iter()
+        .map(|entity| {
+            let mark = if app.merge_marks.contains(&entity.id) {
+                "[x]"
+            } else {
+                "[ ]"
+            };
+            format!(
+                "{mark}  {}  {:<12}  {}  {}",
+                entity.short_ref(),
+                entity.kind.label(),
+                entity.provenance.badge(),
+                entity.display_name()
+            )
         })
-        .unwrap_or_default();
+        .collect();
+    let items = if items.is_empty() {
+        vec!["(no entities — collect on a page, or press n)".into()]
+    } else {
+        items
+    };
     frame.render_widget(
         list_from(items, app.selected, theme).block(pane_block("Entities", focused, theme)),
         area,
@@ -1008,8 +1031,8 @@ fn detail_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'st
         View::Entities | View::Graph => {
             let entity = app
                 .entity_id
-                .and_then(|id| workspace.entity(id))
-                .or_else(|| workspace.data.entities.get(app.selected));
+                .and_then(|id| workspace.entity(workspace.canonical_id(id)))
+                .or_else(|| app.listed_entities().into_iter().nth(app.selected));
             if let Some(entity) = entity {
                 let mut lines = vec![
                     Line::from(format!("{}  {}", entity.short_ref(), entity.display_name())),

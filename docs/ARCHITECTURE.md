@@ -51,8 +51,8 @@ A useful order:
 
 | Module | Responsibility |
 | --- | --- |
-| `model/` | Domain types: `Investigation`, `Page`, `Source`, `Finding`, `Entity`, `Relationship`, `Note`, `Artifact`, `TimelineEvent`, `JobRecord`, `AgentRun`, `Proposal`. Object/link/Action registries and Object View data in `ontology`. Search Around and graph visibility in `graph`. Short references (`S-12`, `E-4`, …). No UI or storage code. |
-| `storage/` | `Store` wraps a SQLite connection: migrations, CRUD, applying collector output transactionally, loading a full `Workspace`. Graph query (`Store::search_around`) runs the same hop expansion as `model::search_around` on a loaded snapshot. |
+| `model/` | Domain types: `Investigation`, `Page`, `Source`, `Finding`, `Entity`, `Relationship`, `Resolution`, `Note`, `Artifact`, `TimelineEvent`, `JobRecord`, `AgentRun`, `Proposal`. Object/link/Action registries and Object View data in `ontology`. Search Around and graph visibility in `graph`. Resolution bags and suggestion rules in `resolution`. Short references (`S-12`, `E-4`, `V-1`, …). No UI or storage code. |
+| `storage/` | `Store` wraps a SQLite connection: migrations, CRUD, applying collector output transactionally, loading a full `Workspace`. Graph query (`Store::search_around`) runs the same hop expansion as `model::search_around` on a loaded snapshot. Merge/unresolve lives in `storage/resolution.rs`. |
 | `files.rs` | Investigation directory layout and content-addressed snapshot storage. |
 | `collectors/` | `Collector` trait plus built-ins: DNS, RDAP, HTTP, TLS, certificate transparency, IP intelligence, repository, file. `diagnose` turns observations into structured readings. Collectors return a `CollectionOutput` and never touch the database. |
 | `tools/` | External tool registry: `PATH` detection, built-in and user-defined tool definitions, argument templates. |
@@ -79,6 +79,7 @@ A useful order:
 | Change a key binding | `tui/keymap.rs`, including `HELP_TEXT`, and the keyboard tables in the user guide |
 | Change a screen | `tui/screens.rs`. Put the state change in `app/`, not in the widget. Object View is `View::Object`. Graph is `View::Graph` |
 | Change Search Around or graph caps | `model/graph.rs` (pure query), then `storage/graph.rs` (`Store::search_around`), then `app/graph.rs` and `tui/screens.rs` |
+| Change merge, unresolve, or suggestion rules | `model/resolution.rs` (bags + scoring), `storage/resolution.rs`, then `app/resolution.rs` and Object View |
 | Add a palette command | `app/commands.rs`, then handle the id in `App::run_command` |
 | Add a report section | `report/`. Keep AI-written text labelled as inference |
 | Change the on-disk export | `exchange/`. Follow the bump rules in [ontology-exchange.md](ontology-exchange.md#format_version-bump-rules). Bump `FORMAT_VERSION` if older archives would no longer import, or if a new collection must survive round-trip |
@@ -125,7 +126,7 @@ Database rows store **relative** paths inside the investigation directory, so an
 - Codex runs as `codex exec --json --skip-git-repo-check --sandbox read-only --ephemeral`, with the prompt on stdin.
 - The `AgentContext` is serialized to Markdown. Trusted os-int instructions are passed separately (system prompt) when the agent supports it. All collected material is wrapped in `<<<UNTRUSTED … nonce=…>>>` fences with a per-request random nonce, and any fence-like text inside the material is neutralized.
 - The exact prompt is saved as an artifact for every run, so an analyst can audit what the agent saw.
-- Agents may propose structured actions in a fenced `os-int-actions` JSON block: `ADD_FINDING`, `ADD_NOTE`, `CREATE_PAGE`, `LINK_ENTITY`, `RUN_COLLECTOR`, `GENERATE_REPORT`. Proposals are stored as pending and applied only after the analyst accepts them. Accepted AI findings keep `provenance = agent`.
+- Agents may propose structured actions in a fenced `os-int-actions` JSON block: `ADD_FINDING`, `ADD_NOTE`, `CREATE_PAGE`, `LINK_ENTITY`, `RUN_COLLECTOR`, `GENERATE_REPORT`, `PROPOSE_RESOLVE`, `PROPOSE_UNRESOLVE`. Proposals are stored as pending and applied only after the analyst accepts them. Accepted AI findings keep `provenance = agent`. Resolution never auto-merges.
 
 ## Decisions
 
@@ -152,6 +153,7 @@ Database rows store **relative** paths inside the investigation directory, so an
 | Source | One observation, with provenance, a retrieval time, and usually a content hash. |
 | Entity | A normalized identifier. Upserted by kind plus canonical value. Graph nodes are entities. |
 | Search Around | Hop expansion from a seed entity along relationships, with optional kind / link / provenance / time filters and render caps. |
+| Resolution bag | Canonical entity plus absorbed constituents. Property and source writes are recorded so unresolve can restore them. |
 | Finding | A claim. Collected diagnostics, analyst conclusions, and accepted agent inferences are all findings, distinguished by provenance. |
 | Proposal | A structured agent action waiting for the analyst to accept or reject it. |
 | Batch | The `EvidenceBatch` / `CollectionOutput` a collector returns. Applied in one transaction. |
