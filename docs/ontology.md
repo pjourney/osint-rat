@@ -70,7 +70,7 @@ Empty `from_kinds` / `to_kinds` means any entity kind. The catalog does not reje
 
 ## Actions
 
-Implemented agent Actions stay the six kinds the workbench already applies. Reserved kinds are catalogued so later phases do not invent a second enum. They may be stored if an agent emits them; accept is refused.
+Implemented agent Actions include playbook kinds. AI and automations only propose; nothing is written until you accept.
 
 | Kind | Implemented | Notes |
 | --- | --- | --- |
@@ -82,8 +82,8 @@ Implemented agent Actions stay the six kinds the workbench already applies. Rese
 | `GENERATE_REPORT` | yes | |
 | `PROPOSE_RESOLVE` | yes | Accept required; never auto-merge |
 | `PROPOSE_UNRESOLVE` | yes | Accept required |
-| `RUN_PLAYBOOK` | no | Playbooks (later phase) |
-| `ASSERT_FINDING_TEMPLATE` | no | Playbooks (later phase) |
+| `RUN_PLAYBOOK` | yes | Bundled ids only (`domain-infra`, `mail-policy`, `cert-estate`, `repo-surface`). Nested playbooks and file paths are refused. Active tools are refused |
+| `ASSERT_FINDING_TEMPLATE` | yes | Pending until accept. Playbook-originated accepts use `analyst` provenance; agent-originated accepts keep `agent` |
 
 Accept and reject record `decided_at` and `decided_by` (the local user name from `$USER` / `$USERNAME`, or `local`). Pending rows leave both empty. `decided_by` is an optional archive field. Resolution bags required a format bump: `FORMAT_VERSION` is **2**.
 
@@ -124,3 +124,4 @@ The screen shows:
 - [User guide — Object View](guide.md#object-view)
 - [User guide — Graph and Search Around](guide.md#graph-and-search-around)
 - [User guide — Entity resolution](guide.md#entity-resolution)
+- [Playbooks](playbooks.md)

@@ -107,6 +107,7 @@ fn map_normal_key(key: KeyEvent, view: View, ctrl: bool) -> Option<Action> {
         KeyCode::Char('e') => Some(Action::Edit),
         KeyCode::Char('r') => Some(Action::Refresh),
         KeyCode::Char('i') => Some(Action::Command("ingest")),
+        KeyCode::Char('b') => Some(Action::Command("run_playbook")),
         KeyCode::Char('v') => Some(Action::OpenObjectView),
         KeyCode::Char('g') => Some(Action::OpenGraph),
         KeyCode::Char('s') => Some(Action::SearchAround),
@@ -153,6 +154,7 @@ os-int keyboard shortcuts
   e            Edit notes in $EDITOR (Overview) or open Settings
   r            Run default collectors for this page
   i            Ingest STIX / MISP / CSV / JSON / Evidence Batch
+  b            Run playbook (bundled YAML or a file)
   v            Object View for the selected entity or page
   g            Graph (entities as nodes, relationships as edges)
   s            Search Around from the selection (default 2 hops)
@@ -196,6 +198,8 @@ and IP intelligence. An email page collects DNS, CT, and the
 email identity pack. A username page collects public profiles.
 Press p and type dns, rdap, http, tls, ct, ip, email, username,
 or subdomain for one collector. i ingests a STIX/MISP/CSV file.
+Press b (or palette Run playbook) for domain-infra and other playbooks.
+Watch and Playbook prompt are palette commands. Automations propose.
 
 Collected material is untrusted evidence. Accepting an AI finding
 keeps the AI badge. os-int observes public information.
@@ -232,6 +236,10 @@ mod tests {
         assert!(matches!(
             map_key(press(KeyCode::Char('i')), &overlay, View::Entities, false),
             Some(Action::Command("ingest"))
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('b')), &overlay, View::Entities, false),
+            Some(Action::Command("run_playbook"))
         ));
         assert!(map_key(press(KeyCode::Char('i')), &overlay, View::Graph, false).is_some());
         assert!(matches!(
@@ -322,7 +330,7 @@ mod tests {
         let ingest = map_key(press(KeyCode::Char('i')), &overlay, View::Entities, false);
         assert!(matches!(ingest, Some(Action::Command("ingest"))));
         let occupied: &[char] = &[
-            'q', 'a', 'p', 'n', 'e', 'r', 'v', 'g', 's', 'm', 'u', 'j', 'k', '/', '?',
+            'q', 'a', 'p', 'n', 'e', 'r', 'v', 'g', 's', 'm', 'u', 'j', 'k', '/', '?', 'b',
         ];
         assert!(!occupied.contains(&'i'));
         for ch in occupied {
@@ -336,6 +344,32 @@ mod tests {
                 "{ch} must not also map to ingest"
             );
         }
+    }
+
+    #[test]
+    fn playbook_key_is_unique_in_normal_mode() {
+        let overlay = Overlay::None;
+        let playbook = map_key(press(KeyCode::Char('b')), &overlay, View::Entities, false);
+        assert!(matches!(playbook, Some(Action::Command("run_playbook"))));
+        let occupied: &[char] = &[
+            'q', 'a', 'p', 'n', 'e', 'r', 'v', 'g', 's', 'm', 'u', 'j', 'k', '/', '?', 'i',
+        ];
+        assert!(!occupied.contains(&'b'));
+        for ch in occupied {
+            let action = map_key(press(KeyCode::Char(*ch)), &overlay, View::Entities, false);
+            assert!(
+                action.is_some(),
+                "expected {ch} to stay bound so playbook cannot collide silently"
+            );
+            assert!(
+                !matches!(action, Some(Action::Command("run_playbook"))),
+                "{ch} must not also map to run_playbook"
+            );
+        }
+        assert!(matches!(
+            map_key(press(KeyCode::Char('b')), &overlay, View::Entities, true),
+            Some(Action::InsertChar('b'))
+        ));
     }
 
     #[test]

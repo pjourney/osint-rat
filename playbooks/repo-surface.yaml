@@ -1,0 +1,24 @@
+format: os-int-playbook
+format_version: 1
+id: repo-surface
+name: Repository surface
+description: >
+  Inspect a public repository, Search Around contributors and references, and
+  propose a review finding. Identity merges stay pending.
+seed:
+  type: repository
+steps:
+  - collect: repository
+  - search_around:
+      hops: 2
+      link_types:
+        - contributed_to
+        - associated_with
+        - references
+  - assert_finding_template:
+      title: Review repository surface
+      details: >
+        Confirm owners, contributors, and linked URLs are cited. Accept this
+        finding only after checking Object View.
+  - propose_resolve:
+      reason: Same canonical repository URL or matching contributor emails

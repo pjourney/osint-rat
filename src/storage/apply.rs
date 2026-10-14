@@ -88,18 +88,27 @@ impl Store {
         batch: &EvidenceBatch,
     ) -> Result<ApplySummary> {
         let transaction = self.connection_mut().transaction()?;
-        let mut summary = ApplySummary::default();
-        let changes = apply_sources(&transaction, context, batch, &mut summary)?;
-        let entity_ids = apply_entities(&transaction, context, batch, &mut summary)?;
-        apply_relationships(&transaction, context, batch, &entity_ids, &mut summary)?;
-        apply_timeline(&transaction, context, batch, &entity_ids, &mut summary)?;
-        apply_observation_changes(&transaction, context, &changes, &mut summary)?;
-        apply_artifacts(&transaction, context, batch, &mut summary)?;
-        apply_diagnostic_findings(&transaction, context, batch, &mut summary)?;
+        let summary = apply_batch_on(&transaction, context, batch)?;
         touch_investigation(&transaction, context.investigation_id)?;
         transaction.commit()?;
         Ok(summary)
     }
+}
+
+pub(crate) fn apply_batch_on(
+    connection: &Connection,
+    context: ApplyContext,
+    batch: &EvidenceBatch,
+) -> rusqlite::Result<ApplySummary> {
+    let mut summary = ApplySummary::default();
+    let changes = apply_sources(connection, context, batch, &mut summary)?;
+    let entity_ids = apply_entities(connection, context, batch, &mut summary)?;
+    apply_relationships(connection, context, batch, &entity_ids, &mut summary)?;
+    apply_timeline(connection, context, batch, &entity_ids, &mut summary)?;
+    apply_observation_changes(connection, context, &changes, &mut summary)?;
+    apply_artifacts(connection, context, batch, &mut summary)?;
+    apply_diagnostic_findings(connection, context, batch, &mut summary)?;
+    Ok(summary)
 }
 
 /// A public record whose latest stored copy differs from the copy just collected.

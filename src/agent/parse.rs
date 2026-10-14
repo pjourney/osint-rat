@@ -345,7 +345,7 @@ mod tests {
         assert_eq!(actual[3].name(), "ASSERT_FINDING_TEMPLATE");
         assert!(!actual[0].is_reserved());
         assert!(!actual[1].is_reserved());
-        assert!(actual[2].is_reserved());
-        assert!(actual[3].is_reserved());
+        assert!(!actual[2].is_reserved());
+        assert!(!actual[3].is_reserved());
     }
 }

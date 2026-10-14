@@ -5,7 +5,7 @@ Two related payloads move investigation data in and out of os-int:
 1. **Investigation archive** — the on-disk export written by `os-int export` (`investigation.osint.json` plus a `files/` tree). This is format `os-int-investigation`, version **`2`**.
 2. **Evidence batch** — the in-memory and connector payload collectors and ingest return. `storage::apply` writes it in one transaction. On disk / sidecar stdout it uses envelope `format` `os-int-evidence-batch`, `format_version` **1** (`ingest::BATCH_FORMAT_VERSION`). That constant is not the archive `FORMAT_VERSION`.
 
-This page describes **today’s** shapes from [`src/exchange.rs`](../src/exchange.rs), [`src/model/batch.rs`](../src/model/batch.rs), and [`docs/schema.md`](schema.md), then reserved later-version extension points (Events, playbook Actions, markings, audit) and the rules for bumping `FORMAT_VERSION`. Version 2 ships **resolution bags** as `data.resolutions`. Do not emit reserved keys that are not listed as implemented.
+This page describes **today’s** shapes from [`src/exchange.rs`](../src/exchange.rs), [`src/model/batch.rs`](../src/model/batch.rs), and [`docs/schema.md`](schema.md), then reserved later-version extension points (Events, markings, audit) and the rules for bumping `FORMAT_VERSION`. Version 2 ships **resolution bags** as `data.resolutions`. Playbook YAML is a **separate** envelope (`os-int-playbook`, `PLAYBOOK_FORMAT_VERSION` 1) and is not this archive. Do not emit reserved keys that are not listed as implemented.
 
 The product thesis is in [VISION.md](../VISION.md). Phase gates are in [PHASED_ROADMAP.md](../PHASED_ROADMAP.md).
 
@@ -59,7 +59,7 @@ Paths inside `data` stay **relative** to the investigation directory. Export doe
 | `resolutions` | Resolution bags (Phase 3). Empty / omitted on version-1 archives (`#[serde(default)]`). |
 | `page_entities` | `{ "page_id", "entity_id" }` links (`page_entities` table). A page’s `entity_id` is the primary subject and may be omitted from this list. |
 
-**Not exported:** `ui_state` (last view, last page, agent thread). That is local workbench chrome, not case evidence.
+**Not exported:** `ui_state` (last view, last page, agent thread), `playbook_runs`, and `automations`. Those are local workbench chrome, not case evidence. Playbook YAML lives under [`playbooks/`](../playbooks/) or a path you pass to `os-int playbook run`; it is not packed into the archive.
 
 Every investigation-scoped row has `id` (UUID, stable across export/import), `investigation_id`, and `seq` (per-table short reference: `P-1`, `S-12`, `E-4`, …), with two exceptions: `page_entities` is only `{ page_id, entity_id }` (no `id`, `investigation_id`, or `seq`), and `JobRecord.investigation_id` is `Option<Uuid>`. Short refs are not unique across tables.
 
@@ -87,11 +87,11 @@ Source kinds today: `dns`, `rdap`, `http`, `tls`, `ct`, `ip_intel`, `repository`
 
 Artifact kinds today: `snapshot`, `file`, `report`, `agent_context`, `tool_output`, `repository`.
 
-Timeline kinds today: `registration`, `expiration`, `updated`, `certificate_issued`, `certificate_expires`, `commit`, `release`, `published`, `observed`, `changed`, `user`, `finding`, `investigation`, `entities_resolved`, `entities_unresolved`.
+Timeline kinds today: `registration`, `expiration`, `updated`, `certificate_issued`, `certificate_expires`, `commit`, `release`, `published`, `observed`, `changed`, `user`, `finding`, `investigation`, `entities_resolved`, `entities_unresolved`, `playbook_run`. `playbook_run` is additive (`TimelineKind::Other` on a down-level reader); it does not bump `FORMAT_VERSION`.
 
 Built-in relationship verbs (`src/model/relationship.rs` `kinds`) include `resolves_to`, `alias_of`, `uses_nameserver`, `mail_handled_by`, `spf_includes`, `reverse_dns`, `announced_by`, `operated_by`, `registered_with`, `registered_to`, `redirects_to`, `serves`, `links_to`, `mentions`, `presents_certificate`, `issued_by`, `covers`, `subdomain_of`, `references`, `contributed_to`, `hosted_on`, `associated_with`, `contains`. Other `snake_case` verbs are stored as-is.
 
-Agent actions today: `ADD_FINDING`, `ADD_NOTE`, `CREATE_PAGE`, `LINK_ENTITY`, `RUN_COLLECTOR`, `GENERATE_REPORT`, `PROPOSE_RESOLVE`, `PROPOSE_UNRESOLVE`. Reserved kinds `RUN_PLAYBOOK` and `ASSERT_FINDING_TEMPLATE` are in the enum and the Action catalog so they can be stored if parsed; accept is refused until those phases ship. Resolution Actions still require human accept. Catalog: [ontology.md](ontology.md).
+Agent actions today: `ADD_FINDING`, `ADD_NOTE`, `CREATE_PAGE`, `LINK_ENTITY`, `RUN_COLLECTOR`, `GENERATE_REPORT`, `PROPOSE_RESOLVE`, `PROPOSE_UNRESOLVE`, `RUN_PLAYBOOK`, `ASSERT_FINDING_TEMPLATE`. `RUN_PLAYBOOK` may only name a bundled id; nested playbooks and file paths are refused. `ASSERT_FINDING_TEMPLATE` stays pending until accept. Automations propose; they do not silently write findings. Catalog: [ontology.md](ontology.md). Playbooks: [playbooks.md](playbooks.md).
 
 ### `data.resolutions` (format version 2)
 
@@ -166,7 +166,7 @@ v1 already stores a cited graph. Phase 1 registers object types, link verbs, and
 | **Object** | 1 | `data.entities`, `data.pages` | Typed property schemas on `kind` in `docs/ontology.md` and `model/ontology.rs`. Property bags stay `entities.fields`. UUIDs and `seq` unchanged. |
 | **Link** | 1 | `data.relationships` (`kind` is still a free `snake_case` string) | Catalog metadata: description, inverse, allowed endpoint kinds. Unknown verbs still store, grouped as “Other”. First-use rows go in SQLite `link_types` (not exported). |
 | **Event** | 6 | `data.timeline` (instant `occurred_at`) | Interval or instant Event objects; links from entities to events; co-occurrence. Do not replace `timeline` without a bump + import of v1 events. |
-| **Action** | 1, 5 | `data.proposals` + `AgentAction` | Catalog of action kinds (existing six plus reserved resolve / playbook kinds). Optional `decided_by` plus existing `decided_at`. Automations propose; they do not silently write. |
+| **Action** | 1, 5 | `data.proposals` + `AgentAction` | Catalog of action kinds including `RUN_PLAYBOOK` and `ASSERT_FINDING_TEMPLATE`. Optional `decided_by` plus existing `decided_at`. Automations propose; they do not silently write. |
 | **Resolution bag** | 3 | `data.resolutions` (format version 2) | Canonical object + constituents; property writes tracked for unresolve. Never auto-merge. |
 | **Markings** | 7 | `investigation.tags` (free strings) | TLP (or confidentiality labels) on the investigation and optionally on objects. Visible in the UI and the manifest. |
 | **Audit** | 7 | *(none; jobs/proposals are not an audit log)* | Append-only merge / accept / playbook / export / marking events. |
@@ -213,6 +213,7 @@ Bump `FORMAT_VERSION` (1 → 2, never reuse a number) when any of the following 
 - Additive open-enum keys (`EntityKind::Other`, new relationship verbs). Unknown kind strings already round-trip.
 - Documentation-only or TUI-only changes.
 - `EvidenceBatch` field additions that are not part of the archive. The batch file/sidecar envelope has its **own** version constant (`ingest::BATCH_FORMAT_VERSION`, currently 1). Bump that constant — not archive `FORMAT_VERSION` — when the envelope gains a required field.
+- Playbook YAML (`os-int-playbook`, `PLAYBOOK_FORMAT_VERSION` 1) and SQLite `playbook_runs` / `automations` tables. Those are not archive collections. Newer playbook YAML is refused by the playbook parser; it does not bump investigation `FORMAT_VERSION`.
 
 If an optional field is load-bearing (resolution, markings that must not be stripped, audit), bump anyway so a down-level binary does not import a silent subset and re-export it as complete.
 
@@ -236,6 +237,7 @@ In the same PR:
 ## See also
 
 - [Ontology](ontology.md)
+- [Playbooks](playbooks.md)
 - [Database tables](schema.md)
 - [Architecture — storage layout](ARCHITECTURE.md#storage-layout)
 - [Examples — export and import](examples.md#write-a-report-and-hand-the-case-over)

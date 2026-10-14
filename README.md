@@ -31,7 +31,7 @@ It orchestrates information, tools, sources, and agents. Built-in collectors cov
 | --- | --- |
 | **New here** | [Install](#install), then [your first investigation](#your-first-investigation) |
 | **Day to day** | [How a case is organized](#how-a-case-is-organized), [keyboard](#keyboard), [command line](#command-line) |
-| **Going further** | [Vision](VISION.md) · [Phased roadmap](PHASED_ROADMAP.md) · [User guide](docs/guide.md) · [Examples](docs/examples.md) · [FAQ](docs/faq.md) · [Connectors](docs/connectors.md) · [Ontology exchange](docs/ontology-exchange.md) |
+| **Going further** | [Vision](VISION.md) · [Phased roadmap](PHASED_ROADMAP.md) · [User guide](docs/guide.md) · [Examples](docs/examples.md) · [FAQ](docs/faq.md) · [Connectors](docs/connectors.md) · [Playbooks](docs/playbooks.md) · [Ontology exchange](docs/ontology-exchange.md) |
 | **Contributing** | [Architecture](docs/ARCHITECTURE.md) · [Ontology](docs/ontology.md) · [Database tables](docs/schema.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) |
 
 ---
@@ -40,7 +40,7 @@ It orchestrates information, tools, sources, and agents. Built-in collectors cov
 
 **This is** a local-first investigation ontology for OSINT and cyber cases. You fuse public sources into objects and links, keep provenance on every record, and stay in control of every Action—including those a local AI agent proposes. Collectors are plugins. The graph and the resolution engine are the product. Delivery is gated by phase: [vision](VISION.md), [roadmap](PHASED_ROADMAP.md).
 
-**This is not** a recon CLI, a collector-count contest, or an active-probing toolkit. Built-in collectors stay passive. There is no silent AI writeback, no automatic identity merge, and no cloud requirement. The bar is an enterprise-class investigative loop (ontology, fusion, resolution, Search Around, playbooks, governed Actions)—not module-count parity. Graph, Search Around, and entity resolution ship now. Playbooks and the remaining phases land only when their criteria pass.
+**This is not** a recon CLI, a collector-count contest, or an active-probing toolkit. Built-in collectors stay passive. There is no silent AI writeback, no automatic identity merge, and no cloud requirement. The bar is an enterprise-class investigative loop (ontology, fusion, resolution, Search Around, playbooks, governed Actions)—not module-count parity. Graph, Search Around, entity resolution, ingest, and playbooks ship now. Remaining phases land only when their criteria pass.
 
 The [Boundaries](#boundaries) section is the operational rule for what built-in collectors may do. It is not relaxed by the vision.
 
@@ -55,6 +55,7 @@ The [Boundaries](#boundaries) section is the operational rule for what built-in 
 - Attach provenance to every record so collected data, original material, your notes, and AI inference stay distinct.
 - Cite anything with a short id (`P-1`, `S-12`, `E-4`, `F-1`) that the interface, the agent, and reports all share.
 - Run passive external tools (`whois`, `dig`, `gh`, or your own) with an explicit argument list. There is no shell.
+- Run a YAML playbook (`domain-infra`, `mail-policy`, `cert-estate`, `repo-surface`) or watch collect steps. Templates stay pending until you accept them.
 - Ask Claude Code, Codex, or another local agent CLI a question about the case. Proposed changes are previewed before anything is written.
 - Export a Markdown or JSON report, or a portable directory you can import on another machine.
 
@@ -177,6 +178,7 @@ The screen has a navigation column, a main pane, and (on a wide terminal) a deta
 | `e` | Edit the current page notes in `$EDITOR`, or open agent and theme settings |
 | `r` | Run the default collectors for the current page |
 | `i` | Ingest a STIX / MISP / CSV / JSON / Evidence Batch file |
+| `b` | Run playbook (bundled YAML or a file) |
 | `v` | Object View: highlighted entity, or the current page |
 | `g` | Graph: entities as nodes, relationships as edges |
 | `s` | Search Around from the current selection |
@@ -207,6 +209,8 @@ os-int collect example.com --collector dns  # kind is guessed from the value
 os-int collect ip 192.0.2.15
 os-int collect email alice@example.com --collector email
 os-int ingest ./bundle.json --format stix --investigation "Example Corp"
+os-int playbook run domain-infra --investigation "Example Corp" --target example.com
+os-int watch --playbook domain-infra --investigation "Example Corp" --dry-run
 os-int report "Example Corp" --format markdown -o ./example.md
 os-int export "Example Corp" -o ./export
 os-int import ./export --rename             # --rename only if the id already exists

@@ -35,6 +35,7 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 scraper = "0.27.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+serde_yaml = "0.9.34"
 sha2 = "0.11.0"
 shlex = "2.0.1"
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "process", "time", "sync", "signal", "fs", "net", "io-util", "test-util"] }

@@ -13,6 +13,7 @@ use crate::ingest::{
 use crate::jobs::JobContext;
 use crate::model::{PageKind, Target, TargetKind, Workspace};
 use crate::paths::AppPaths;
+use crate::playbook::{ExecuteOptions, bundled_ids, execute, load_playbook, plan_playbook};
 use crate::storage::{ApplyContext, NewPage, Store};
 use crate::tools::ToolRegistry;
 use clap::{Parser, Subcommand};
@@ -147,6 +148,39 @@ pub enum Command {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Run, list, or validate a playbook.
+    ///
+    /// Bundled ids: `domain-infra`, `mail-policy`, `cert-estate`, `repo-surface`.
+    /// A YAML file is also accepted. Finding templates and merges stay pending until accept.
+    /// Active tools are refused.
+    Playbook {
+        #[command(subcommand)]
+        command: PlaybookCommand,
+    },
+    /// Re-run a playbook's collect steps (watch set). Dry-run prints planned Actions.
+    ///
+    /// `--once` runs a single pass. `--interval` loops until Ctrl+C. Automations propose
+    /// on changes; they do not silently write findings.
+    Watch {
+        /// Bundled playbook id or YAML file.
+        #[arg(long)]
+        playbook: String,
+        /// Case to write into. Created when the name is new.
+        #[arg(short, long)]
+        investigation: Option<String>,
+        /// Seed value. Defaults to the current page target.
+        #[arg(long)]
+        target: Option<String>,
+        /// Print planned Actions without applying.
+        #[arg(long)]
+        dry_run: bool,
+        /// Run one pass and exit (deterministic; used by tests).
+        #[arg(long)]
+        once: bool,
+        /// Seconds between passes when looping (ignored with `--once` or `--dry-run`).
+        #[arg(long)]
+        interval: Option<u64>,
+    },
     /// Check the local environment.
     ///
     /// Reports the database, config file, log directory, proxy or direct network, and whether
@@ -159,6 +193,31 @@ pub enum Command {
     /// Also prints the database path and the log directory after flags, environment variables,
     /// and `storage.data_dir` have been applied.
     Config,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PlaybookCommand {
+    /// List bundled playbooks.
+    List,
+    /// Parse a playbook file or bundled id; print errors without writing.
+    Validate {
+        /// Bundled id or YAML file.
+        file: String,
+    },
+    /// Run a playbook against a seed in an investigation.
+    Run {
+        /// Bundled id (`domain-infra`) or a YAML file.
+        file: String,
+        /// Case to write into. Created when the name is new.
+        #[arg(short, long)]
+        investigation: Option<String>,
+        /// Seed value. Defaults to a page of the playbook's seed type, or creates one.
+        #[arg(long)]
+        target: Option<String>,
+        /// Print planned Actions without applying.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 struct Runtime {
@@ -262,6 +321,26 @@ pub async fn run() -> Result<()> {
             ref format,
             ref output,
         }) => report(&cli, investigation, format, output.as_deref()),
+        Some(Command::Playbook { ref command }) => playbook_command(&cli, command).await,
+        Some(Command::Watch {
+            ref playbook,
+            ref investigation,
+            ref target,
+            dry_run,
+            once,
+            interval,
+        }) => {
+            watch_command(
+                &cli,
+                playbook,
+                investigation.as_deref(),
+                target.as_deref(),
+                dry_run,
+                once,
+                interval,
+            )
+            .await
+        }
         Some(Command::Doctor) => doctor(&cli),
         Some(Command::Config) => show_config(&cli),
     }
@@ -552,6 +631,265 @@ fn report(cli: &Cli, query: &str, format: &str, output: Option<&std::path::Path>
         println!("{}", absolute.display());
     }
     Ok(())
+}
+
+async fn playbook_command(cli: &Cli, command: &PlaybookCommand) -> Result<()> {
+    match command {
+        PlaybookCommand::List => {
+            println!("BUNDLED PLAYBOOKS");
+            for id in bundled_ids() {
+                let playbook = crate::playbook::bundled(id).expect("bundled parses");
+                println!("{:<16} {}", playbook.id, playbook.name);
+                if !playbook.description.is_empty() {
+                    println!("                 {}", playbook.description.trim());
+                }
+            }
+            println!(
+                "\nRun: os-int playbook run domain-infra --investigation NAME --target example.com"
+            );
+            Ok(())
+        }
+        PlaybookCommand::Validate { file } => {
+            let playbook = load_playbook(file).map_err(|error| eyre!(error))?;
+            println!(
+                "ok  {} ({})  seed={}  {} step(s)",
+                playbook.id,
+                playbook.name,
+                playbook.seed.kind,
+                playbook.steps.len()
+            );
+            Ok(())
+        }
+        PlaybookCommand::Run {
+            file,
+            investigation,
+            target,
+            dry_run,
+        } => {
+            run_playbook_cli(
+                cli,
+                file,
+                investigation.as_deref(),
+                target.as_deref(),
+                *dry_run,
+                false,
+                None,
+            )
+            .await
+        }
+    }
+}
+
+async fn watch_command(
+    cli: &Cli,
+    playbook_spec: &str,
+    investigation: Option<&str>,
+    target: Option<&str>,
+    dry_run: bool,
+    once: bool,
+    interval: Option<u64>,
+) -> Result<()> {
+    let mut runtime = Runtime::load(cli)?;
+    loop {
+        run_playbook_on(
+            &mut runtime,
+            playbook_spec,
+            investigation,
+            target,
+            dry_run,
+            true,
+            interval.map(|seconds| seconds as i64),
+        )
+        .await?;
+        let Some(seconds) = interval.filter(|_| !dry_run && !once) else {
+            return Ok(());
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                eprintln!("watch cancelled");
+                return Ok(());
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_secs(seconds.max(1))) => {}
+        }
+    }
+}
+
+async fn run_playbook_cli(
+    cli: &Cli,
+    spec: &str,
+    investigation_query: Option<&str>,
+    target_arg: Option<&str>,
+    dry_run: bool,
+    automation: bool,
+    interval_seconds: Option<i64>,
+) -> Result<()> {
+    let mut runtime = Runtime::load(cli)?;
+    run_playbook_on(
+        &mut runtime,
+        spec,
+        investigation_query,
+        target_arg,
+        dry_run,
+        automation,
+        interval_seconds,
+    )
+    .await
+}
+
+async fn run_playbook_on(
+    runtime: &mut Runtime,
+    spec: &str,
+    investigation_query: Option<&str>,
+    target_arg: Option<&str>,
+    dry_run: bool,
+    automation: bool,
+    interval_seconds: Option<i64>,
+) -> Result<()> {
+    let playbook = load_playbook(spec).map_err(|error| eyre!(error))?;
+    let investigation = resolve_investigation(
+        runtime,
+        investigation_query,
+        &format!("{}-{}", playbook.id, playbook.seed.kind),
+    )?;
+    let seed = resolve_playbook_seed(runtime, investigation.id, &playbook, target_arg)?;
+    InvestigationFiles::new(&runtime.paths, investigation.id).ensure()?;
+    let tools = Arc::new(ToolRegistry::detect(&runtime.config.tools));
+    let job = JobContext::detached(true);
+    if dry_run {
+        let plan = plan_playbook(&playbook, &seed, &tools, automation, &job)
+            .map_err(|error| eyre!(error))?;
+        println!("{}", plan.describe());
+        return Ok(());
+    }
+    let files = InvestigationFiles::new(&runtime.paths, investigation.id);
+    let net = Arc::new(NetContext::new(&runtime.config.network).map_err(|error| eyre!(error))?);
+    let registry = CollectorRegistry::from_config(&runtime.config);
+    let settings = CollectorSettings::from_config(&runtime.config);
+    let page = existing_or_create_page(runtime, investigation.id, &seed)?;
+    let previous = runtime
+        .store
+        .find_automation(investigation.id, &playbook.id, &seed.value())?
+        .and_then(|row| row.last_digest);
+    let context = CollectorContext {
+        net,
+        files,
+        tools: Arc::clone(&tools),
+        cache_dir: runtime.paths.cache_dir(),
+        settings,
+        job,
+    };
+    let output = execute(
+        &mut runtime.store,
+        &playbook,
+        &seed,
+        ApplyContext {
+            investigation_id: investigation.id,
+            page_id: Some(page.id),
+            job_id: None,
+        },
+        &registry,
+        &context,
+        ExecuteOptions {
+            dry_run: false,
+            automation,
+            previous_digest: previous,
+            interval_seconds,
+        },
+    )
+    .await
+    .map_err(|error| eyre!(error))?;
+    println!(
+        "Playbook {} on {} {} — {}",
+        playbook.id,
+        seed.kind(),
+        seed.value(),
+        if output.batches.iter().any(|batch| !batch.summary.is_empty()) {
+            output
+                .batches
+                .iter()
+                .find(|batch| !batch.summary.is_empty())
+                .map(|batch| batch.summary.clone())
+                .unwrap_or_else(|| format!("{} proposal(s) pending", output.proposals.len()))
+        } else {
+            format!("{} proposal(s) pending", output.proposals.len())
+        }
+    );
+    for warning in output.warnings {
+        println!("  ! {warning}");
+    }
+    for proposal in &output.proposals {
+        println!("  pending  {}", proposal.summary());
+    }
+    Ok(())
+}
+
+fn resolve_investigation(
+    runtime: &mut Runtime,
+    query: Option<&str>,
+    fallback_name: &str,
+) -> Result<crate::model::Investigation> {
+    match query {
+        Some(query) => match runtime.store.find_investigation(query)? {
+            Some(found) => Ok(found),
+            None if uuid::Uuid::parse_str(query).is_ok() => Err(eyre!(
+                "no investigation named {query:?}; run `os-int list` to see existing investigations"
+            )),
+            None => {
+                let created = runtime.store.create_investigation(query, "")?;
+                InvestigationFiles::new(&runtime.paths, created.id).ensure()?;
+                eprintln!("Created investigation {}", created.name);
+                Ok(created)
+            }
+        },
+        None => match runtime.store.list_investigations()?.into_iter().next() {
+            Some(summary) => Ok(summary.investigation),
+            None => Ok(runtime.store.create_investigation(fallback_name, "")?),
+        },
+    }
+}
+
+fn resolve_playbook_seed(
+    runtime: &mut Runtime,
+    investigation_id: uuid::Uuid,
+    playbook: &crate::model::Playbook,
+    target_arg: Option<&str>,
+) -> Result<Target> {
+    if let Some(value) = target_arg {
+        return Target::parse(playbook.seed.kind, value).map_err(|error| eyre!(error));
+    }
+    let data = runtime.store.load_investigation(investigation_id)?;
+    if let Some(page) = data.pages.iter().find(|page| {
+        page.target.is_some() && PageKind::from_target_kind(playbook.seed.kind) == page.kind
+    }) && let Some(target) = page.collection_target()
+    {
+        return Ok(target);
+    }
+    Err(eyre!(
+        "playbook {} needs a {} seed; pass --target",
+        playbook.id,
+        playbook.seed.kind
+    ))
+}
+
+fn existing_or_create_page(
+    runtime: &mut Runtime,
+    investigation_id: uuid::Uuid,
+    seed: &Target,
+) -> Result<crate::model::Page> {
+    let data = runtime.store.load_investigation(investigation_id)?;
+    if let Some(page) = data
+        .pages
+        .iter()
+        .find(|page| page.target.as_deref() == Some(seed.value().as_str()))
+    {
+        return Ok(page.clone());
+    }
+    runtime.store.create_page(NewPage::new(
+        investigation_id,
+        &seed.value(),
+        PageKind::from_target_kind(seed.kind()),
+        Some(&seed.value()),
+    ))
 }
 
 fn doctor(cli: &Cli) -> Result<()> {

@@ -86,6 +86,10 @@ HTTP(S) can use `network.proxy` (for example `socks5h://127.0.0.1:9050`). DNS an
 
 The same content hash is treated as the same observation: the source is marked seen again and is not duplicated. A new hash writes an "observation changed" timeline event. A diagnostic that is now `present` clears the earlier gap finding.
 
+## Does a playbook write findings by itself?
+
+No. `assert_finding_template` and watch-set change Actions become pending proposals. Accept writes the finding. Collect steps still apply sources, entities, and relationships in one transaction (the same path as `os-int collect`). Automations strip collector diagnostic findings from that apply and propose them instead. Nested playbooks and tools marked `active` are refused. Schema: [playbooks.md](playbooks.md).
+
 ## I accepted an agent proposal. Why is the finding still marked AI?
 
 That is the record of who asserted it. Accepting means you allowed it into the case. It does not turn the inference into a collected fact. Cite sources in the proposal (`"sources":["S-1"]`) when the claim rests on evidence you already have.
@@ -123,6 +127,7 @@ Rust **1.88** or newer. The crate uses the 2024 edition. SQLite is bundled; you 
 ## See also
 
 - [Examples](examples.md)
+- [Playbooks](playbooks.md)
 - [User guide](guide.md)
 - [Database tables](schema.md)
 - [Security policy](../SECURITY.md)

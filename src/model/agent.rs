@@ -97,11 +97,11 @@ pub enum AgentAction {
         #[serde(default)]
         reason: String,
     },
-    /// Reserved until playbooks ship. Stored if parsed; accept is refused.
+    /// Run a bundled playbook. Accept is required; nested playbooks are refused.
     RunPlaybook {
         playbook: String,
     },
-    /// Reserved until playbooks ship. Stored if parsed; accept is refused.
+    /// Propose a templated finding from a playbook. Accept writes the finding.
     AssertFindingTemplate {
         title: String,
         #[serde(default)]
@@ -126,11 +126,9 @@ impl AgentAction {
     }
 
     /// Reserved Action kinds are catalogued and may be stored, but must not apply yet.
+    /// Playbook Actions shipped in Phase 5 and are no longer reserved.
     pub fn is_reserved(&self) -> bool {
-        matches!(
-            self,
-            AgentAction::RunPlaybook { .. } | AgentAction::AssertFindingTemplate { .. }
-        )
+        false
     }
 
     /// A one-line human description used in proposal lists.

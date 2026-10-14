@@ -12,6 +12,7 @@ This is the complete guide to using os-int: the workbench, the collectors, the a
 - [Entity resolution](#entity-resolution)
 - [Collectors](#collectors)
 - [Ingest](#ingest)
+- [Playbooks](#playbooks)
 - [Diagnostics](#diagnostics)
 - [External tools](#external-tools)
 - [Asking an agent](#asking-an-agent)
@@ -167,6 +168,9 @@ Press `p` or `Ctrl+P`, then type to filter.
 | Run DNS / RDAP / HTTP / TLS / Certificate Transparency / IP Intelligence | One collector |
 | Run Email Identity Pack / Username Pack / Subdomain Expansion | One collector |
 | Ingest file | STIX, MISP, CSV/JSON, or Evidence Batch (`i`) |
+| Run playbook | Bundled YAML or a file (`b`). Mode `run` / `dry-run` |
+| Playbook prompt | Seed the agent question with suggested Actions |
+| Watch playbook | Re-run collect steps; mode `dry-run` / `once` |
 | Ask Agent | Question the active agent |
 | Generate Report | Markdown or JSON |
 | Add Finding / Add Note | Analyst-authored records |
@@ -211,7 +215,7 @@ Object View is the typed reading of one entity or page: property groups from the
 - Palette: **Object View** uses the same rules; a leftover entity is never reused.
 - `Esc` returns to the screen you came from.
 
-Identity is always shown, so every object has at least one property group. Known relationship verbs use the link-type catalog (`resolves_to`, `subdomain_of`, …). Unknown snake_case verbs still store and appear under **Other**. Accepting an agent Action records who and when. `PROPOSE_RESOLVE` / `PROPOSE_UNRESOLVE` apply only after accept. Playbook Action stubs stay refused.
+Identity is always shown, so every object has at least one property group. Known relationship verbs use the link-type catalog (`resolves_to`, `subdomain_of`, …). Unknown snake_case verbs still store and appear under **Other**. Accepting an agent Action records who and when. `PROPOSE_RESOLVE` / `PROPOSE_UNRESOLVE` / `RUN_PLAYBOOK` / `ASSERT_FINDING_TEMPLATE` apply only after accept. `RUN_PLAYBOOK` may only name a bundled id.
 
 When the object is a resolved canonical, Object View lists **Constituents** (the absorbed records). Sources and links from both sides stay visible.
 
@@ -322,6 +326,28 @@ os-int ingest tests/fixtures/ingest/observables.csv --format csv
 
 The in-repo sidecar example is [`examples/connectors/hello-batch/`](../examples/connectors/hello-batch/).
 
+## Playbooks
+
+A playbook is a YAML document: a seed object type plus ordered steps (`collect`, `search_around`, `run_tool`, `assert_finding_template`, `propose_resolve`). Collect and tool steps run; Search Around is a graph query; finding templates and merges become **pending proposals**. Nothing from a template is written until you accept it.
+
+From the workbench, press `b` (or palette **Run playbook**). Left/Right cycles bundled ids (`domain-infra`, `mail-policy`, `cert-estate`, `repo-surface`). Mode `run` / `dry-run`. Esc closes the form and leaves the entity selection in place. Enter on dry-run shows the plan as text; Enter on run queues a job you can cancel from Jobs with `c`. Palette **Playbook prompt** seeds the agent question with suggested Actions — the agent still only proposes. Palette **Watch playbook** re-runs collect steps (`dry-run` / `once`) and opens proposals on changes.
+
+From the shell:
+
+```bash
+os-int playbook list
+os-int playbook validate domain-infra
+os-int playbook run domain-infra --investigation "Example Corp" --target example.com
+os-int playbook run domain-infra --investigation "Example Corp" --target example.com --dry-run
+os-int watch --playbook domain-infra --investigation "Example Corp" --target example.com --dry-run
+os-int watch --playbook domain-infra --investigation "Example Corp" --target example.com --once
+os-int watch --playbook domain-infra --investigation "Example Corp" --interval 3600
+```
+
+`--dry-run` prints planned Actions and applies nothing. `--once` runs one watch pass. `--interval` loops until Ctrl+C. Collect batches apply in **one SQLite transaction** after the steps finish; a cancelled or failed collect applies nothing.
+
+Built-in collectors stay **passive-only**. Tools marked `active` are refused. Nested playbooks are refused. Untrusted YAML cannot set provenance or clear collected findings. Caps, the YAML schema, and the bundled files: [playbooks.md](playbooks.md).
+
 ## Diagnostics
 
 Diagnostics read published records. Each reading is `present`, `missing`, or `review`.
@@ -424,7 +450,9 @@ If the agent wants os-int to change the case, it appends a fenced JSON block. os
   {"action":"CREATE_PAGE","title":"www.example.com","page_type":"domain","target":"www.example.com"},
   {"action":"LINK_ENTITY","from":"E-1","to":"E-4","relation":"resolves_to","sources":["S-1"]},
   {"action":"RUN_COLLECTOR","collector":"dns","target":"www.example.com"},
-  {"action":"GENERATE_REPORT","format":"markdown"}
+  {"action":"GENERATE_REPORT","format":"markdown"},
+  {"action":"RUN_PLAYBOOK","playbook":"domain-infra"},
+  {"action":"ASSERT_FINDING_TEMPLATE","title":"Review domain infrastructure","details":"…"}
 ]
 ```
 ````
@@ -500,6 +528,10 @@ os-int [OPTIONS] [COMMAND]
 | `collect --investigation <name>` | Case to write into. Created when the name is new |
 | `collect --collector <id>` | Run one collector instead of the defaults |
 | `ingest <path> [--format stix\|misp\|csv\|json\|batch]` | Import a file into a case |
+| `playbook list` | Print bundled playbooks |
+| `playbook validate <id-or-file>` | Parse YAML without writing |
+| `playbook run <id-or-file> --investigation <name> --target <seed>` | Run a playbook (`--dry-run` plans only) |
+| `watch --playbook <id-or-file> --investigation <name>` | Re-run collect steps (`--dry-run`, `--once`, `--interval`) |
 | `report <name> [--format markdown\|json] [-o <file>]` | Write a report |
 | `export <name> [-o <dir>]` | Write a portable directory |
 | `import <path> [--rename]` | Import an export directory |
@@ -625,6 +657,7 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `e` | normal | Edit notes, or open settings |
 | `r` | normal | Run collectors for this page |
 | `i` | normal | Ingest a STIX / MISP / CSV / JSON / Evidence Batch file |
+| `b` | normal | Run playbook (bundled YAML or a file) |
 | `v` | normal | Object View: highlighted entity, or the current page |
 | `g` | normal | Graph for the current entity (1 hop) |
 | `s` | normal | Search Around (default 2 hops; merges on Graph) |
@@ -684,6 +717,7 @@ To report a vulnerability in os-int itself, follow [SECURITY.md](../SECURITY.md)
 - [Ontology](ontology.md) — object types, link verbs, Actions, Object View
 - [Database tables](schema.md) — what each SQLite table stores
 - [Connectors](connectors.md) — Evidence Batch sidecars, STIX/MISP/CSV ingest, API keys
+- [Playbooks](playbooks.md) — YAML schema, bundled files, watch sets, caps
 - [Ontology Exchange Format](ontology-exchange.md) — export JSON, EvidenceBatch, and version bumps
 - [ARCHITECTURE.md](ARCHITECTURE.md) — module map and design decisions
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — development setup and pull requests

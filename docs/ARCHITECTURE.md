@@ -42,6 +42,7 @@ A useful order:
                 ├──────────────┬───────────────┬───────────────┤
                 │ jobs/        │ agent/        │ report/        │
                 │ collectors/  │ tools/        │ exchange/ingest│
+                │ playbook/    │               │                │
                 ├──────────────┴───────────────┴───────────────┤
                 │ storage/  SQLite (rusqlite) + file store      │
                 ├──────────────────────────────────────────────┤
@@ -51,11 +52,12 @@ A useful order:
 
 | Module | Responsibility |
 | --- | --- |
-| `model/` | Domain types: `Investigation`, `Page`, `Source`, `Finding`, `Entity`, `Relationship`, `Resolution`, `Note`, `Artifact`, `TimelineEvent`, `JobRecord`, `AgentRun`, `Proposal`. Object/link/Action registries and Object View data in `ontology`. Search Around and graph visibility in `graph`. Resolution bags and suggestion rules in `resolution`. Short references (`S-12`, `E-4`, `V-1`, …). No UI or storage code. |
-| `storage/` | `Store` wraps a SQLite connection: migrations, CRUD, applying collector output transactionally, loading a full `Workspace`. Graph query (`Store::search_around`) runs the same hop expansion as `model::search_around` on a loaded snapshot. Merge/unresolve lives in `storage/resolution.rs`. |
+| `model/` | Domain types: `Investigation`, `Page`, `Source`, `Finding`, `Entity`, `Relationship`, `Resolution`, `Note`, `Artifact`, `TimelineEvent`, `JobRecord`, `AgentRun`, `Proposal`, `Playbook`. Object/link/Action registries and Object View data in `ontology`. Search Around and graph visibility in `graph`. Resolution bags and suggestion rules in `resolution`. Short references (`S-12`, `E-4`, `V-1`, …). No UI or storage code. |
+| `storage/` | `Store` wraps a SQLite connection: migrations, CRUD, applying collector output transactionally, loading a full `Workspace`. Graph query (`Store::search_around`) runs the same hop expansion as `model::search_around` on a loaded snapshot. Merge/unresolve lives in `storage/resolution.rs`. Playbook runs and automations (`playbook_runs`, `automations`) are local tables, not archived. |
 | `files.rs` | Investigation directory layout and content-addressed snapshot storage. |
 | `collectors/` | `Collector` trait plus built-ins: DNS, RDAP, HTTP, TLS, certificate transparency, IP intelligence, repository, file, email, username, subdomain, optional API wrappers, and `[[collectors.external]]` sidecars. `diagnose` turns observations into structured readings. Collectors return a `CollectionOutput` and never touch the database. |
 | `ingest/` | STIX 2.1, MISP, CSV/JSON observables, and Evidence Batch parsing. Untrusted files are size-capped; malformed input is an error, not a panic. |
+| `playbook/` | YAML playbooks and watch-set automations. Parse without panicking. Gather (collect/tools) runs on a job thread; commit applies every batch in one SQLite transaction. Active tools, nested playbooks, and silent finding writes are refused. |
 | `tools/` | External tool registry: `PATH` detection, built-in and user-defined tool definitions, argument templates. |
 | `exec/` | The single place where subprocesses are spawned: no shell, explicit argv, timeouts, bounded output, process-group kill, cancellation, argument redaction for display and logs. |
 | `agent/` | Agent profiles (Claude Code, Codex, generic), `AgentContext` and its prompt serialization, the streaming runner and output parsers, structured action proposals. |
@@ -64,7 +66,7 @@ A useful order:
 | `exchange/` | Versioned, path-independent import and export of investigations. |
 | `app/` | `App` owns config, store, workspace, job manager, and all UI state (including `GraphState`). Keys map to `Action`s; `App::dispatch` performs state transitions and side effects. Per-investigation `ui_state` restores the last view, page, and agent thread after restart. Long notes open `$EDITOR` / `$VISUAL` without a shell. |
 | `tui/` | Terminal setup and restore, the async event loop, theme, keymap, widgets, screens, and overlays. Rendering is a pure function of `App`. |
-| `cli/` | Clap definitions and non-TUI commands (`list`, `new`, `open`, `export`, `import`, `collect`, `ingest`, `report`, `doctor`, `config`). |
+| `cli/` | Clap definitions and non-TUI commands (`list`, `new`, `open`, `export`, `import`, `collect`, `ingest`, `playbook`, `watch`, `report`, `doctor`, `config`). |
 
 ## Where to make a change
 
@@ -73,11 +75,12 @@ A useful order:
 | Add a field to a record | `model/`, then a migration in `storage/migrations.rs`, then the row mapping in `storage/` |
 | Add a passive collector | Implement `Collector`, register it in `CollectorRegistry::builtin`, and document it in [guide.md](guide.md#collectors) |
 | Add a file ingest format | `src/ingest/`, CLI `os-int ingest`, TUI `i` / FormKind::Ingest, [connectors.md](connectors.md) |
+| Add or change a playbook | YAML under `playbooks/`, parser/executor in `src/playbook/`, palette `b` / `os-int playbook`, [playbooks.md](playbooks.md) |
 | Add an external sidecar | `[[collectors.external]]` emitting Evidence Batch JSON; example under `examples/connectors/` |
 | Add a diagnostic reading | `collectors/diagnose.rs`. Record gaps with `record_findings` so a later good reading clears them |
 | Add a built-in external tool | `tools/registry.rs` (`builtin_tools`). Keep `activity` passive |
 | Change how processes are spawned | `exec/` only. Callers pass an argv. They do not build shell strings |
-| Change what the agent is allowed to propose | `model/agent.rs` (`AgentAction`), the Action catalog in `model/ontology.rs`, and the instructions in `agent/context.rs`. Reserved kinds stay refused on accept |
+| Change what the agent is allowed to propose | `model/agent.rs` (`AgentAction`), the Action catalog in `model/ontology.rs`, and the instructions in `agent/context.rs`. `RUN_PLAYBOOK` may only name a bundled id |
 | Change an object type, property schema, or link verb | `model/ontology.rs` and [ontology.md](ontology.md). Prefer a JSON property bag field over a new column |
 | Change a key binding | `tui/keymap.rs`, including `HELP_TEXT`, and the keyboard tables in the user guide |
 | Change a screen | `tui/screens.rs`. Put the state change in `app/`, not in the widget. Object View is `View::Object`. Graph is `View::Graph` |
@@ -129,7 +132,7 @@ Database rows store **relative** paths inside the investigation directory, so an
 - Codex runs as `codex exec --json --skip-git-repo-check --sandbox read-only --ephemeral`, with the prompt on stdin.
 - The `AgentContext` is serialized to Markdown. Trusted os-int instructions are passed separately (system prompt) when the agent supports it. All collected material is wrapped in `<<<UNTRUSTED … nonce=…>>>` fences with a per-request random nonce, and any fence-like text inside the material is neutralized.
 - The exact prompt is saved as an artifact for every run, so an analyst can audit what the agent saw.
-- Agents may propose structured actions in a fenced `os-int-actions` JSON block: `ADD_FINDING`, `ADD_NOTE`, `CREATE_PAGE`, `LINK_ENTITY`, `RUN_COLLECTOR`, `GENERATE_REPORT`, `PROPOSE_RESOLVE`, `PROPOSE_UNRESOLVE`. Proposals are stored as pending and applied only after the analyst accepts them. Accepted AI findings keep `provenance = agent`. Resolution never auto-merges.
+- Agents may propose structured actions in a fenced `os-int-actions` JSON block: `ADD_FINDING`, `ADD_NOTE`, `CREATE_PAGE`, `LINK_ENTITY`, `RUN_COLLECTOR`, `GENERATE_REPORT`, `PROPOSE_RESOLVE`, `PROPOSE_UNRESOLVE`, `RUN_PLAYBOOK`, `ASSERT_FINDING_TEMPLATE`. Proposals are stored as pending and applied only after the analyst accepts them. Accepted AI findings keep `provenance = agent`. Resolution never auto-merges. `RUN_PLAYBOOK` may only name a bundled playbook; nested playbooks are refused. Playbook-originated finding templates keep `analyst` provenance after accept.
 
 ## Decisions
 
@@ -160,6 +163,8 @@ Database rows store **relative** paths inside the investigation directory, so an
 | Resolution bag | Canonical entity plus absorbed constituents. Property and source writes are recorded so unresolve can restore them. |
 | Finding | A claim. Collected diagnostics, analyst conclusions, and accepted agent inferences are all findings, distinguished by provenance. |
 | Proposal | A structured agent action waiting for the analyst to accept or reject it. |
+| Playbook | A YAML document of collect / Search Around / tool / template steps. Templates become pending proposals. |
+| Automation | A watch set that re-runs collect steps and proposes Actions on changes. It does not silently write findings. |
 | Batch | The `EvidenceBatch` / `CollectionOutput` a collector returns. Applied in one transaction. |
 | Short ref | `S-12` style id. Sequence number scoped to one investigation. |
 | Activity | `passive` or `active`. Built-in collectors are passive. Tools marked `active` are refused. |
@@ -171,6 +176,7 @@ Database rows store **relative** paths inside the investigation directory, so an
 - [Database tables](schema.md)
 - [Ontology](ontology.md)
 - [Connectors](connectors.md)
+- [Playbooks](playbooks.md)
 - [Ontology Exchange Format](ontology-exchange.md)
 - [Vision](../VISION.md)
 - [Phased roadmap](../PHASED_ROADMAP.md)

@@ -1,4 +1,4 @@
-//! Background jobs: collectors, external tools, agent calls, and report generation.
+//! Background jobs: collectors, external tools, agent calls, playbooks, and report generation.
 //!
 //! Jobs run on Tokio tasks and report back through a bounded channel. Long-running work
 //! never touches UI state directly; the UI applies results when `JobEvent::Finished` arrives.
@@ -13,6 +13,7 @@ pub use manager::JobManager;
 
 use crate::agent::AgentOutcome;
 use crate::collectors::CollectionOutput;
+use crate::model::PlaybookOutput;
 
 /// Capacity of the job event channel. Log lines are dropped (and counted) rather than
 /// blocking a job when the UI falls behind; results are never dropped.
@@ -53,6 +54,7 @@ pub enum JobOutput {
     Collection(CollectionOutput),
     Agent(AgentOutcome),
     Report(ReportOutput),
+    Playbook(Box<PlaybookOutput>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,0 +1,27 @@
+format: os-int-playbook
+format_version: 1
+id: domain-infra
+name: Domain infrastructure
+description: >
+  Map DNS, registration, HTTP, TLS, certificate transparency, and subdomains
+  for a seed domain, then Search Around. Finding templates stay pending until
+  the analyst accepts them. Resolution is proposed, never auto-merged.
+seed:
+  type: domain
+steps:
+  - collect: dns
+  - collect: rdap
+  - collect: http
+  - collect: tls
+  - collect: ct
+  - collect: subdomain
+  - run_tool: whois
+  - search_around:
+      hops: 2
+  - assert_finding_template:
+      title: Review domain infrastructure
+      details: >
+        Confirm nameservers, addresses, certificates, and subdomains are cited
+        on the graph. Accept this finding only after checking Object View.
+  - propose_resolve:
+      reason: Same registrable domain or shared certificate SAN cluster
