@@ -21,7 +21,7 @@ The product thesis is in [VISION.md](../VISION.md). Phase gates are in [PHASED_R
   files/                      # copy of the investigation directory (if it exists)
 ```
 
-`exchange::MANIFEST_NAME` is `investigation.osint.json`. `exchange::FORMAT_VERSION` is `1`. Suggested directory name: `<sanitized-investigation-name>-<uuid>` (`exchange::suggested_export_name`).
+`exchange::MANIFEST_NAME` is `investigation.osint.json`. `exchange::FORMAT_VERSION` is `1`. Suggested directory name: `<sanitized-investigation-name>-<32 hex digits>` (`exchange::suggested_export_name` uses `Uuid::simple()`, no hyphens).
 
 Import accepts either the directory or a path to the JSON file. When the path is a file, `files/` is taken as a sibling of that file.
 
@@ -60,7 +60,7 @@ Paths inside `data` stay **relative** to the investigation directory. Export doe
 
 **Not exported:** `ui_state` (last view, last page, agent thread). That is local workbench chrome, not case evidence.
 
-Every investigation-scoped row has `id` (UUID, stable across export/import), `investigation_id`, and `seq` (per-table short reference: `P-1`, `S-12`, `E-4`, …). Short refs are not unique across tables.
+Every investigation-scoped row has `id` (UUID, stable across export/import), `investigation_id`, and `seq` (per-table short reference: `P-1`, `S-12`, `E-4`, …), with two exceptions: `page_entities` is only `{ page_id, entity_id }` (no `id`, `investigation_id`, or `seq`), and `JobRecord.investigation_id` is `Option<Uuid>`. Short refs are not unique across tables.
 
 ### Shared field encodings
 
@@ -102,7 +102,7 @@ From `exchange::import_investigation`:
 4. If the name already exists (case-insensitive), append ` (2)`, ` (3)`, … or a UUID suffix.
 5. Insert `InvestigationData`, then copy `files/` into the new investigation directory.
 
-Copy skips `.`, `..`, and names starting with `tmp-`. Directory depth is capped at 32. Symlink / cycle edges that would copy a tree into itself are skipped.
+Copy skips `.`, `..`, and names starting with `tmp-`. Directory depth is capped at 32. All symlinks are skipped (`DirEntry::metadata` does not follow them, so they are neither `is_dir` nor `is_file`). The cycle check is only for overlapping real directories (`canonicalize` plus a prefix test) before recursing.
 
 ### File tree
 
@@ -127,7 +127,7 @@ This is the ingest shape Phase 4 connectors will emit as JSON. It is **not** `in
 | `resolved_findings` | Titles of collected findings that no longer apply (a later `present` reading). |
 | `summary` | One-line human summary for the job result. |
 
-`SourceKey` is a `usize` index into `sources`, not a UUID. Entity identity in a batch is `EntityKey` (kind + normalized value), not a UUID. Apply upserts entities on `(kind, canonical value)` and relationships on `(from, kind, to)`. A source with the same collector and content hash is marked seen again instead of inserted. A new hash of a prior observation inserts a `changed` timeline event.
+`SourceKey` is a `usize` index into `sources`, not a UUID. Entity identity in a batch is `EntityKey` (kind + normalized value), not a UUID. Apply upserts entities on `(kind, canonical value)` and relationships on `(from, kind, to)`. A source with the same collector, title, URL, and content hash is marked seen again instead of inserted (`find_duplicate_source`). A new hash of a prior observation (same collector, title, and URL) inserts a `changed` timeline event.
 
 `EvidenceBatch::is_empty` is true only when `sources`, `entities`, and `timeline` are all empty (relationships / artifacts / findings alone do not count).
 

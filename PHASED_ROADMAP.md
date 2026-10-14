@@ -45,11 +45,11 @@ Lock the product thesis, document the ontology exchange shape, and add engineeri
 
 ### Success criteria (must all pass before merge)
 
-- [ ] `VISION.md` and `PHASED_ROADMAP.md` are on `main`.
-- [ ] `docs/ontology-exchange.md` exists and accurately describes today’s export + the intended v2 additions (even if v2 is not implemented yet).
-- [ ] README vision blurb matches `VISION.md` (no contradiction with Boundaries / passive-only).
-- [ ] CI green on the phase PR(s).
-- [ ] Maintainer checklist in the PR: “No collector-count vanity metrics; success metrics listed in Phase 0 PR description.”
+- [x] `VISION.md` and `PHASED_ROADMAP.md` are on `main`.
+- [x] `docs/ontology-exchange.md` exists and accurately describes today’s export + the intended v2 additions (even if v2 is not implemented yet).
+- [x] README vision blurb matches `VISION.md` (no contradiction with Boundaries / passive-only).
+- [x] CI green on the phase PR(s).
+- [x] Maintainer checklist in the PR: “No collector-count vanity metrics; success metrics listed in Phase 0 PR description.”
 
 ### How to complete
 

@@ -40,7 +40,7 @@ Every investigation-scoped table has:
 
 Collectors do not write these tables. They return an `EvidenceBatch`. `storage::apply` writes the batch in one transaction:
 
-1. Insert sources. A source with the same collector and content hash is marked seen again instead of inserted.
+1. Insert sources. A source with the same collector, title, URL, and content hash is marked seen again instead of inserted (`find_duplicate_source`).
 2. Upsert entities on `(kind, canonical value)` and attach them to the page.
 3. Upsert relationships on `(from, kind, to)` and record the supporting source.
 4. Sync collected findings: a `missing` or `review` diagnostic is stored, and a later `present` reading clears that finding.
@@ -48,7 +48,7 @@ Collectors do not write these tables. They return an `EvidenceBatch`. `storage::
 
 ## Provenance and confidence
 
-`provenance` is one of `collected`, `external`, `analyst`, `agent`. `confidence` is one of `unknown`, `low`, `medium`, `high`. Both are stored as those words. The workbench shows provenance as `[COL]`, `[EXT]`, `[ANL]`, and `[AI]`.
+`provenance` is one of `collected`, `external`, `analyst`, `agent`. `confidence` is one of `unknown`, `low`, `medium`, `high`, `confirmed`. Both are stored as those words. The workbench shows provenance as `[COL]`, `[EXT]`, `[ANL]`, and `[AI]`.
 
 ## Export
 
