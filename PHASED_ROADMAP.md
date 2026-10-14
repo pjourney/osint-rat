@@ -1,8 +1,8 @@
-# os-int phased roadmap (ontology workbench)
+# os-int phased roadmap (enterprise-class ontology workbench)
 
 **North star:** os-int is a local-first investigation ontology for OSINT and cyber cases—fuse sources into objects and links, resolve identities, Search Around the graph, run playbooks, and keep humans in control of every Action (including AI). Collectors are plugins. The graph and resolution engine are the product.
 
-**Bar:** enterprise investigation / intelligence-platform loop (ontology, fusion, entity resolution, Search Around–style graph expansion, temporal/geo, governed Actions, collaboration)—not recon CLI parity.
+**Bar:** enterprise investigation platforms–class investigative loop (ontology, fusion, entity resolution, Search Around, temporal/geo, governed Actions, collaboration)—not recon CLI parity.
 
 **How to use this document**
 
@@ -36,7 +36,7 @@ Lock the product thesis, document the ontology exchange shape, and add engineeri
 
 ### Features
 
-- `VISION.md` stating the north star and non-goals (no active probing; no silent AI writeback; no chasing raw module count).
+- `VISION.md` stating the enterprise-class north star and non-goals (no active probing; no silent AI writeback; no chasing raw module count).
 - This `PHASED_ROADMAP.md` as the merge-gated plan (this file).
 - Document **Ontology Exchange Format** intent in `docs/ontology-exchange.md`: current `EvidenceBatch` / `investigation.osint.json` fields mapped to future Objects, Links, Events, Actions, Resolution bags; mark `FORMAT_VERSION` bump rules.
 - CI reminders: phase PRs must include tests for any new model/storage path; `cargo fmt`, `clippy -D warnings`, `cargo test` remain required.
@@ -203,7 +203,7 @@ Multi-source fusion: anything an analyst has becomes ontology Objects/Links with
 
 ### Goal
 
-Capture analyst logic as reusable, reviewable workflows (ontology-driven ops / investigative-template analogue).
+Capture analyst logic as reusable, reviewable workflows (enterprise ontology platforms templated analysis tools / enterprise investigation platforms investigative templates analogue).
 
 ### Features
 
@@ -233,7 +233,7 @@ Capture analyst logic as reusable, reviewable workflows (ontology-driven ops / i
 
 ### Goal
 
-Time and place as first-class investigative dimensions (timeline + geospatial overlay).
+Time and place as first-class investigative dimensions (enterprise investigation platforms Timeline + geospatial investigation lite).
 
 ### Features
 
@@ -265,7 +265,7 @@ Time and place as first-class investigative dimensions (timeline + geospatial ov
 
 ### Goal
 
-Small-cell collaboration with governance (markings, roles, and audit, local-first default).
+Small-cell collaboration with governance (enterprise investigation platforms collaboration / ACL spirit, local-first default).
 
 ### Features
 
@@ -296,7 +296,7 @@ Small-cell collaboration with governance (markings, roles, and audit, local-firs
 
 ### Goal
 
-Investigations larger than whole-workspace reload; ontology as an operational bus (programmable local API).
+Investigations larger than whole-workspace reload; ontology as an operational bus (enterprise ontology platforms ontology SDK spirit).
 
 ### Features
 
@@ -326,7 +326,7 @@ Investigations larger than whole-workspace reload; ontology as an operational bu
 
 ### Goal
 
-Install in sixty seconds; show the investigative loop immediately; invite external ontology plugins.
+Install in sixty seconds; show enterprise-class loop immediately; invite external ontology plugins.
 
 ### Features
 

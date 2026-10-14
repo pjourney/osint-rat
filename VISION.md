@@ -2,7 +2,7 @@
 
 os-int is a **local-first investigation ontology** for OSINT and cyber cases. The product is the graph and the resolution engine: fuse sources into objects and links, resolve identities, Search Around the graph, run playbooks, and keep humans in control of every Action—including those proposed by AI.
 
-The bar is an enterprise investigation / intelligence-platform loop, not recon CLI parity and not collector-count vanity.
+The bar is an enterprise-class investigative loop, not recon CLI parity and not collector-count vanity.
 
 ## The loop
 
