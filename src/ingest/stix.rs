@@ -167,9 +167,12 @@ fn ingest_observed_window(
     else {
         return;
     };
-    let ended_at = string(object, "last_observed")
-        .and_then(|text| parse_timestamp_untrusted(&text))
-        .filter(|ended| *ended >= started_at);
+    let ended_at = super::interval_end_or_skip(
+        started_at,
+        string(object, "last_observed").and_then(|text| parse_timestamp_untrusted(&text)),
+        report,
+        "observed-data last_observed",
+    );
     let title = string(object, "id").unwrap_or_else(|| "STIX observed-data".into());
     let mut fields = Fields::new();
     fields.set("stix_type", "observed-data");
@@ -505,6 +508,26 @@ mod tests {
                 .entities
                 .iter()
                 .any(|entity| entity.key.value == "192.0.2.9")
+        );
+
+        let inverted = r#"{
+          "type": "bundle",
+          "objects": [
+            {"type": "observed-data", "id": "observed-data--back",
+             "first_observed": "2024-05-02T00:00:00Z",
+             "last_observed": "2024-05-01T00:00:00Z",
+             "objects": {"0": {"type": "ipv4-addr", "value": "192.0.2.8"}}}
+          ]
+        }"#;
+        let actual = parse_stix(inverted, "back.json").expect("parse");
+        assert_eq!(actual.batch.events.len(), 1);
+        assert!(actual.batch.events[0].ended_at.is_none());
+        assert_eq!(actual.skipped, 1);
+        assert!(
+            actual
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("ended_at precedes started_at"))
         );
     }
 

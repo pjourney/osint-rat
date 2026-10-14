@@ -50,7 +50,7 @@ fn load(path: &Path, ip: IpAddr) -> Result<Option<GeoLocation>, String> {
         .and_then(|ext| ext.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    if matches!(extension.as_str(), "mmdb" | "mmbb") {
+    if extension == "mmdb" {
         return load_mmdb(path, ip);
     }
     load_json(path, ip)

@@ -130,7 +130,7 @@ fn read_batch(value: &Value, origin: &str, report: &mut IngestReport) -> Result<
     }
     if let Some(events) = object.get("events").and_then(Value::as_array) {
         for (index, event) in events.iter().take(MAX_OBJECTS).enumerate() {
-            match read_case_event(event) {
+            match read_case_event(event, report, index) {
                 Ok(event) => report.batch.events.push(event),
                 Err(error) => {
                     report.skipped += 1;
@@ -296,16 +296,22 @@ fn read_event(value: &Value) -> Result<NewTimelineEvent, IngestError> {
     })
 }
 
-fn read_case_event(value: &Value) -> Result<NewEvent, IngestError> {
+fn read_case_event(
+    value: &Value,
+    report: &mut IngestReport,
+    index: usize,
+) -> Result<NewEvent, IngestError> {
     let started_at = value
         .get("started_at")
         .or_else(|| value.get("occurred_at"))
         .and_then(parse_timestamp_value)
         .ok_or_else(|| IngestError::new("event is missing started_at"))?;
-    let ended_at = value
-        .get("ended_at")
-        .and_then(parse_timestamp_value)
-        .filter(|ended| *ended >= started_at);
+    let ended_at = crate::ingest::interval_end_or_skip(
+        started_at,
+        value.get("ended_at").and_then(parse_timestamp_value),
+        report,
+        &format!("event {index}"),
+    );
     let kind = value
         .get("kind")
         .and_then(Value::as_str)
@@ -592,6 +598,11 @@ mod tests {
                     "ended_at": "2024-05-01T18:00:00Z",
                     "title": "window",
                     "entities": [{"kind": "ip", "value": "192.0.2.1"}]
+                },
+                {
+                    "started_at": "2024-05-02T12:00:00Z",
+                    "ended_at": "2024-05-01T12:00:00Z",
+                    "title": "backwards"
                 }
             ]
         }"#;
@@ -602,10 +613,18 @@ mod tests {
             actual.batch.timeline[0].occurred_at,
             chrono::Utc.with_ymd_and_hms(2024, 6, 1, 16, 0, 0).unwrap()
         );
-        assert_eq!(actual.batch.events.len(), 1);
+        assert_eq!(actual.batch.events.len(), 2);
         assert_eq!(actual.batch.events[0].title, "window");
         assert!(actual.batch.events[0].ended_at.is_some());
-        assert_eq!(actual.skipped, 3);
+        assert_eq!(actual.batch.events[1].title, "backwards");
+        assert!(actual.batch.events[1].ended_at.is_none());
+        assert!(
+            actual
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("ended_at precedes started_at"))
+        );
+        assert_eq!(actual.skipped, 4);
     }
 
     #[test]

@@ -13,6 +13,7 @@ pub struct TimelineState {
     pub facet_index: usize,
     pub event_id: Option<Uuid>,
     pub saved_selected: usize,
+    pub filter_saved_selected: Option<usize>,
     pub nearby_seed_id: Option<Uuid>,
 }
 
@@ -79,10 +80,13 @@ impl App {
             return;
         };
         if self.timeline.filter_entity_id == Some(id) {
-            self.timeline.filter_entity_id = None;
-        } else {
-            self.timeline.filter_entity_id = Some(id);
+            self.clear_timeline_filter();
+            return;
         }
+        if self.timeline.filter_saved_selected.is_none() {
+            self.timeline.filter_saved_selected = Some(self.selected);
+        }
+        self.timeline.filter_entity_id = Some(id);
         self.timeline.nearby = false;
         self.selected = 0;
         self.sync_timeline_selection();
@@ -95,7 +99,9 @@ impl App {
         }
         self.timeline.filter_entity_id = None;
         self.timeline.nearby = false;
-        self.selected = self.timeline.saved_selected;
+        if let Some(saved) = self.timeline.filter_saved_selected.take() {
+            self.selected = saved;
+        }
         self.clamp_timeline_selection();
         self.sync_timeline_selection();
         self.status = self.timeline_status();

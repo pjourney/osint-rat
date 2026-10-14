@@ -13,7 +13,7 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
 
-use crate::model::EvidenceBatch;
+use crate::model::{EvidenceBatch, Timestamp};
 
 pub use batch::{BATCH_FORMAT, BATCH_FORMAT_VERSION, parse_batch_json};
 pub use misp::parse_misp;
@@ -113,6 +113,25 @@ impl IngestReport {
             warnings: Vec::new(),
             skipped: 0,
         }
+    }
+}
+
+/// Drops an inverted interval (`ended_at` before `started_at`) with a warning and skip count.
+pub(crate) fn interval_end_or_skip(
+    started_at: Timestamp,
+    ended_at: Option<Timestamp>,
+    report: &mut IngestReport,
+    context: &str,
+) -> Option<Timestamp> {
+    match ended_at {
+        Some(ended) if ended < started_at => {
+            report.skipped += 1;
+            report.warnings.push(format!(
+                "{context}: ended_at precedes started_at; interval dropped"
+            ));
+            None
+        }
+        other => other,
     }
 }
 

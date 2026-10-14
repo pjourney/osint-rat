@@ -524,12 +524,11 @@ fn cooccur(cli: &Cli, query: &str, window_hours: Option<u64>) -> Result<()> {
             .ref_of(pair.right)
             .map(|reference| reference.to_string())
             .unwrap_or_else(|| pair.right.to_string());
-        let kind = match pair.kind {
-            crate::model::CoOccurrenceKind::SharedEvent => "shared_event",
-            crate::model::CoOccurrenceKind::SharedSource => "shared_source",
-            crate::model::CoOccurrenceKind::SharedWindow => "shared_window",
-        };
-        println!("{kind:<14} {left:<8} {right:<8} {}", pair.evidence);
+        println!(
+            "{:<14} {left:<8} {right:<8} {}",
+            pair.kind.as_str(),
+            pair.evidence
+        );
     }
     Ok(())
 }

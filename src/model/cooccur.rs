@@ -18,6 +18,21 @@ pub enum CoOccurrenceKind {
     SharedWindow,
 }
 
+impl CoOccurrenceKind {
+    /// Serde / CLI key (`shared_event`, `shared_source`, `shared_window`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SharedEvent => "shared_event",
+            Self::SharedSource => "shared_source",
+            Self::SharedWindow => "shared_window",
+        }
+    }
+}
+
+/// A co-occurring pair of canonical entities.
+///
+/// `left` is the lesser UUID, `right` the greater (`left < right`). [`co_occur`]
+/// returns these sorted by `(left, right, kind.as_str())`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CoOccurrence {
     pub left: Uuid,
@@ -34,6 +49,9 @@ pub struct CoOccurrenceQuery {
 }
 
 /// Pairs of visible (canonical) entities that co-occur. Empty data returns no pairs.
+///
+/// Each pair has `left < right` by canonical UUID. The vec is sorted by `left`, then
+/// `right`, then [`CoOccurrenceKind::as_str`] (the serde key), not by `Debug`.
 pub fn co_occur(data: &InvestigationData, query: &CoOccurrenceQuery) -> Vec<CoOccurrence> {
     if data.entities.is_empty() {
         return Vec::new();
@@ -43,16 +61,18 @@ pub fn co_occur(data: &InvestigationData, query: &CoOccurrenceQuery) -> Vec<CoOc
     pairs.extend(shared_events(data, query));
     pairs.extend(shared_sources(data, query));
     pairs.extend(shared_windows(data, query, window));
-    pairs.sort_by(|left, right| {
-        left.left
-            .cmp(&right.left)
-            .then(left.right.cmp(&right.right))
-            .then(format!("{:?}", left.kind).cmp(&format!("{:?}", right.kind)))
-    });
+    pairs.sort_by(cmp_pair);
     pairs.dedup_by(|left, right| {
         left.left == right.left && left.right == right.right && left.kind == right.kind
     });
     pairs
+}
+
+fn cmp_pair(left: &CoOccurrence, right: &CoOccurrence) -> std::cmp::Ordering {
+    left.left
+        .cmp(&right.left)
+        .then(left.right.cmp(&right.right))
+        .then(left.kind.as_str().cmp(right.kind.as_str()))
 }
 
 fn wanted(data: &InvestigationData, query: &CoOccurrenceQuery, entity_id: Uuid) -> bool {
@@ -69,7 +89,7 @@ fn wanted(data: &InvestigationData, query: &CoOccurrenceQuery, entity_id: Uuid) 
         .any(|id| data.canonical_id(*id) == canonical)
 }
 
-fn ordered_pair(left: Uuid, right: Uuid) -> Option<(Uuid, Uuid)> {
+pub(crate) fn ordered_pair(left: Uuid, right: Uuid) -> Option<(Uuid, Uuid)> {
     if left == right {
         return None;
     }
@@ -263,24 +283,26 @@ mod tests {
         let (data, alpha, beta, gamma) = fixture();
         let actual = co_occur(&data, &CoOccurrenceQuery::default());
         assert!(
-            actual
-                .iter()
-                .any(|pair| pair.kind == CoOccurrenceKind::SharedEvent
-                    && same_pair(pair, alpha, beta)),
-            "shared event {actual:?}"
+            actual.iter().all(|pair| pair.left < pair.right),
+            "left must be the lesser canonical UUID {actual:?}"
         );
+        let (ab_left, ab_right) = ordered_pair(alpha, beta).expect("alpha != beta");
+        let (ag_left, ag_right) = ordered_pair(alpha, gamma).expect("alpha != gamma");
+        let mut expected = vec![
+            (ab_left, ab_right, CoOccurrenceKind::SharedEvent.as_str()),
+            (ag_left, ag_right, CoOccurrenceKind::SharedSource.as_str()),
+            (ab_left, ab_right, CoOccurrenceKind::SharedWindow.as_str()),
+        ];
+        expected.sort();
+        let keys: Vec<_> = actual
+            .iter()
+            .map(|pair| (pair.left, pair.right, pair.kind.as_str()))
+            .collect();
+        assert_eq!(keys, expected, "pairs must match and already be sorted");
         assert!(
             actual
-                .iter()
-                .any(|pair| pair.kind == CoOccurrenceKind::SharedSource
-                    && same_pair(pair, alpha, gamma)),
-            "shared source {actual:?}"
-        );
-        assert!(
-            actual
-                .iter()
-                .any(|pair| pair.kind == CoOccurrenceKind::SharedWindow),
-            "shared window {actual:?}"
+                .windows(2)
+                .all(|window| cmp_pair(&window[0], &window[1]) != std::cmp::Ordering::Greater)
         );
         let filtered = co_occur(
             &data,
@@ -289,11 +311,14 @@ mod tests {
                 window: None,
             },
         );
-        assert!(filtered.iter().all(|pair| same_pair(pair, alpha, beta)));
-    }
-
-    fn same_pair(pair: &CoOccurrence, left: Uuid, right: Uuid) -> bool {
-        (pair.left == left && pair.right == right) || (pair.left == right && pair.right == left)
+        assert!(filtered.iter().all(|pair| {
+            pair.left < pair.right && Some((pair.left, pair.right)) == ordered_pair(alpha, beta)
+        }));
+        assert!(
+            filtered
+                .windows(2)
+                .all(|window| cmp_pair(&window[0], &window[1]) != std::cmp::Ordering::Greater)
+        );
     }
 
     #[test]

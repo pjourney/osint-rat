@@ -218,17 +218,24 @@ fn features_for_entity(data: &InvestigationData, entity: &Entity) -> Vec<GeoJson
                     .as_deref()
                     .and_then(country_centroid)
             }) {
-                let mut properties = features[0].properties.clone();
-                properties.insert("geometry_role".into(), "envelope".into());
-                features.push(GeoJsonFeature {
-                    feature_type: "Feature",
-                    id: format!("{}-envelope", entity.id),
-                    geometry: Some(GeoJsonGeometry {
-                        geometry_type: "Polygon",
-                        coordinates: GeoJsonCoordinates::Polygon(envelope_polygon(point)),
-                    }),
-                    properties,
-                });
+                for (index, polygon) in envelope_polygons(point).into_iter().enumerate() {
+                    let mut properties = features[0].properties.clone();
+                    properties.insert("geometry_role".into(), "envelope".into());
+                    let id = if index == 0 {
+                        format!("{}-envelope", entity.id)
+                    } else {
+                        format!("{}-envelope-{index}", entity.id)
+                    };
+                    features.push(GeoJsonFeature {
+                        feature_type: "Feature",
+                        id,
+                        geometry: Some(GeoJsonGeometry {
+                            geometry_type: "Polygon",
+                            coordinates: GeoJsonCoordinates::Polygon(polygon),
+                        }),
+                        properties,
+                    });
+                }
             }
             features
         }
@@ -284,12 +291,38 @@ fn feature_for_entity(data: &InvestigationData, entity: &Entity) -> Option<GeoJs
     })
 }
 
-fn envelope_polygon(point: GeoPoint) -> Vec<Vec<[f64; 2]>> {
+fn envelope_polygons(point: GeoPoint) -> Vec<Vec<Vec<[f64; 2]>>> {
     let delta: f64 = 0.5;
-    let west = (point.longitude - delta).clamp(MIN_LONGITUDE, MAX_LONGITUDE);
-    let east = (point.longitude + delta).clamp(MIN_LONGITUDE, MAX_LONGITUDE);
     let south = (point.latitude - delta).clamp(MIN_LATITUDE, MAX_LATITUDE);
     let north = (point.latitude + delta).clamp(MIN_LATITUDE, MAX_LATITUDE);
+    let west = point.longitude - delta;
+    let east = point.longitude + delta;
+    if west >= MIN_LONGITUDE && east <= MAX_LONGITUDE {
+        return vec![closed_ring(west, east, south, north)];
+    }
+    if west < MIN_LONGITUDE {
+        vec![
+            closed_ring(wrap_longitude(west), MAX_LONGITUDE, south, north),
+            closed_ring(MIN_LONGITUDE, east, south, north),
+        ]
+    } else {
+        vec![
+            closed_ring(west, MAX_LONGITUDE, south, north),
+            closed_ring(MIN_LONGITUDE, wrap_longitude(east), south, north),
+        ]
+    }
+}
+
+fn wrap_longitude(longitude: f64) -> f64 {
+    let wrapped = ((longitude + 180.0).rem_euclid(360.0)) - 180.0;
+    if wrapped == MIN_LONGITUDE && longitude > MIN_LONGITUDE {
+        MAX_LONGITUDE
+    } else {
+        wrapped
+    }
+}
+
+fn closed_ring(west: f64, east: f64, south: f64, north: f64) -> Vec<Vec<[f64; 2]>> {
     vec![vec![
         [west, south],
         [east, south],
@@ -576,6 +609,33 @@ mod tests {
                 .iter()
                 .any(|feature| feature["geometry"]["type"] == "Point")
         );
+    }
+
+    #[test]
+    fn envelope_wraps_the_antimeridian_instead_of_clamping() {
+        let point = GeoPoint::new(0.0, 179.8).expect("point");
+        let polygons = envelope_polygons(point);
+        assert_eq!(
+            polygons.len(),
+            2,
+            "dateline envelope must split, not shrink"
+        );
+        let lons: Vec<f64> = polygons
+            .iter()
+            .flat_map(|polygon| polygon.iter().flatten())
+            .map(|position| position[0])
+            .collect();
+        assert!(lons.iter().any(|lon| *lon <= -179.0), "east wrap {lons:?}");
+        assert!(lons.iter().any(|lon| *lon >= 179.0), "west piece {lons:?}");
+        assert!(
+            lons.iter()
+                .all(|lon| *lon >= MIN_LONGITUDE && *lon <= MAX_LONGITUDE),
+            "wrapped longs stay in range {lons:?}"
+        );
+        let west = GeoPoint::new(0.0, -179.8).expect("west");
+        assert_eq!(envelope_polygons(west).len(), 2);
+        let inland = GeoPoint::new(38.0, -97.0).expect("inland");
+        assert_eq!(envelope_polygons(inland).len(), 1);
     }
 
     fn entity(

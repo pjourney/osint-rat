@@ -61,7 +61,7 @@ fn parse_unix_timestamp(raw: &str) -> Option<Timestamp> {
         return None;
     }
     let value: i64 = raw.parse().ok()?;
-    if value.abs() >= 1_000_000_000_000 {
+    if value.unsigned_abs() >= 1_000_000_000_000 {
         DateTime::from_timestamp_millis(value).map(|stamp| stamp.trunc_subsecs(3))
     } else {
         DateTime::from_timestamp(value, 0).map(|stamp| stamp.trunc_subsecs(3))
@@ -112,5 +112,12 @@ mod tests {
         let actual = parse_timestamp_untrusted("1710000000").expect("unix");
         assert_eq!(actual.timezone(), Utc);
         assert_eq!(actual.timestamp(), 1_710_000_000);
+    }
+
+    #[test]
+    fn i64_min_unix_does_not_panic() {
+        assert!(parse_timestamp_untrusted("-9223372036854775808").is_none());
+        assert!(parse_timestamp_untrusted(&i64::MIN.to_string()).is_none());
+        assert!(parse_timestamp_untrusted(&i64::MAX.to_string()).is_none());
     }
 }

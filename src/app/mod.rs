@@ -4500,6 +4500,7 @@ mod tests {
         assert!(!app.listed_timeline_rows().is_empty());
         app.dispatch(Action::Back).expect("clear filter");
         assert!(app.timeline.filter_entity_id.is_none());
+        assert_eq!(app.selected, collected);
     }
 
     #[test]
