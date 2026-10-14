@@ -199,9 +199,9 @@ Search (`/` or `Ctrl+F`) matches pages (title, target, notes), entities, finding
 
 Object View is the typed reading of one entity or page: property groups from the [ontology](ontology.md), linked objects grouped by catalog verb, supporting sources, and findings.
 
-- From **Entities**, press `Enter` or `v`.
-- From **Pages** or Overview, press `v` (uses the page's primary entity when it has one).
-- Palette: **Object View**.
+- From **Entities**, press `Enter` or `v` to open the highlighted row.
+- From **Pages** or Overview, press `v` to open the current page (its primary entity when it has one).
+- Palette: **Object View** uses the same rules; a leftover entity is never reused.
 - `Esc` returns to the screen you came from.
 
 Identity is always shown, so every object has at least one property group. Known relationship verbs use the link-type catalog (`resolves_to`, `subdomain_of`, …). Unknown snake_case verbs still store and appear under **Other**. Accepting an agent Action records who and when; reserved Action kinds (`PROPOSE_RESOLVE` and the playbook stubs) stay refused.
@@ -544,7 +544,7 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `n` | normal | New investigation, page, or finding |
 | `e` | normal | Edit notes, or open settings |
 | `r` | normal | Run collectors for this page |
-| `v` | normal | Object View for the selected entity or page |
+| `v` | normal | Object View: highlighted entity, or the current page |
 | `Enter` | Entities | Open Object View |
 | `c` | Jobs | Cancel the selected job |
 | `?` | normal, overlays | Help |

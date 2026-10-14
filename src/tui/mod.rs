@@ -226,3 +226,77 @@ fn draw_status(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
     let text = format!(" {}    {jobs}", sanitize_line(&app.status));
     frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{Action, App, View};
+    use crate::config::Config;
+    use crate::model::PageKind;
+    use crate::paths::AppPaths;
+    use crate::storage::{NewPage, Store};
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    fn test_app() -> (tempfile::TempDir, App) {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let paths = AppPaths::new(
+            directory.path().join("config.toml"),
+            directory.path().join("data"),
+        );
+        paths.ensure_dirs().expect("dirs");
+        let store = Store::open(&paths.database()).expect("store");
+        let app = App::new(Config::default(), paths, store);
+        (directory, app)
+    }
+
+    fn visible_text(terminal: &Terminal<TestBackend>) -> String {
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn object_view_renders_page_without_entity_id() {
+        let (_directory, mut app) = test_app();
+        app.dispatch(Action::Command("new_investigation"))
+            .expect("form");
+        if let crate::app::Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set("Example Corp");
+        }
+        app.dispatch(Action::Submit).expect("create");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let page = app
+            .store
+            .create_page(NewPage::new(
+                investigation_id,
+                "Case notes",
+                PageKind::Generic,
+                None,
+            ))
+            .expect("generic page");
+        assert!(page.entity_id.is_none());
+        app.open_investigation(investigation_id)
+            .expect("reload workspace");
+        app.page_id = Some(page.id);
+        app.entity_id = Some(uuid::Uuid::new_v4());
+        app.view = View::Pages;
+        app.dispatch(Action::OpenObjectView).expect("object view");
+        assert_eq!(app.view, View::Object);
+        assert!(app.entity_id.is_none());
+        let view = app.current_object_view().expect("page object");
+        assert_eq!(view.title, "Case notes");
+        assert!(view.groups.iter().any(|group| group.id == "identity"));
+        let backend = TestBackend::new(120, 36);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal.draw(|frame| draw(frame, &app)).expect("draw");
+        let text = visible_text(&terminal);
+        assert!(text.contains("Case notes"), "{text}");
+        assert!(text.contains("Identity"), "{text}");
+        assert!(text.contains("P-1"), "{text}");
+    }
+}

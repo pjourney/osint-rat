@@ -371,27 +371,32 @@ impl App {
         {
             self.page_id = Some(page_id);
         }
+        if let Some(entity) = self.store.get_state(&scope, "entity")? {
+            if entity.is_empty() {
+                self.entity_id = None;
+            } else if let Ok(entity_id) = Uuid::parse_str(&entity)
+                && self
+                    .workspace
+                    .as_ref()
+                    .is_some_and(|workspace| workspace.entity(entity_id).is_some())
+            {
+                self.entity_id = Some(entity_id);
+            }
+        }
         if let Some(view) = self.store.get_state(&scope, "view")?
             && let Some(view) = View::parse(&view)
             && view != View::Welcome
         {
             self.view = view;
-            if let Some(index) = self
+            if view == View::Object {
+                self.select_nav_for_object_view();
+            } else if let Some(index) = self
                 .nav_items()
                 .iter()
                 .position(|(_, candidate)| *candidate == view)
             {
                 self.nav_index = index;
             }
-        }
-        if let Some(entity) = self.store.get_state(&scope, "entity")?
-            && let Ok(entity_id) = Uuid::parse_str(&entity)
-            && self
-                .workspace
-                .as_ref()
-                .is_some_and(|workspace| workspace.entity(entity_id).is_some())
-        {
-            self.entity_id = Some(entity_id);
         }
         if let Some(thread) = self.store.get_state(&scope, "agent_thread")? {
             self.agent_thread = Uuid::parse_str(&thread).ok();
@@ -428,10 +433,14 @@ impl App {
         if let Some(page_id) = self.page_id {
             self.store.set_state(&scope, "page", &page_id.to_string())?;
         }
-        if let Some(entity_id) = self.entity_id {
-            self.store
-                .set_state(&scope, "entity", &entity_id.to_string())?;
-        }
+        self.store.set_state(
+            &scope,
+            "entity",
+            &self
+                .entity_id
+                .map(|entity_id| entity_id.to_string())
+                .unwrap_or_default(),
+        )?;
         if let Some(thread) = self.agent_thread {
             self.store
                 .set_state(&scope, "agent_thread", &thread.to_string())?;
@@ -1831,33 +1840,62 @@ impl App {
             self.status = "Create or open an investigation first.".into();
             return;
         };
-        let selected_entity = (self.view == View::Entities)
-            .then(|| {
+        let highlighted_entity = workspace
+            .data
+            .entities
+            .get(self.selected)
+            .map(|entity| entity.id);
+        let current_page = self
+            .page_id
+            .and_then(|id| workspace.page(id).map(|page| (page.id, page.entity_id)))
+            .or_else(|| {
                 workspace
                     .data
-                    .entities
+                    .pages
                     .get(self.selected)
-                    .map(|entity| entity.id)
-            })
-            .flatten();
-        if self.entity_id.and_then(|id| workspace.entity(id)).is_none()
-            && let Some(entity_id) = selected_entity
-        {
-            self.entity_id = Some(entity_id);
-        }
-        if self.entity_id.and_then(|id| workspace.entity(id)).is_none()
-            && let Some(page) = self
-                .page_id
-                .and_then(|id| workspace.page(id))
-                .or_else(|| workspace.data.pages.get(self.selected))
-        {
-            self.page_id = Some(page.id);
-            if let Some(entity_id) = page.entity_id {
-                self.entity_id = Some(entity_id);
+                    .map(|page| (page.id, page.entity_id))
+            });
+        match self.view {
+            View::Entities => {
+                self.entity_id = highlighted_entity;
+            }
+            View::Object => {}
+            View::Pages
+            | View::Overview
+            | View::Welcome
+            | View::Sources
+            | View::Findings
+            | View::Timeline
+            | View::Notes
+            | View::Agent
+            | View::Jobs
+            | View::Tools
+            | View::Settings
+            | View::Artifacts => {
+                if let Some((page_id, entity_id)) = current_page {
+                    self.page_id = Some(page_id);
+                    self.entity_id = entity_id;
+                } else {
+                    self.entity_id = None;
+                }
             }
         }
-        let has_entity = self.entity_id.and_then(|id| workspace.entity(id)).is_some();
-        let has_page = self.page_id.and_then(|id| workspace.page(id)).is_some();
+        let has_entity = self
+            .entity_id
+            .and_then(|id| {
+                self.workspace
+                    .as_ref()
+                    .and_then(|workspace| workspace.entity(id))
+            })
+            .is_some();
+        let has_page = self
+            .page_id
+            .and_then(|id| {
+                self.workspace
+                    .as_ref()
+                    .and_then(|workspace| workspace.page(id))
+            })
+            .is_some();
         if !has_entity && !has_page {
             self.status = "Select an entity or page to open Object View.".into();
             return;
@@ -1868,15 +1906,26 @@ impl App {
         self.view = View::Object;
         self.scroll = 0;
         self.overlay = Overlay::None;
+        self.select_nav_for_object_view();
+        self.status = "Object View. Esc returns.".into();
+        let _ = self.save_session();
+    }
+
+    fn select_nav_for_object_view(&mut self) {
+        let target = if self.entity_id.is_some() {
+            View::Entities
+        } else if self.page_id.is_some() {
+            View::Pages
+        } else {
+            View::Overview
+        };
         if let Some(index) = self
             .nav_items()
             .iter()
-            .position(|(_, candidate)| *candidate == View::Entities)
+            .position(|(_, candidate)| *candidate == target)
         {
             self.nav_index = index;
         }
-        self.status = "Object View. Esc returns.".into();
-        let _ = self.save_session();
     }
 
     fn close_object_view(&mut self) {
@@ -2681,6 +2730,51 @@ mod tests {
         );
         app.dispatch(Action::Back).expect("back");
         assert_eq!(app.view, View::Entities);
+    }
+
+    #[test]
+    fn open_object_view_uses_highlighted_entity_not_leftover() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Example Corp");
+        create_page(&mut app, "alpha.example", "domain", "alpha.example");
+        create_page(&mut app, "beta.example", "domain", "beta.example");
+        app.reload().expect("reload");
+        let (entity_a, entity_b) = {
+            let workspace = app.workspace.as_ref().expect("workspace");
+            (workspace.data.entities[0].id, workspace.data.entities[1].id)
+        };
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = Pane::Main;
+        app.selected = 0;
+        app.dispatch(Action::OpenObjectView).expect("open A");
+        assert_eq!(app.entity_id, Some(entity_a));
+        assert_eq!(app.current_object_view().expect("A").title, "alpha.example");
+        app.dispatch(Action::Back).expect("return");
+        app.selected = 1;
+        app.dispatch(Action::OpenObjectView).expect("open B");
+        assert_eq!(app.entity_id, Some(entity_b));
+        assert_eq!(app.current_object_view().expect("B").title, "beta.example");
+    }
+
+    #[test]
+    fn restoring_object_view_selects_entities_nav() {
+        let (directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Example Corp");
+        create_page(&mut app, "example.com", "domain", "example.com");
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = Pane::Main;
+        app.dispatch(Action::OpenObjectView).expect("object");
+        assert_eq!(app.view, View::Object);
+        app.dispatch(Action::Quit).expect("save session");
+        let paths = AppPaths::new(
+            directory.path().join("config.toml"),
+            directory.path().join("data"),
+        );
+        let store = Store::open(&paths.database()).expect("reopen");
+        let mut restarted = App::new(Config::default(), paths, store);
+        restarted.open_last_or_welcome().expect("restore");
+        assert_eq!(restarted.view, View::Object);
+        assert_eq!(restarted.nav_items()[restarted.nav_index].1, View::Entities);
     }
 
     #[test]

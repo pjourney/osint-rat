@@ -174,6 +174,15 @@ pub(crate) fn catalogue_link_type(
     investigation_id: Uuid,
     kind: &str,
 ) -> rusqlite::Result<()> {
+    catalogue_link_type_at(connection, investigation_id, kind, &ts(&now()))
+}
+
+fn catalogue_link_type_at(
+    connection: &Connection,
+    investigation_id: Uuid,
+    kind: &str,
+    first_seen_at: &str,
+) -> rusqlite::Result<()> {
     let recorded = CataloguedLink::from_first_use(kind);
     connection.execute(
         "INSERT OR IGNORE INTO link_types (investigation_id, kind, description, inverse, first_seen_at)
@@ -183,19 +192,26 @@ pub(crate) fn catalogue_link_type(
             recorded.kind,
             recorded.description,
             recorded.inverse,
-            ts(&now()),
+            first_seen_at,
         ],
     )?;
     Ok(())
 }
 
 pub(crate) fn backfill_link_catalog(connection: &Connection) -> rusqlite::Result<()> {
-    let mut statement =
-        connection.prepare("SELECT DISTINCT investigation_id, kind FROM relationships")?;
-    let rows = statement.query_map([], |row| Ok((row.uuid(0)?, row.get::<_, String>(1)?)))?;
+    let mut statement = connection.prepare(
+        "SELECT investigation_id, kind, MIN(created_at) FROM relationships GROUP BY investigation_id, kind",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.uuid(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
     for row in rows {
-        let (investigation_id, kind) = row?;
-        catalogue_link_type(connection, investigation_id, &kind)?;
+        let (investigation_id, kind, first_seen_at) = row?;
+        catalogue_link_type_at(connection, investigation_id, &kind, &first_seen_at)?;
     }
     Ok(())
 }

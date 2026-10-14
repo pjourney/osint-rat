@@ -361,6 +361,34 @@ mod tests {
                 params![now().to_rfc3339()],
             )
             .expect("v1 proposal");
+        connection
+            .execute(
+                "INSERT INTO entities (id, investigation_id, seq, kind, value, label, notes, provenance, fields, created_at, updated_at)
+                 VALUES ('55555555-5555-4555-8555-555555555555', '11111111-1111-4111-8111-111111111111', 1, 'domain', 'example.com', '', '', 'analyst', '[]', ?1, ?1)",
+                params![now().to_rfc3339()],
+            )
+            .expect("v1 entity");
+        connection
+            .execute(
+                "INSERT INTO entities (id, investigation_id, seq, kind, value, label, notes, provenance, fields, created_at, updated_at)
+                 VALUES ('66666666-6666-4666-8666-666666666666', '11111111-1111-4111-8111-111111111111', 2, 'ip', '192.0.2.10', '', '', 'collected', '[]', ?1, ?1)",
+                params![now().to_rfc3339()],
+            )
+            .expect("v1 related entity");
+        connection
+            .execute(
+                "INSERT INTO relationships (id, investigation_id, seq, from_id, to_id, kind, provenance, confidence, notes, created_at)
+                 VALUES ('77777777-7777-4777-8777-777777777777', '11111111-1111-4111-8111-111111111111', 1, '55555555-5555-4555-8555-555555555555', '66666666-6666-4666-8666-666666666666', 'resolves_to', 'collected', 'medium', '', ?1)",
+                params![now().to_rfc3339()],
+            )
+            .expect("v1 relationship");
+        connection
+            .execute(
+                "INSERT INTO findings (id, investigation_id, seq, page_id, title, details, confidence, provenance, created_at, updated_at)
+                 VALUES ('88888888-8888-4888-8888-888888888888', '11111111-1111-4111-8111-111111111111', 1, NULL, 'Apex domain is live', '', 'medium', 'analyst', ?1, ?1)",
+                params![now().to_rfc3339()],
+            )
+            .expect("v1 finding");
         assert_eq!(current_version(&connection).expect("v1 version"), 1);
         let applied = migrate(&mut connection).expect("applies v2");
         assert_eq!(applied, 1);
@@ -374,6 +402,30 @@ mod tests {
             )
             .expect("survives");
         assert!(decided_by.is_none());
+        let entity_value: String = connection
+            .query_row(
+                "SELECT value FROM entities WHERE id = '55555555-5555-4555-8555-555555555555'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("entity survives");
+        assert_eq!(entity_value, "example.com");
+        let relationship_kind: String = connection
+            .query_row(
+                "SELECT kind FROM relationships WHERE id = '77777777-7777-4777-8777-777777777777'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("relationship survives");
+        assert_eq!(relationship_kind, "resolves_to");
+        let finding_title: String = connection
+            .query_row(
+                "SELECT title FROM findings WHERE id = '88888888-8888-4888-8888-888888888888'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("finding survives");
+        assert_eq!(finding_title, "Apex domain is live");
         let count: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'link_types'",

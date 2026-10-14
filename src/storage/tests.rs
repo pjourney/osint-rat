@@ -3,6 +3,7 @@ use crate::model::{
     AgentAction, Confidence, EntityKey, EntityKind, EvidenceBatch, JobRecord, JobStatus, NewSource,
     PageKind, ProposalStatus, Provenance, SourceKind, TimelineKind, Workspace,
 };
+use rusqlite::params;
 
 fn store_with_investigation() -> (Store, Investigation) {
     let store = Store::open_in_memory().expect("store opens");
@@ -588,6 +589,43 @@ fn apply_batch_catalogues_known_and_custom_link_types() {
             .iter()
             .any(|item| item.kind == "spotted_near" && item.is_other())
     );
+}
+
+#[test]
+fn backfill_link_catalog_uses_original_relationship_time() {
+    let (mut store, investigation) = store_with_investigation();
+    store
+        .apply_batch(
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            &dns_batch("hash-backfill"),
+        )
+        .expect("applies");
+    let original = "2020-06-15T12:34:56.000Z";
+    store
+        .connection()
+        .execute(
+            "UPDATE relationships SET created_at = ?1 WHERE investigation_id = ?2",
+            params![original, investigation.id.to_string()],
+        )
+        .expect("backdate");
+    store
+        .connection()
+        .execute("DELETE FROM link_types", [])
+        .expect("clear catalog");
+    graph::backfill_link_catalog(store.connection()).expect("backfill");
+    let seen: String = store
+        .connection()
+        .query_row(
+            "SELECT first_seen_at FROM link_types WHERE investigation_id = ?1 AND kind = 'resolves_to'",
+            params![investigation.id.to_string()],
+            |row| row.get(0),
+        )
+        .expect("first_seen_at");
+    assert_eq!(seen, original);
 }
 
 #[test]

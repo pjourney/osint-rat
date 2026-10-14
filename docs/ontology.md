@@ -89,7 +89,7 @@ Accept and reject record `decided_at` and `decided_by` (the local user name from
 
 ## Object View
 
-From **Entities**, press `Enter` (or `v`, or the palette command **Object View**). From **Pages** or Overview, press `v` to open the current page's primary entity. Esc returns.
+From **Entities**, press `Enter` (or `v`, or the palette command **Object View**) to open the highlighted row. From **Pages** or Overview, press `v` (or the palette) to open the current page — its primary entity when it has one. A leftover entity is never reused. Esc returns.
 
 The screen shows:
 
