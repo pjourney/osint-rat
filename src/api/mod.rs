@@ -642,4 +642,57 @@ mod tests {
             .expect("send");
         assert_eq!(response.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
     }
+
+    #[tokio::test]
+    async fn concurrent_reads_and_propose_stay_consistent() {
+        let store = seeded_store();
+        let investigation = store
+            .list_investigations()
+            .expect("list")
+            .into_iter()
+            .next()
+            .expect("one");
+        let id = investigation.investigation.id;
+        let base = spawn_api(store, "secret-token").await;
+        let client = reqwest::Client::new();
+        let list = format!("{base}/v1/investigations");
+        let objects = format!("{base}/v1/investigations/{id}/objects");
+        let around = format!("{base}/v1/investigations/{id}/search-around?seed=E-1&hops=1");
+        let actions = format!("{base}/v1/investigations/{id}/actions");
+        let payload = serde_json::json!({
+            "actions": [{
+                "action": "ADD_FINDING",
+                "title": "concurrent propose",
+                "details": "pending only"
+            }]
+        });
+        let (a, b, c, d) = tokio::join!(
+            client
+                .get(&list)
+                .header("Authorization", "Bearer secret-token")
+                .send(),
+            client
+                .get(&objects)
+                .header("Authorization", "Bearer secret-token")
+                .send(),
+            client
+                .get(&around)
+                .header("Authorization", "Bearer secret-token")
+                .send(),
+            client
+                .post(&actions)
+                .header("Authorization", "Bearer secret-token")
+                .header("content-type", "application/json")
+                .body(payload.to_string())
+                .send(),
+        );
+        assert_eq!(a.expect("list").status(), reqwest::StatusCode::OK);
+        assert_eq!(b.expect("objects").status(), reqwest::StatusCode::OK);
+        assert_eq!(c.expect("search-around").status(), reqwest::StatusCode::OK);
+        let propose = d.expect("propose");
+        assert_eq!(propose.status(), reqwest::StatusCode::ACCEPTED);
+        let body: serde_json::Value =
+            serde_json::from_slice(&propose.bytes().await.expect("bytes")).expect("json");
+        assert_eq!(body["status"], "pending");
+    }
 }

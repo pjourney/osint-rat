@@ -53,7 +53,8 @@ pub fn pane_title_pulse(
 }
 
 pub fn rule_span(theme: &Theme) -> Span<'static> {
-    Span::styled("│", theme.rule)
+    let glyph = if theme.glyphs.ascii { "|" } else { "│" };
+    Span::styled(glyph, theme.rule)
 }
 
 pub fn truncate(text: &str, max_width: usize) -> String {
@@ -81,7 +82,7 @@ pub fn truncate(text: &str, max_width: usize) -> String {
 
 pub fn input_line(input: &Input) -> Line<'static> {
     let value = sanitize_line(&input.value).into_owned();
-    let cursor = input.cursor.min(input.value.len());
+    let cursor = crate::app::Input::floor_boundary(&input.value, input.cursor);
     let prefix = sanitize_line(&input.value[..cursor]).into_owned();
     let rest = input.value.get(cursor..).unwrap_or("");
     let mut chars = rest.chars();
@@ -227,7 +228,8 @@ fn hint_label(command: &crate::app::commands::Command, view: View) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::truncate;
+    use super::super::theme::{ColorDepth, DetectedDepth, Theme, ThemeName};
+    use super::{rule_span, truncate};
 
     #[test]
     fn truncate_width_zero_emits_nothing() {
@@ -244,5 +246,27 @@ mod tests {
         let emoji = truncate("ok👍ok", 5);
         assert!(UnicodeWidthStr::width(emoji.as_str()) <= 5, "{emoji}");
         assert!(emoji.contains('…') || UnicodeWidthStr::width(emoji.as_str()) <= 5);
+    }
+
+    #[test]
+    fn rule_span_uses_ascii_bar_when_theme_is_ascii() {
+        let ascii = Theme::build(
+            ThemeName::Mono,
+            DetectedDepth {
+                depth: ColorDepth::None,
+                reason: "test".into(),
+            },
+            true,
+        );
+        assert_eq!(rule_span(&ascii).content.as_ref(), "|");
+        let unicode = Theme::build(
+            ThemeName::Dark,
+            DetectedDepth {
+                depth: ColorDepth::TrueColor,
+                reason: "test".into(),
+            },
+            false,
+        );
+        assert_eq!(rule_span(&unicode).content.as_ref(), "│");
     }
 }

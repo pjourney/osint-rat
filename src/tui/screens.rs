@@ -144,33 +144,51 @@ pub fn workspace(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) -> Rec
 }
 
 fn workspace_linear(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) -> Rect {
-    let rail_height = (app.nav_items().len() as u16).saturating_add(2).min(8);
-    let inspector_height = (area.height as u32 * 40 / 100).max(6) as u16;
+    let rail_height: u16 = 2;
+    let min_board = 10u16;
+    let preferred_inspector = ((area.height as u32 * 30) / 100).max(6) as u16;
+    let inspector_height = preferred_inspector
+        .min(
+            area.height
+                .saturating_sub(rail_height.saturating_add(min_board)),
+        )
+        .max(4)
+        .min(area.height.saturating_sub(rail_height.saturating_add(6)));
     let rows = Layout::vertical([
-        Constraint::Length(rail_height),
+        Constraint::Length(rail_height.min(area.height)),
         Constraint::Min(6),
-        Constraint::Length(inspector_height.min(area.height.saturating_sub(8))),
+        Constraint::Length(inspector_height),
     ])
     .split(area);
-    frame.render_widget(
-        Paragraph::new(Span::styled("RAIL", theme.header)),
-        Rect {
-            x: rows[0].x,
-            y: rows[0].y,
-            width: rows[0].width,
-            height: 1,
-        },
-    );
-    let rail_body = Rect {
-        x: rows[0].x,
-        y: rows[0].y.saturating_add(1),
-        width: rows[0].width,
-        height: rows[0].height.saturating_sub(1),
-    };
-    draw_rail(frame, rail_body, app, theme, area.width < 80);
+    draw_rail_linear(frame, rows[0], app, theme);
     draw_main(frame, rows[1], app, theme);
     draw_inspector(frame, rows[2], app, theme);
     rows[1]
+}
+
+fn draw_rail_linear(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    let review = app.pending_review_count();
+    let mut spans = Vec::new();
+    for (index, (label, view)) in app.nav_items().into_iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::raw("  "));
+        }
+        let current = app.rail_view_is_current(view);
+        let mut text = format!("{} {label}", index + 1);
+        if view == View::Review && review > 0 {
+            text = format!("{text} {review}");
+        }
+        if current {
+            text = format!("{}{text}", theme.glyphs.focus);
+        }
+        let style = if current { theme.selected } else { theme.fg };
+        spans.push(Span::styled(text, style));
+    }
+    let lines = vec![
+        Line::from(Span::styled("RAIL", theme.header)),
+        Line::from(spans),
+    ];
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
 }
 
 fn draw_rail(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, digits_only: bool) {
@@ -353,17 +371,20 @@ fn glance_line(
     counts: crate::app::case::GlanceCounts,
     theme: &Theme,
 ) -> Line<'static> {
-    Line::from(vec![
-        Span::raw(format!("  {:>2} {label:<9}  ", counts.total)),
-        provenance_glyph(crate::model::Provenance::Collected, theme),
-        Span::raw(format!(" {}  ", counts.collected)),
-        provenance_glyph(crate::model::Provenance::External, theme),
-        Span::raw(format!(" {}  ", counts.external)),
-        provenance_glyph(crate::model::Provenance::Analyst, theme),
-        Span::raw(format!(" {}  ", counts.analyst)),
-        provenance_glyph(crate::model::Provenance::Agent, theme),
-        Span::raw(format!(" {}", counts.agent)),
-    ])
+    let mut spans = vec![Span::raw(format!("  {:>2} {label:<9}  ", counts.total))];
+    let mut wrote = false;
+    for (provenance, count) in counts.nonzero_buckets() {
+        if wrote {
+            spans.push(Span::raw("  "));
+        }
+        wrote = true;
+        spans.push(provenance_glyph(provenance, theme));
+        spans.push(Span::raw(format!(" {count}")));
+    }
+    if !wrote {
+        spans.push(Span::styled("none", theme.muted));
+    }
+    Line::from(spans)
 }
 
 fn evidence(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
@@ -882,7 +903,8 @@ fn graph_facet_line(app: &App, chips: &[crate::model::FacetChip], theme: &Theme)
     let mut last_axis = None;
     for (index, chip) in chips.iter().enumerate() {
         if last_axis.is_some() && last_axis != Some(chip.axis) {
-            spans.push(Span::styled(" │ ", theme.muted));
+            let sep = if theme.glyphs.ascii { " | " } else { " │ " };
+            spans.push(Span::styled(sep, theme.muted));
         } else if index > 0 {
             spans.push(Span::raw("  "));
         }

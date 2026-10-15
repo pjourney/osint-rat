@@ -48,7 +48,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub debug: bool,
     /// ASCII glyphs, no colour, and motion off. Use with a screen reader or a dumb terminal.
-    #[arg(long, global = true)]
+    #[arg(long, global = true, env = "OS_INT_PLAIN")]
     pub plain: bool,
     /// Machine-readable JSON for list commands.
     #[arg(long, global = true)]
@@ -730,10 +730,13 @@ fn confirm_write(cli: &Cli, prompt: &str) -> Result<bool> {
 }
 
 fn cli_theme(cli: &Cli) -> crate::tui::Theme {
-    let config = load_config_only(cli).unwrap_or_default();
+    let mut config = load_config_only(cli).unwrap_or_default();
     let mut env = crate::tui::TerminalEnv::from_process();
     if cli.plain || !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
         env.no_color = true;
+    }
+    if cli.plain {
+        config.ui.ascii = true;
     }
     crate::tui::Theme::resolve(&config, &env)
 }
@@ -837,25 +840,43 @@ fn cooccur(cli: &Cli, query: &str, window_hours: Option<u64>) -> Result<()> {
             window,
         },
     );
+    let workspace = crate::model::Workspace::new(data);
+    let rows: Vec<serde_json::Value> = pairs
+        .iter()
+        .map(|pair| {
+            let left = workspace
+                .ref_of(pair.left)
+                .map(|reference| reference.to_string())
+                .unwrap_or_else(|| pair.left.to_string());
+            let right = workspace
+                .ref_of(pair.right)
+                .map(|reference| reference.to_string())
+                .unwrap_or_else(|| pair.right.to_string());
+            serde_json::json!({
+                "kind": pair.kind.as_str(),
+                "left": left,
+                "right": right,
+                "left_id": pair.left,
+                "right_id": pair.right,
+                "evidence": pair.evidence,
+            })
+        })
+        .collect();
+    if cli.json {
+        return print_json(&rows);
+    }
     if pairs.is_empty() {
         println!("No co-occurring pairs.");
         return Ok(());
     }
-    let workspace = crate::model::Workspace::new(data);
     println!("{:<14} {:<8} {:<8} EVIDENCE", "KIND", "LEFT", "RIGHT");
-    for pair in pairs {
-        let left = workspace
-            .ref_of(pair.left)
-            .map(|reference| reference.to_string())
-            .unwrap_or_else(|| pair.left.to_string());
-        let right = workspace
-            .ref_of(pair.right)
-            .map(|reference| reference.to_string())
-            .unwrap_or_else(|| pair.right.to_string());
+    for row in &rows {
         println!(
-            "{:<14} {left:<8} {right:<8} {}",
-            pair.kind.as_str(),
-            pair.evidence
+            "{:<14} {:<8} {:<8} {}",
+            row["kind"].as_str().unwrap_or(""),
+            row["left"].as_str().unwrap_or(""),
+            row["right"].as_str().unwrap_or(""),
+            row["evidence"].as_str().unwrap_or("")
         );
     }
     Ok(())
@@ -1092,12 +1113,32 @@ fn report(cli: &Cli, query: &str, format: &str, output: Option<&std::path::Path>
 async fn playbook_command(cli: &Cli, command: &PlaybookCommand) -> Result<()> {
     match command {
         PlaybookCommand::List => {
-            println!("BUNDLED PLAYBOOKS");
+            let mut rows = Vec::new();
             for id in bundled_ids() {
-                let playbook = crate::playbook::bundled(id).expect("bundled parses");
-                println!("{:<16} {}", playbook.id, playbook.name);
-                if !playbook.description.is_empty() {
-                    println!("                 {}", playbook.description.trim());
+                let Some(playbook) = crate::playbook::bundled(id) else {
+                    return Err(user_err(format!("bundled playbook {id} failed to parse")));
+                };
+                rows.push(serde_json::json!({
+                    "id": playbook.id,
+                    "name": playbook.name,
+                    "description": playbook.description.trim(),
+                    "seed": playbook.seed.kind.as_str(),
+                    "steps": playbook.steps.len(),
+                }));
+            }
+            if cli.json {
+                return print_json(&rows);
+            }
+            println!("BUNDLED PLAYBOOKS");
+            for row in &rows {
+                println!(
+                    "{:<16} {}",
+                    row["id"].as_str().unwrap_or(""),
+                    row["name"].as_str().unwrap_or("")
+                );
+                let description = row["description"].as_str().unwrap_or("");
+                if !description.is_empty() {
+                    println!("                 {description}");
                 }
             }
             println!(
@@ -1459,12 +1500,25 @@ fn marking_command(cli: &Cli, command: &MarkingCommand) -> Result<()> {
                 let entity = workspace
                     .entity(entity_id)
                     .ok_or_else(|| user_err(format!("unknown entity {query}")))?;
+                if cli.json {
+                    return print_json(&serde_json::json!({
+                        "investigation": investigation.name,
+                        "ref": entity.short_ref().to_string(),
+                        "name": entity.display_name(),
+                        "marking": entity.marking().label(),
+                    }));
+                }
                 println!(
                     "{} {}  {}",
                     entity.short_ref(),
                     entity.display_name(),
                     entity.marking().label()
                 );
+            } else if cli.json {
+                return print_json(&serde_json::json!({
+                    "investigation": investigation.name,
+                    "marking": investigation.marking.label(),
+                }));
             } else {
                 println!("{}  {}", investigation.name, investigation.marking.label());
             }
@@ -1500,6 +1554,14 @@ fn team_command(cli: &Cli, command: &TeamCommand) -> Result<()> {
             let investigation = runtime.store.require_investigation(investigation)?;
             let members = runtime.store.list_members(investigation.id)?;
             let role = runtime.store.role_for(investigation.id)?;
+            if cli.json {
+                return print_json(&serde_json::json!({
+                    "investigation": investigation.name,
+                    "identity": runtime.store.identity().user_id,
+                    "role": role.as_str(),
+                    "members": members,
+                }));
+            }
             println!(
                 "{}  local identity {} ({})",
                 investigation.name,
@@ -1608,28 +1670,14 @@ fn case_command(cli: &Cli, query: &str) -> Result<()> {
     }
     println!("AT A GLANCE");
     println!(
-        "  {} entities   {} {}  {} {}  {} {}  {} {}",
+        "  {} entities   {}",
         home.entities.total,
-        theme.glyphs.collected,
-        home.entities.collected,
-        theme.glyphs.external,
-        home.entities.external,
-        theme.glyphs.analyst,
-        home.entities.analyst,
-        theme.glyphs.ai,
-        home.entities.agent
+        format_glance_buckets(&home.entities, &theme)
     );
     println!(
-        "  {} findings   {} {}  {} {}  {} {}  {} {}",
+        "  {} findings   {}",
         home.findings.total,
-        theme.glyphs.collected,
-        home.findings.collected,
-        theme.glyphs.external,
-        home.findings.external,
-        theme.glyphs.analyst,
-        home.findings.analyst,
-        theme.glyphs.ai,
-        home.findings.agent
+        format_glance_buckets(&home.findings, &theme)
     );
     println!("NEXT");
     if home.next.is_empty() {
@@ -2339,7 +2387,16 @@ fn doctor(cli: &Cli) -> Result<()> {
         Some(&runtime.store),
         &tools,
     );
-    let mut failed = false;
+    let failed = checks
+        .iter()
+        .any(|check| check.status == crate::doctor::CheckStatus::Warn);
+    if cli.json {
+        print_json(&checks)?;
+        if failed {
+            return Err(user_err("doctor reported warnings"));
+        }
+        return Ok(());
+    }
     for check in checks {
         println!(
             "{:<16} {:<8} {}",
@@ -2347,14 +2404,27 @@ fn doctor(cli: &Cli) -> Result<()> {
             check.status.symbol(),
             check.detail
         );
-        if check.status == crate::doctor::CheckStatus::Warn {
-            failed = true;
-        }
     }
     if failed {
         return Err(user_err("doctor reported warnings"));
     }
     Ok(())
+}
+
+fn format_glance_buckets(
+    counts: &crate::app::case::GlanceCounts,
+    theme: &crate::tui::Theme,
+) -> String {
+    let parts: Vec<String> = counts
+        .nonzero_buckets()
+        .into_iter()
+        .map(|(provenance, count)| format!("{} {count}", theme.glyphs.provenance(provenance)))
+        .collect();
+    if parts.is_empty() {
+        "none".into()
+    } else {
+        parts.join("  ")
+    }
 }
 
 fn show_config(cli: &Cli) -> Result<()> {
@@ -2687,5 +2757,45 @@ mod tests {
         };
         assert!(review_confirm_prompt(&analyst, true).contains("analyst provenance"));
         assert!(review_accepted_copy(analyst.written_as, false).contains("Analyst"));
+    }
+
+    #[test]
+    fn json_flag_is_accepted_on_playbook_team_marking_cooccur_and_doctor() {
+        for args in [
+            ["os-int", "--json", "playbook", "list"].as_slice(),
+            ["os-int", "--json", "team", "list", "Case"].as_slice(),
+            ["os-int", "--json", "marking", "get", "Case"].as_slice(),
+            ["os-int", "--json", "cooccur", "Case"].as_slice(),
+            ["os-int", "--json", "doctor"].as_slice(),
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap_or_else(|error| panic!("{args:?}: {error}"));
+            assert!(cli.json, "{args:?}");
+        }
+    }
+
+    #[test]
+    fn glance_buckets_omit_zero_counts_and_skip_hollow_diamond_for_agent_findings() {
+        let mut config = Config::default();
+        config.ui.ascii = true;
+        let env = crate::tui::TerminalEnv {
+            no_color: true,
+            ..crate::tui::TerminalEnv::default()
+        };
+        let theme = crate::tui::Theme::resolve(&config, &env);
+        let counts = crate::app::case::GlanceCounts {
+            total: 1,
+            agent: 1,
+            ..crate::app::case::GlanceCounts::default()
+        };
+        let text = format_glance_buckets(&counts, &theme);
+        assert!(text.contains('*'), "{text}");
+        assert!(!text.contains('◇'), "{text}");
+        assert!(!text.contains('X'), "{text}");
+        let cli = Cli::try_parse_from(["os-int", "--plain", "case", "Case"]).expect("plain");
+        assert!(cli.plain);
+        let theme = cli_theme(&cli);
+        assert!(theme.glyphs.ascii);
+        assert_eq!(theme.glyphs.external, "X");
+        assert_eq!(theme.glyphs.ai, "*");
     }
 }

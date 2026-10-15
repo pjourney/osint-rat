@@ -609,14 +609,14 @@ os-int [OPTIONS] [COMMAND]
 | `collect --investigation <name>` | Case to write into. Created when the name is new |
 | `collect --collector <id>` | Run one collector instead of the defaults |
 | `ingest <path> [--format stix\|misp\|csv\|json\|batch]` | Import a file into a case |
-| `playbook list` | Print bundled playbooks |
+| `playbook list` | Print bundled playbooks (`--json` supported) |
 | `playbook validate <id-or-file>` | Parse YAML without writing |
 | `playbook run <id-or-file> --investigation <name> --target <seed>` | Run a playbook (`--dry-run` plans only) |
 | `watch --playbook <id-or-file> --investigation <name>` | Re-run collect steps (`--dry-run`, `--once`, `--interval`) |
 | `report <name> [--format markdown\|json] [-o <file>]` | Write a report |
 | `export <name> [-o <dir>] [--format archive\|geojson\|stix]` | Write a portable directory, GeoJSON, or a STIX 2.1 bundle |
 | `geojson <name> [-o <file>]` | Write a GeoJSON FeatureCollection |
-| `cooccur <name> [--window <hours>]` | Print pairs that share an Event, source, or time window |
+| `cooccur <name> [--window <hours>]` | Print pairs that share an Event, source, or time window (`--json` supported) |
 | `get <name> <ref>` | Object View JSON for `E-n` / `P-n` |
 | `objects <name> [--kind domain]` | Visible entities as JSON |
 | `search-around <name> <seed> [--hops 2]` | Search Around JSON |
@@ -624,10 +624,10 @@ os-int [OPTIONS] [COMMAND]
 | `serve [--bind 127.0.0.1:8743]` | Localhost ontology HTTP API |
 | `bench [--sizes 1000,10000,100000]` | Load/query timings for synthetic graphs |
 | `import <path> [--rename]` | Import an export directory |
-| `marking get\|set <name> [TLP:…]` | Show or set the case (or `--entity`) marking |
-| `team list\|add\|set-role\|remove` | Case members (`owner` / `analyst` / `reader`) |
+| `marking get\|set <name> [TLP:…]` | Show or set the case (or `--entity`) marking (`get` supports `--json`) |
+| `team list\|add\|set-role\|remove` | Case members (`owner` / `analyst` / `reader`; `list` supports `--json`) |
 | `audit <name> [--kind …]` | Print the append-only audit log |
-| `doctor` | Check the database, config, network, logs, and common programs |
+| `doctor` | Check the database, config, network, logs, and common programs (`--json` supported) |
 | `config` | Print the resolved config, data, database, and log paths |
 | `theme preview [name\|--all]` | Print cockpit role swatches, a sample strip, and colour-blind ΔE without opening the TUI |
 | `case <name>` | Print the Case home dashboard (targets, glance, NEXT) |

@@ -1,24 +1,24 @@
- os-int ▸ acme-phish ▸ Case  unma…  * 1 to review  ok jobs  agent X Claude Code
+ os-int > acme-phish > Case  unma…  * 1 to review  ok jobs  agent X Claude Code
 RAIL
- Rail
->1 Case
- 2 Entities
- 3 Evidence
- 4 Graph
- 5 Review 1
+>1 Case  2 Entities  3 Evidence  4 Graph  5 Review 1  6 Jobs
 >TARGETS
 >DOM acme-login.com        A 1    0s ok
 
 AT A GLANCE
-   2 entities   C 1  X 0  A 1  * 0
-   1 findings   C 0  X 0  A 0  * 1
+   2 entities   C 1  A 1
+   1 findings   * 1
+
+NEXT
+  * 1 agent proposals waiting  5 review
+
+
+
+
  Inspector · acme-login.com
 DOM  acme-login.com
 A 1 facts · 1 sources
 SOURCES
   S1 C  dns  0s
 NOTES  e edit
-  No notes yet. e edits in $EDITOR.
-
  Case — Enter opens. It never writes.    0 jobs
 c collect  n new target  a ask agent  s search around  / search  Ctrl+K commands

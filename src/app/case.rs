@@ -39,6 +39,19 @@ impl GlanceCounts {
             Provenance::Agent => self.agent += 1,
         }
     }
+
+    /// Provenance buckets with a non-zero count, in legend order.
+    pub fn nonzero_buckets(self) -> Vec<(Provenance, usize)> {
+        [
+            (Provenance::Collected, self.collected),
+            (Provenance::External, self.external),
+            (Provenance::Analyst, self.analyst),
+            (Provenance::Agent, self.agent),
+        ]
+        .into_iter()
+        .filter(|(_, count)| *count > 0)
+        .collect()
+    }
 }
 
 /// A suggested next action on Case.
@@ -218,7 +231,17 @@ mod tests {
         assert_eq!(counts.total, 5);
         assert_eq!(counts.collected, 2);
         assert_eq!(counts.agent, 1);
+        assert_eq!(
+            counts.nonzero_buckets(),
+            vec![
+                (Provenance::Collected, 2),
+                (Provenance::External, 1),
+                (Provenance::Analyst, 1),
+                (Provenance::Agent, 1),
+            ]
+        );
         assert_eq!(counts.analyst, 1);
         assert_eq!(counts.external, 1);
+        assert!(GlanceCounts::default().nonzero_buckets().is_empty());
     }
 }

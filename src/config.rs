@@ -743,6 +743,12 @@ parser = "hostnames"
     }
 
     #[test]
+    fn malformed_toml_is_an_error() {
+        let error = Config::parse("ui.theme = [unterminated").expect_err("malformed");
+        assert!(!error.to_string().is_empty());
+    }
+
+    #[test]
     fn old_theme_names_warn() {
         for name in ["default", "high-contrast"] {
             let mut input = Config::default();
