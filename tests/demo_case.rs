@@ -229,13 +229,13 @@ fn install_and_release_docs_cover_one_liners() {
         "Windows binstall URL must end in .zip, got {windows_url}"
     );
     let readme = std::fs::read_to_string(root.join("README.md")).expect("readme");
-    assert!(readme.contains("/v0.2.0/scripts/install.sh"));
+    assert!(readme.contains("/v0.2.1/scripts/install.sh"));
     assert!(!readme.contains("/main/scripts/install.sh"));
     assert!(readme.contains("cargo binstall --git https://github.com/pjourney/osint-rat"));
     assert!(readme.contains("192.0.2.1"));
     assert!(!readme.contains("93.184.216.34"));
     let docs_install = std::fs::read_to_string(root.join("docs/install.md")).expect("install.md");
-    assert!(docs_install.contains("/v0.2.0/scripts/install.sh"));
+    assert!(docs_install.contains("/v0.2.1/scripts/install.sh"));
     assert!(!docs_install.contains("/main/scripts/install.sh"));
     assert!(docs_install.contains("Draft releases are not latest"));
     assert!(docs_install.contains("cargo binstall --git https://github.com/pjourney/osint-rat"));
@@ -247,7 +247,7 @@ fn install_and_release_docs_cover_one_liners() {
 fn interpolate_binstall_pkg_url(template: &str, target: &str) -> String {
     template
         .replace("{ repo }", "https://github.com/pjourney/osint-rat")
-        .replace("{ version }", "0.2.0")
+        .replace("{ version }", "0.2.1")
         .replace("{ name }", "os-int")
         .replace("{ target }", target)
         .replace("{ archive-suffix }", ".tgz")

@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.1 — 2026-10-15
+
+Bugfixes on the 0.2.0 Evidence Cockpit. Production QA (#30) and a follow-up bug hunt (#31).
+
+### Fixed
+
+- Plain mode at 80×24 keeps Case NEXT and Graph edges. `OS_INT_PLAIN` is presence-based (`1` / `yes` / `on` / `true` work; `false` / `0` / `no` / `off` do not abort).
+- `--plain` / ASCII chrome: header crumbs, pane rules, review glyphs, graph seen-mark, three-dot ellipsis, and no colour.
+- `--json` on `playbook list`, `team list`, `marking get`, `cooccur`, `doctor`, `config`, and `review list` (now includes `kind`, `short_ref`, `proposal_id`).
+- Parallel CLI on one data dir no longer hits `database is locked` (skip redundant catalog backfill; 30s busy timeout).
+- `cooccur --window` and huge `timeout_seconds` reject values that would overflow instead of panicking or silently saturating.
+- UTF-8 input cursor no longer panics on a mid-code-unit index.
+- Job apply writes to the job's investigation and page, not the open case. Missing investigation or apply errors persist `Failed`.
+- Jobs lane lists only the open investigation's jobs.
+- Playbook apply is one atomic transaction (evidence, proposals, automation).
+- `marking set --entity UUID` stays in the named investigation.
+- Import/export `copy_tree` skips symlinks instead of following them.
+- Graph Object View uses the tree-walk selection, not the node-vector index.
+- `--kind` / `?kind=` typos are rejected instead of becoming `Other`.
+- Review-accept on a pipe still requires `--yes`.
+
+### Install
+
+Linux aarch64 has no prebuilt archive; install from source. Until crates.io, use `cargo binstall --git https://github.com/pjourney/osint-rat`.
+
 ## 0.2.0 — 2026-10-15
 
 Evidence Cockpit UI. The workbench is now a three-pane analyst cockpit: Rail, Board, and Inspector.
