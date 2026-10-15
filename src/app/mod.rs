@@ -860,10 +860,20 @@ impl App {
         match &self.overlay {
             Overlay::Palette { query, selected } => {
                 let items = filtered(&query.value);
-                if let Some(command) = items.get(*selected) {
-                    let id = command.id;
-                    self.overlay = Overlay::None;
-                    self.run_command(id)?;
+                if let Some(command) = items.get(*selected).copied() {
+                    if command.writes {
+                        self.overlay = Overlay::Confirm {
+                            title: command.title.to_string(),
+                            message: format!(
+                                "Run {}? This writes case data. Press y to confirm.",
+                                command.title
+                            ),
+                            command: command.id.to_string(),
+                        };
+                    } else {
+                        self.overlay = Overlay::None;
+                        self.run_command(command.id)?;
+                    }
                 }
             }
             Overlay::Search { query, selected } => {
@@ -885,7 +895,6 @@ impl App {
                 self.switch_view(view);
             }
             Overlay::None => self.select_main_item(),
-            Overlay::Form(_) => self.submit()?,
             Overlay::Confirm { command, .. } => {
                 let command = command.clone();
                 self.overlay = Overlay::None;
@@ -2113,11 +2122,14 @@ impl App {
         let Overlay::Proposals {
             run_id,
             selected,
-            armed: _,
+            armed,
         } = self.overlay
         else {
             return Ok(());
         };
+        if status == ProposalStatus::Accepted && !armed {
+            return Ok(());
+        }
         let Some(proposal) = self.pending_proposals(run_id).get(selected).cloned() else {
             return Ok(());
         };
@@ -3564,6 +3576,7 @@ mod tests {
             selected: 0,
             armed: false,
         };
+        app.dispatch(Action::Arm).expect("arm");
         app.dispatch(Action::Accept).expect("accept");
         let data = app
             .store
@@ -3638,6 +3651,49 @@ mod tests {
     }
 
     #[test]
+    fn unarmed_accept_does_not_apply_a_proposal() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Unarmed");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let mut run = sample_run(investigation_id, Uuid::new_v4(), Uuid::new_v4(), "Find?");
+        app.store.insert_agent_run(&mut run).expect("run");
+        app.store
+            .insert_proposals(
+                investigation_id,
+                run.id,
+                vec![(
+                    AgentAction::AddNote {
+                        body: "must stay pending".into(),
+                    },
+                    ProposalStatus::Pending,
+                    None,
+                )],
+            )
+            .expect("proposals");
+        app.reload().expect("reload");
+        app.overlay = Overlay::Proposals {
+            run_id: run.id,
+            selected: 0,
+            armed: false,
+        };
+        app.dispatch(Action::Accept).expect("refused");
+        let data = app
+            .store
+            .load_investigation(investigation_id)
+            .expect("loads");
+        assert_eq!(data.proposals[0].status, ProposalStatus::Pending);
+        assert!(
+            data.notes
+                .iter()
+                .all(|note| !note.body.contains("must stay"))
+        );
+        assert!(matches!(
+            app.overlay,
+            Overlay::Proposals { armed: false, .. }
+        ));
+    }
+
+    #[test]
     fn reader_accept_leaves_finding_and_proposal_unchanged() {
         let (_directory, mut app) = test_app();
         app.store.set_identity(crate::model::Identity {
@@ -3679,6 +3735,7 @@ mod tests {
             selected: 0,
             armed: false,
         };
+        app.dispatch(Action::Arm).expect("arm");
         let error = app.dispatch(Action::Accept).expect_err("reader accept");
         assert!(
             error.to_string().contains("reader"),
@@ -4223,6 +4280,7 @@ mod tests {
             selected: 0,
             armed: false,
         };
+        app.dispatch(Action::Arm).expect("arm");
         app.dispatch(Action::Accept).expect("accept");
         let data = app
             .store
@@ -4296,6 +4354,7 @@ mod tests {
             selected: 0,
             armed: false,
         };
+        app.dispatch(Action::Arm).expect("arm");
         app.dispatch(Action::Accept).expect("accept");
         let workspace = app.workspace.as_ref().expect("workspace");
         assert!(workspace.data.is_absorbed(host));

@@ -35,7 +35,7 @@ pub fn map_key(key: KeyEvent, overlay: &Overlay, view: View, editing: bool) -> O
 fn map_proposal_key(key: KeyEvent, armed: bool) -> Option<Action> {
     if armed {
         return match key.code {
-            KeyCode::Char('y') => Some(Action::Accept),
+            KeyCode::Char('y' | 'Y') => Some(Action::Accept),
             _ => Some(Action::Disarm),
         };
     }
@@ -284,6 +284,10 @@ mod tests {
         let armed = proposals(true);
         assert!(matches!(
             map_key(press(KeyCode::Char('y')), &armed, View::Agent, false),
+            Some(Action::Accept)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('Y')), &armed, View::Agent, false),
             Some(Action::Accept)
         ));
         assert!(matches!(

@@ -702,7 +702,7 @@ pub fn help_text() -> String {
     lines.push("Enter opens. It never writes.".into());
     lines.push("Shift+A then y accepts a proposal. Any other key disarms.".into());
     lines.push("y confirms a write prompt. Ctrl+S submits a form or agent prompt.".into());
-    lines.push("Palette commands that write still require a confirm form.".into());
+    lines.push("Palette writes open a y-confirm. Enter on the palette does not run them.".into());
     lines.push(String::new());
     lines.push("Provenance glyphs: ● collected  ◇ original material".into());
     lines.push("                   ✎ you wrote  ◆ agent inference (kept after accept)".into());
@@ -842,6 +842,7 @@ mod tests {
         let help = help_text();
         assert!(help.contains("Command palette"));
         assert!(help.contains("Enter never writes") || help.contains("never writes"));
+        assert!(help.contains("Palette writes open a y-confirm"), "{help}");
         assert!(help.contains('●') || help.contains("collected"));
         for command in COMMANDS.iter().filter(|command| !command.hint.is_empty()) {
             assert!(

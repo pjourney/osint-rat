@@ -449,4 +449,70 @@ mod tests {
         let text = visible_text(&terminal);
         assert!(text.contains("phosphor needs 256 colours"), "{text}");
     }
+
+    fn press(code: crossterm::event::KeyCode) -> crossterm::event::KeyEvent {
+        crossterm::event::KeyEvent::new(code, crossterm::event::KeyModifiers::NONE)
+    }
+
+    fn dispatch_key(app: &mut App, key: crossterm::event::KeyEvent) {
+        let action =
+            keymap::map_key(key, &app.overlay, app.view, app.is_editing()).expect("key should map");
+        app.dispatch(action).expect("dispatch");
+    }
+
+    #[test]
+    fn palette_enter_on_write_command_waits_for_y() {
+        let (_directory, mut app) = test_app();
+        app.dispatch(Action::Command("new_investigation"))
+            .expect("form");
+        if let crate::app::Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set("Palette Write");
+        }
+        app.dispatch(Action::Submit).expect("create");
+        app.dispatch(Action::Palette).expect("palette");
+        if let crate::app::Overlay::Palette { query, selected } = &mut app.overlay {
+            query.set("generate_report");
+            *selected = 0;
+        }
+        let hits = crate::app::commands::filtered("generate_report");
+        assert_eq!(hits[0].id, "generate_report");
+        assert!(hits[0].writes);
+        dispatch_key(&mut app, press(crossterm::event::KeyCode::Enter));
+        assert!(
+            matches!(
+                app.overlay,
+                crate::app::Overlay::Confirm { ref command, .. } if command == "generate_report"
+            ),
+            "{:?}",
+            app.overlay
+        );
+        assert!(
+            app.workspace
+                .as_ref()
+                .expect("workspace")
+                .data
+                .artifacts
+                .iter()
+                .all(|artifact| artifact.kind != crate::model::ArtifactKind::Report)
+        );
+        assert!(
+            keymap::map_key(
+                press(crossterm::event::KeyCode::Enter),
+                &app.overlay,
+                app.view,
+                app.is_editing()
+            )
+            .is_none()
+        );
+        dispatch_key(&mut app, press(crossterm::event::KeyCode::Char('y')));
+        assert!(
+            app.workspace
+                .as_ref()
+                .expect("workspace")
+                .data
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.kind == crate::model::ArtifactKind::Report)
+        );
+    }
 }

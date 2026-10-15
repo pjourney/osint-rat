@@ -773,7 +773,8 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `d` | welcome | Doctor |
 | `Shift+A` then `y` | proposals | Arm, then accept. Any other key disarms. Enter never accepts. |
 | `R` `n` | proposals | Reject the selected proposal |
-| `y` | confirm | Confirm a write. Enter never writes. |
+| `y` | confirm | Confirm a write, including a palette command that writes. Enter never writes. |
+| `Enter` | palette | Pick a command. Writes open a y-confirm and do not run until `y`. |
 | `Ctrl+S` | editing | Submit the form or the agent question. Enter never writes. |
 | `Left` `Right` | forms | Cycle a choice (page type, and similar fields) |
 
