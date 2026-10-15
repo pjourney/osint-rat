@@ -204,7 +204,7 @@ Press `Ctrl+K` or `:`, then type to filter. Ingest, playbooks, tools, settings, 
 | Doctor | Environment checks |
 | Help | Keyboard overlay |
 | Cancel Running Job | Cancel the selected job |
-| Unresolve entity | Propose unresolving the current bag. Lands in Review |
+| Unresolve entity | Propose unresolving the current bag. Opens a y-confirm overlay. Enter never writes. |
 
 ## Building a case
 
@@ -300,14 +300,14 @@ A shared `--data-dir` plus roles is optional. Empty membership is single-user ow
 - Prefer the more specific or already-cited object as the winner (the highlighted marked row). The winner keeps its kind and value.
 - Read the confirm text. Esc cancels. Nothing merges until you confirm.
 - After merge, open Object View and check constituents, sources, and links. Both sides' citations must still be there.
-- Unresolve (`u` on the canonical) if the bag was wrong. Constituents return; property writes from that bag are undone. SQLite rows are not deleted, so `os-int doctor` should stay clean.
+- Unresolve (palette **Unresolve entity**, then `y`) if the bag was wrong. Constituents return; property writes from that bag are undone. SQLite rows are not deleted, so `os-int doctor` should stay clean.
 - Do not accept an agent `PROPOSE_RESOLVE` without checking the entity ids. AI only proposes.
 - Suggestions (palette **Resolution suggestions**) are scored hints: same canonical email/domain/IP/repo URL, username↔profile URL, certificate SAN clusters. They never auto-merge.
 
 ### Keys
 
 - **Entities:** `Space` marks or unmarks. `m` proposes a merge of the marked set (the highlighted marked row is the canonical). The proposal lands in **Review**. `Shift+A` then `y` writes; Enter never writes.
-- Palette: **Merge selected entities**, **Unresolve entity**, **Resolution suggestions**. Unresolve and scored suggestions also land in Review.
+- Palette: **Merge selected entities**, **Unresolve entity**, **Resolution suggestions**. Unresolve opens a y-confirm overlay. Scored suggestions land in Review.
 
 Timeline events `entities_resolved` and `entities_unresolved` record the actor and constituent ids.
 

@@ -118,11 +118,12 @@ pub fn provenance_span(provenance: Provenance, theme: &Theme) -> Span<'static> {
 
 pub fn context_line(view: View, pane: Pane, theme: &Theme) -> Line<'static> {
     let mut spans = Vec::new();
-    for (index, command) in context_commands(view, pane).into_iter().enumerate() {
-        if command.hint.is_empty() {
+    let mut seen = std::collections::HashSet::new();
+    for command in context_commands(view, pane) {
+        if command.hint.is_empty() || !seen.insert(command.hint) {
             continue;
         }
-        if index > 0 {
+        if !spans.is_empty() {
             spans.push(Span::raw("  "));
         }
         spans.push(Span::styled(command.hint.to_string(), theme.accent));

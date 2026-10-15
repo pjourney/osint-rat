@@ -1,17 +1,17 @@
  os-int ▸ acme-phish ▸ Entities  u…  ◆ 1 to review  ✓ jobs  agent ◇ Claude Code
- Rail         │┌Entities───────────────────────────────────────────────────────┐
- 1 Case        │[ ]  E-1  Domain        ANL  acme-login.com                    │
-▌2 Entities    │[ ]  E-2  IP            COL  203.0.113.7                       │
- 3 Evidence    │                                                               │
- 4 Graph       │                                                               │
- 5 Review 1    │                                                               │
- 6 Jobs        │                                                               │
-               │                                                               │
-               │                                                               │
-               │                                                               │
-               │                                                               │
-               │                                                               │
-               └───────────────────────────────────────────────────────────────┘
+ Rail         │▌Entities
+ 1 Case        [ ]  E-1  Domain        ANL  acme-login.com
+▌2 Entities    [ ]  E-2  IP            COL  203.0.113.7
+ 3 Evidence
+ 4 Graph
+ 5 Review 1
+ 6 Jobs
+
+
+
+
+
+
  Inspector · acme-login.com
 TABS  ·Props·  Sources  Notes  History
 E-1  acme-login.com
@@ -20,5 +20,5 @@ Sources  S-1
 
 Relationships
   --resolves_to-->  E-2 203.0.113.7
- Opened acme-phish    0 jobs
-/ search  Ctrl+K commands  ? help  c collect  a ask agent  4 graph  g graph  s s
+ Entities. Space marks. m proposes a merge to Review.    0 jobs
+/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro

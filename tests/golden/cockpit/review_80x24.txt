@@ -15,10 +15,10 @@
  Inspector · Will write
 + Finding  ◆ AI
   mail.acme-login.com uses the same MX
-  severity  medium
+  confidence  medium
   provenance agent (kept forever)
   Registered 3 days before the campaign
 
 CITED EVIDENCE
  1 item(s) waiting. Shift+A then y writes. Enter never writes.    0 jobs
-/ search  Ctrl+K commands  ? help  c collect  a ask agent  4 graph  g graph  s s
+/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro

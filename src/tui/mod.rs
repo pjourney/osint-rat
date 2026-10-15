@@ -180,28 +180,38 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if theme.paints_background {
         frame.render_widget(Block::default().style(theme.bg), area);
     }
-    let confirm = if app.review_armed { 1 } else { 0 };
-    let rows = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(5),
-        Constraint::Length(confirm),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .split(area);
+    let mut constraints = vec![Constraint::Length(1), Constraint::Min(5)];
+    if app.review_armed {
+        constraints.push(Constraint::Length(1));
+    }
+    if theme.degrade_hint.is_some() {
+        constraints.push(Constraint::Length(1));
+    }
+    constraints.push(Constraint::Length(1));
+    constraints.push(Constraint::Length(1));
+    let rows = Layout::vertical(constraints).split(area);
     draw_header(frame, rows[0], app, &theme);
     if app.view == View::Welcome {
         screens::welcome(frame, rows[1], app, &theme);
     } else {
         screens::workspace(frame, rows[1], app, &theme);
     }
+    let mut row = 2;
     if app.review_armed {
-        draw_confirm_bar(frame, rows[2], app, &theme);
+        draw_confirm_bar(frame, rows[row], app, &theme);
+        row += 1;
     }
-    draw_status(frame, rows[3], app, &theme);
+    if let Some(hint) = theme.degrade_hint {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(format!(" {hint}"), theme.warn))),
+            rows[row],
+        );
+        row += 1;
+    }
+    draw_status(frame, rows[row], app, &theme);
     frame.render_widget(
         Paragraph::new(widgets::context_line(app.view, app.pane, &theme)),
-        rows[4],
+        rows[row + 1],
     );
     overlays::draw(frame, area, app, &theme);
 }
@@ -267,13 +277,7 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
 }
 
 fn draw_confirm_bar(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme: &Theme) {
-    let items = app.armed_review_items();
-    let ai = items.iter().filter(|item| item.is_ai()).count();
-    let text = format!(
-        " Accept {} item(s), {ai} AI? They keep {} agent provenance.   y confirm   any other key cancels ",
-        items.len(),
-        theme.glyphs.ai
-    );
+    let text = app.confirm_bar_text();
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(text, theme.fg))).style(theme.panel),
         area,
@@ -309,12 +313,7 @@ fn draw_status(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
     } else {
         theme.fg
     };
-    let hint = theme.degrade_hint.unwrap_or("");
-    let text = if hint.is_empty() {
-        format!(" {}    {jobs}", sanitize_line(&app.status))
-    } else {
-        format!(" {}    {jobs}    {hint}", sanitize_line(&app.status))
-    };
+    let text = format!(" {}    {jobs}", sanitize_line(&app.status));
     frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
 }
 
@@ -492,6 +491,22 @@ mod tests {
         terminal.draw(|frame| draw(frame, &app)).expect("draw");
         let text = visible_text(&terminal);
         assert!(text.contains("phosphor needs 256 colours"), "{text}");
+    }
+
+    #[test]
+    fn degrade_hint_stays_readable_at_minimum_size() {
+        let (_directory, mut app) = test_app();
+        app.config.ui.theme = "phosphor".into();
+        app.config.ui.color = "16".into();
+        app.status = "ready".into();
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal.draw(|frame| draw(frame, &app)).expect("draw");
+        let text = visible_text(&terminal);
+        assert!(
+            text.contains("phosphor needs 256 colours"),
+            "hint must not be truncated at 80x24\n{text}"
+        );
     }
 
     fn press(code: crossterm::event::KeyCode) -> crossterm::event::KeyEvent {
@@ -697,6 +712,25 @@ mod tests {
             name
         );
         None
+    }
+
+    #[test]
+    fn graph_time_lens_draws_the_timeline() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenGraph).expect("graph");
+        assert!(!app.is_time_lens());
+        let graph = render_snapshot(&app, 80, 24);
+        assert!(
+            graph.contains("Neighborhood") || graph.contains("Facets") || graph.contains("Graph"),
+            "{graph}"
+        );
+        assert!(!graph.contains("Time lens"));
+        app.dispatch(Action::ToggleTimeLens).expect("t");
+        assert_eq!(app.view, View::Graph);
+        assert!(app.is_time_lens());
+        let lens = render_snapshot(&app, 80, 24);
+        assert!(lens.contains("Time lens"), "{lens}");
+        assert!(!lens.contains("Neighborhood"), "{lens}");
     }
 
     #[test]

@@ -24,9 +24,6 @@ pub fn map_key(
     if board_zoomed {
         return Some(Action::Unzoom);
     }
-    if let Overlay::Proposals { armed, .. } = overlay {
-        return map_proposal_key(key, *armed);
-    }
     if view == View::Review
         && matches!(overlay, Overlay::None)
         && let Some(action) = map_review_key(key, review_armed)
@@ -46,10 +43,6 @@ pub fn map_key(
         return Some(tab_action(key.modifiers));
     }
     map_registered_key(key.code, view, ctrl, overlay)
-}
-
-fn map_proposal_key(key: KeyEvent, armed: bool) -> Option<Action> {
-    map_review_key(key, armed)
 }
 
 fn map_review_key(key: KeyEvent, armed: bool) -> Option<Action> {
@@ -93,7 +86,7 @@ fn map_editing_key(key: KeyEvent, overlay: &Overlay) -> Option<Action> {
         KeyCode::End => Some(Action::End),
         KeyCode::Backspace => Some(Action::Backspace),
         KeyCode::Delete => Some(Action::Delete),
-        KeyCode::Char('k' | 'p') if ctrl => Some(Action::Palette),
+        KeyCode::Char('k') if ctrl => Some(Action::Palette),
         KeyCode::Char(ch) if !ctrl => Some(Action::InsertChar(ch)),
         _ => None,
     }
@@ -336,20 +329,23 @@ mod tests {
             Some(Action::Reject)
         ));
         let modal = proposals(false);
-        assert!(map(press(KeyCode::Enter), &modal, View::Review).is_none());
+        assert!(!matches!(
+            map(press(KeyCode::Enter), &modal, View::Review),
+            Some(Action::Accept)
+        ));
         assert!(map(press(KeyCode::Char('y')), &modal, View::Review).is_none());
-        assert!(matches!(
+        assert!(!matches!(
             map(press(KeyCode::Char('A')), &modal, View::Review),
             Some(Action::Arm)
         ));
         let armed = proposals(true);
-        assert!(matches!(
+        assert!(!matches!(
             map(press(KeyCode::Char('y')), &armed, View::Review),
             Some(Action::Accept)
         ));
-        assert!(matches!(
+        assert!(!matches!(
             map(press(KeyCode::Enter), &armed, View::Review),
-            Some(Action::Disarm)
+            Some(Action::Accept)
         ));
     }
 

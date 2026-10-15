@@ -2,7 +2,7 @@
  Rail         │▌AI PROPOSES ONLY                                                               │ Inspector · Will write
  1 Case        nothing is written until you accept                                              + Finding  ◆ AI
  2 Entities    X-1 Q-1 · codex                                                                    mail.acme-login.com uses the same MX
- 3 Evidence    ▌◆? + Finding: mail.acme-login.com uses the same MX                                severity  medium
+ 3 Evidence    ▌◆? + Finding: mail.acme-login.com uses the same MX                                confidence  medium
  4 Graph                                                                                          provenance agent (kept forever)
 ▌5 Review 1                                                                                       Registered 3 days before the campaign
  6 Jobs
@@ -12,8 +12,8 @@
                                                                                                 RATIONALE ◆
                                                                                                   ┊ Registered 3 days before the campaign
 
-
-
+                                                                                                TRANSCRIPT  Q-1
+                                                                                                Q  Is this phishing?
 
 
 
@@ -37,4 +37,4 @@
 
 
  1 item(s) waiting. Shift+A then y writes. Enter never writes.    0 jobs
-/ search  Ctrl+K commands  ? help  c collect  a ask agent  4 graph  g graph  s search around  A arm  x reject
+/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search around  A arm  x reject

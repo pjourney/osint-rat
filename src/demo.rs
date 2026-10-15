@@ -114,7 +114,7 @@ pub fn demo_case_data() -> InvestigationData {
         investigation_id: INVESTIGATION,
         seq: 1,
         page_id: Some(PAGE),
-        body: "Import path: open Graph (`g`) on example.com, Search Around (`s`) two hops, then open Object View (`v`) on the canonical domain. Constituent hostname example.com is merged. Playbook domain-infra is on the timeline as T-2.".into(),
+        body: "Import path: open Graph (`g`) on example.com, Search Around (`s`) two hops, then press Enter on the canonical domain to open Object View. Constituent hostname example.com is merged. Playbook domain-infra is on the timeline as T-2.".into(),
         provenance: Provenance::Analyst,
         created_at: timestamp,
         updated_at: timestamp,

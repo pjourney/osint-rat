@@ -91,8 +91,8 @@ Accept and reject record `decided_at` and `decided_by` (the local user name from
 
 A **resolution bag** is a canonical entity plus the constituents absorbed into it. Constituent rows stay in SQLite. The bag records property writes (`entities.fields`, plus label/notes) and source citations copied onto the canonical so unresolve can restore them. Nothing is deleted. `canonical_id` is a SQLite foreign key; `constituent_ids` is a JSON array, so `PRAGMA foreign_key_check` cannot validate those members.
 
-- Manual merge: on **Entities**, `Space` marks rows, `m` proposes, `y` confirms. Esc cancels. Winner is the highlighted marked row (else the first marked).
-- Unresolve: from Object View (or Entities) on the canonical, `u` then confirm.
+- Manual merge: on **Entities**, `Space` marks rows, `m` proposes; the merge lands in Review. `Shift+A` then `y` writes. Esc cancels. Winner is the highlighted marked row (else the first marked).
+- Unresolve: palette **Unresolve entity** on the canonical, then `y` on the confirm overlay. Enter never writes.
 - Suggestions (rules v1): same canonical email/domain/IP/repo URL; username↔profile URL; shared certificate SAN clusters. Palette **Resolution suggestions**. Scored only — never auto-merge.
 - Agent Actions `PROPOSE_RESOLVE` / `PROPOSE_UNRESOLVE` apply only after accept. Timeline: `entities_resolved` / `entities_unresolved` with actor and constituents.
 - Graph and Search Around collapse constituents onto the canonical (one node). Object View lists constituents and the union of sources, links, and findings.
@@ -101,7 +101,7 @@ Safe merge practices: [user guide](guide.md#entity-resolution).
 
 ## Events, time, and place
 
-A first-class **Event** (`C-n`) is an instant (`ended_at` absent) or an interval. Entities link through `event_entities`. The Timeline screen overlays collection log rows (`T-n`) and Events; filter with `[` `]` `f`, nearby with `l`. Co-occurrence (`os-int cooccur`) finds pairs that share an Event, a source, or a time window (default 24 hours). Overlay and co-occurrence follow resolution bags (`member_ids_of`).
+A first-class **Event** (`C-n`) is an instant (`ended_at` absent) or an interval. Entities link through `event_entities`. The time lens (`t` on Evidence or Graph) overlays collection log rows (`T-n`) and Events. Nearby is a palette command. Co-occurrence (`os-int cooccur`) finds pairs that share an Event, a source, or a time window (default 24 hours). Overlay and co-occurrence follow resolution bags (`member_ids_of`).
 
 Geo properties (`country`, `latitude`, `longitude`, `prefix`, `geo_source`) live on the entity field bag. `geo_source` is `collected` (RDAP / Cymru), `geo_db` (optional local JSON or MMDB), or `country_centroid` (derived fallback). Built-ins never phone home for geo. `os-int export --format geojson` writes Point and envelope Polygon features plus properties. Missing geo databases degrade; they do not crash.
 
@@ -121,7 +121,7 @@ The screen shows:
 2. **Linked objects** grouped by catalog link type (unknown verbs under Other), including edges from absorbed constituents remapped to the canonical.
 3. **Supporting sources** cited on the entity (union with constituents after a merge).
 4. **Findings** on pages that include the entity, or that share a cited source.
-5. **Constituents** when the object is the canonical of an active resolution bag. Palette **Unresolve entity** proposes unresolve (Review, then `Shift+A` then `y`).
+5. **Constituents** when the object is the canonical of an active resolution bag. Palette **Unresolve entity** opens a y-confirm overlay. Enter never writes.
 
 ## See also
 

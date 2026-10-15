@@ -2,9 +2,9 @@
 
 use uuid::Uuid;
 
-use super::{App, Overlay, PendingResolve, View};
+use super::{App, PendingResolve, View};
 use crate::model::{
-    AgentAction, Proposal, ProposalStatus, ResolutionSuggestion, ShortRef, Workspace,
+    AgentAction, Proposal, ProposalStatus, Provenance, ResolutionSuggestion, ShortRef, Workspace,
 };
 
 /// How a Review row was produced.
@@ -16,6 +16,8 @@ pub enum ReviewKind {
     Playbook,
     /// A scored or manual merge suggestion.
     Merge,
+    /// An agent run with no pending write. Transcript only.
+    History,
 }
 
 /// One row in the Review board.
@@ -30,6 +32,8 @@ pub struct ReviewItem {
     pub preview: Vec<String>,
     pub citations: Vec<ReviewCitation>,
     pub rationale: String,
+    /// Provenance that accept will store. `None` means the row is not a write.
+    pub written_as: Option<Provenance>,
 }
 
 impl ReviewItem {
@@ -38,7 +42,11 @@ impl ReviewItem {
     }
 
     pub fn is_ai(&self) -> bool {
-        matches!(self.kind, ReviewKind::Agent | ReviewKind::Playbook)
+        self.written_as == Some(Provenance::Agent)
+    }
+
+    pub fn is_writable(&self) -> bool {
+        self.written_as.is_some() && (self.proposal_id.is_some() || self.merge.is_some())
     }
 }
 
@@ -52,7 +60,10 @@ pub struct ReviewCitation {
 
 impl App {
     pub fn pending_review_count(&self) -> usize {
-        self.listed_review_items().len()
+        self.listed_review_items()
+            .iter()
+            .filter(|item| item.is_writable())
+            .count()
     }
 
     pub fn listed_review_items(&self) -> Vec<ReviewItem> {
@@ -81,6 +92,15 @@ impl App {
                 continue;
             }
             items.push(review_item_from_suggestion(workspace, &suggestion));
+        }
+        for run in &workspace.data.agent_runs {
+            if items
+                .iter()
+                .any(|item| item.run_id == Some(run.id) && item.kind != ReviewKind::History)
+            {
+                continue;
+            }
+            items.push(review_item_from_run(run));
         }
         items
     }
@@ -115,40 +135,88 @@ impl App {
     }
 
     pub(crate) fn arm_review(&mut self) {
-        if self.view != View::Review && !matches!(self.overlay, Overlay::Proposals { .. }) {
+        if self.view != View::Review {
             return;
         }
-        if let Overlay::Proposals { armed, .. } = &mut self.overlay {
-            *armed = true;
+        let items = self.armed_review_items();
+        if items.is_empty() || items.iter().any(|item| !item.is_writable()) {
+            self.status = "Nothing to accept.".into();
+            self.review_armed = false;
+            return;
         }
-        if self.view == View::Review {
-            let items = self.armed_review_items();
-            if items.is_empty() {
-                self.status = "Nothing to accept.".into();
-                return;
-            }
-            if items.iter().any(ReviewItem::has_missing_citation) {
-                self.status =
-                    "A citation points at a missing source. Acceptance is blocked.".into();
-                self.review_armed = false;
-                return;
-            }
-            self.review_armed = true;
-            let ai = items.iter().filter(|item| item.is_ai()).count();
-            self.status = format!(
-                "Armed — accept {} item(s), {ai} AI. y confirm. Any other key cancels.",
-                items.len()
-            );
+        if items.iter().any(ReviewItem::has_missing_citation) {
+            self.status = "A citation points at a missing source. Acceptance is blocked.".into();
+            self.review_armed = false;
+            return;
         }
+        self.review_armed = true;
+        self.status = confirm_status(&items);
     }
 
     pub(crate) fn disarm_review(&mut self) {
-        if let Overlay::Proposals { armed, .. } = &mut self.overlay {
-            *armed = false;
-        }
         if self.review_armed {
             self.review_armed = false;
             self.status = "Disarmed. Nothing written.".into();
+        }
+    }
+
+    pub(crate) fn open_agent_history(&mut self) {
+        self.open_review_lane();
+        let Some(workspace) = self.workspace.as_ref() else {
+            return;
+        };
+        let Some(run) = self
+            .agent_run_id
+            .and_then(|id| workspace.agent_run(id))
+            .or_else(|| workspace.data.agent_runs.last())
+        else {
+            self.status = "No agent runs yet. Press a to ask.".into();
+            return;
+        };
+        let run_id = run.id;
+        let thread_id = run.thread_id;
+        let reference = run.short_ref().to_string();
+        self.agent_run_id = Some(run_id);
+        self.agent_thread = Some(thread_id);
+        if let Some(index) = self
+            .listed_review_items()
+            .iter()
+            .position(|item| item.run_id == Some(run_id))
+        {
+            self.selected = index;
+        }
+        self.status = format!("Agent run {reference} — transcript in Inspector.");
+    }
+
+    pub fn confirm_accept_text(&self) -> String {
+        confirm_status(&self.armed_review_items())
+    }
+
+    pub fn confirm_bar_text(&self) -> String {
+        let items = self.armed_review_items();
+        let ai = items.iter().filter(|item| item.is_ai()).count();
+        let analyst = items
+            .iter()
+            .filter(|item| item.written_as == Some(Provenance::Analyst))
+            .count();
+        match (items.len(), ai, analyst) {
+            (1, 1, _) => {
+                " Accept 1 AI item? It keeps ◆ agent provenance.   y confirm   any other key cancels "
+                    .into()
+            }
+            (1, _, 1) => {
+                " Accept 1 analyst item? It keeps analyst provenance.   y confirm   any other key cancels "
+                    .into()
+            }
+            (count, ai, 0) if ai == count => format!(
+                " Accept {count} AI item(s)? They keep ◆ agent provenance.   y confirm   any other key cancels "
+            ),
+            (count, 0, analyst) if analyst == count => format!(
+                " Accept {count} analyst item(s)? They keep analyst provenance.   y confirm   any other key cancels "
+            ),
+            (count, ai, analyst) => format!(
+                " Accept {count} item(s): {ai} AI keep ◆, {analyst} analyst.   y confirm   any other key cancels "
+            ),
         }
     }
 
@@ -192,9 +260,10 @@ fn review_item_from_proposal(workspace: &Workspace, proposal: &Proposal) -> Revi
         merge: None,
         title: proposal.action.summary(),
         group,
-        preview: preview_lines(&proposal.action),
+        preview: preview_lines(&proposal.action, kind),
         citations: citations_for(workspace, proposal.action.cited_sources()),
         rationale: rationale_for(&proposal.action),
+        written_as: Some(written_provenance(kind, &proposal.action)),
     }
 }
 
@@ -231,6 +300,7 @@ fn review_item_from_merge(
         ],
         citations: Vec::new(),
         rationale: pending.reason.clone(),
+        written_as: Some(Provenance::Analyst),
     }
 }
 
@@ -252,7 +322,62 @@ fn review_item_from_suggestion(
     item
 }
 
-fn preview_lines(action: &AgentAction) -> Vec<String> {
+fn review_item_from_run(run: &crate::model::AgentRun) -> ReviewItem {
+    ReviewItem {
+        kind: ReviewKind::History,
+        proposal_id: None,
+        run_id: Some(run.id),
+        merge: None,
+        title: run.question.clone(),
+        group: format!("{} · {}", run.short_ref(), run.agent_name),
+        preview: vec!["Transcript only. Nothing to accept.".into()],
+        citations: Vec::new(),
+        rationale: String::new(),
+        written_as: None,
+    }
+}
+
+fn written_provenance(kind: ReviewKind, action: &AgentAction) -> Provenance {
+    match (kind, action) {
+        (ReviewKind::Playbook, AgentAction::AssertFindingTemplate { .. }) => Provenance::Analyst,
+        (ReviewKind::Merge, _) => Provenance::Analyst,
+        _ => Provenance::Agent,
+    }
+}
+
+fn confirm_status(items: &[ReviewItem]) -> String {
+    let ai = items.iter().filter(|item| item.is_ai()).count();
+    let analyst = items
+        .iter()
+        .filter(|item| item.written_as == Some(Provenance::Analyst))
+        .count();
+    match (items.len(), ai, analyst) {
+        (1, 1, _) => {
+            "Armed — accept 1 AI item. It keeps ◆ agent provenance. y confirm. Any other key cancels."
+                .into()
+        }
+        (1, _, 1) => {
+            "Armed — accept 1 analyst item. It keeps analyst provenance. y confirm. Any other key cancels."
+                .into()
+        }
+        (count, ai, 0) if ai == count => format!(
+            "Armed — accept {count} AI item(s). They keep ◆ agent provenance. y confirm. Any other key cancels."
+        ),
+        (count, 0, analyst) if analyst == count => format!(
+            "Armed — accept {count} analyst item(s). They keep analyst provenance. y confirm. Any other key cancels."
+        ),
+        (count, ai, analyst) => format!(
+            "Armed — accept {count} item(s): {ai} AI keep ◆, {analyst} analyst. y confirm. Any other key cancels."
+        ),
+    }
+}
+
+/// Resolve a cited source the same way Review preview and apply do.
+pub fn resolve_source_citation(workspace: &Workspace, raw: &str) -> Option<Uuid> {
+    resolve_citation(workspace, raw)
+}
+
+fn preview_lines(action: &AgentAction, kind: ReviewKind) -> Vec<String> {
     match action {
         AgentAction::AddFinding {
             title,
@@ -262,7 +387,10 @@ fn preview_lines(action: &AgentAction) -> Vec<String> {
         } => vec![
             "+ Finding  ◆ AI".into(),
             format!("  {title}"),
-            format!("  severity  {}", confidence.as_deref().unwrap_or("medium")),
+            format!(
+                "  confidence  {}",
+                confidence.as_deref().unwrap_or("medium")
+            ),
             "  provenance agent (kept forever)".into(),
             if details.is_empty() {
                 String::new()
@@ -273,11 +401,18 @@ fn preview_lines(action: &AgentAction) -> Vec<String> {
         .into_iter()
         .filter(|line| !line.is_empty())
         .collect(),
-        AgentAction::AssertFindingTemplate { title, details } => vec![
-            "+ Finding template  ◆ playbook".into(),
-            format!("  {title}"),
-            format!("  {}", details.lines().next().unwrap_or_default()),
-        ],
+        AgentAction::AssertFindingTemplate { title, details } => {
+            let (glyph, label) = if kind == ReviewKind::Playbook {
+                ("✎", "analyst (playbook template)")
+            } else {
+                ("◆", "agent (kept forever)")
+            };
+            vec![
+                format!("+ Finding template  {glyph} {label}"),
+                format!("  {title}"),
+                format!("  {}", details.lines().next().unwrap_or_default()),
+            ]
+        }
         AgentAction::AddNote { body } => vec![
             "+ Note  ◆ AI".into(),
             format!("  {}", body.lines().next().unwrap_or_default()),
@@ -341,7 +476,7 @@ fn citations_for(workspace: &Workspace, cited: &[String]) -> Vec<ReviewCitation>
     cited
         .iter()
         .map(|reference| {
-            let present = resolve_citation(workspace, reference);
+            let present = resolve_source_citation(workspace, reference);
             let label = present
                 .and_then(|id| workspace.source(id))
                 .map(|source| source.title.clone())

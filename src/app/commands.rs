@@ -419,7 +419,7 @@ pub const COMMANDS: &[Command] = &[
         "4",
         "Jump to Graph.",
         true,
-        true,
+        false,
         false,
     ),
     cmd(
@@ -822,12 +822,8 @@ pub fn help_text() -> String {
         "Keys below are generated from the command registry.".into(),
         String::new(),
     ];
-    let mut seen = std::collections::BTreeSet::new();
     for command in COMMANDS {
         if command.hint.is_empty() {
-            continue;
-        }
-        if !seen.insert(command.hint) {
             continue;
         }
         lines.push(format!("  {:<12} {}", command.hint, command.summary));
@@ -891,7 +887,7 @@ fn action_for_command(id: &str, view: View) -> Option<Action> {
         "open_sources" | "open_findings" | "open_evidence" => Action::OpenEvidence,
         "open_entities" => Action::OpenEntities,
         "open_timeline" => Action::OpenTimeline,
-        "open_agent" => Action::OpenReview,
+        "open_agent" => Action::OpenAgent,
         "open_review" => Action::OpenReview,
         "open_jobs" => Action::OpenJobs,
         "open_tools" => Action::OpenTools,
@@ -940,7 +936,7 @@ pub fn map_registered_key(
     }
     if ctrl {
         return match code {
-            KeyCode::Char('k') | KeyCode::Char('p') => Some(Action::Palette),
+            KeyCode::Char('k') => Some(Action::Palette),
             KeyCode::Char('f') => Some(Action::Search),
             _ => None,
         };
@@ -995,6 +991,14 @@ mod tests {
         assert!(help.contains("Enter never writes") || help.contains("never writes"));
         assert!(help.contains("Palette writes open a y-confirm"), "{help}");
         assert!(help.contains('●') || help.contains("collected"));
+        assert!(
+            help.contains("Reject the highlighted Review item"),
+            "help must list x as reject\n{help}"
+        );
+        assert!(
+            help.contains("Clear the filter or time lens"),
+            "help must list x as clear filters\n{help}"
+        );
         for command in COMMANDS.iter().filter(|command| !command.hint.is_empty()) {
             assert!(
                 help.contains(command.hint),

@@ -36,5 +36,5 @@
 
 
 
- Opened acme-phish    0 jobs
-/ search  Ctrl+K commands  ? help  c collect  a ask agent  4 graph  g graph  s search around  n new investigation
+ Case — Enter opens. It never writes.    0 jobs
+/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search around  n new investigation

@@ -14,11 +14,11 @@
  Inspector · Will write
 + Finding  ◆ AI
   mail.acme-login.com uses the same MX
-  severity  medium
+  confidence  medium
   provenance agent (kept forever)
   Registered 3 days before the campaign
 
 CITED EVIDENCE
- Accept 1 item(s), 1 AI? They keep ◆ agent provenance.   y confirm   any other k
- Armed — accept 1 item(s), 1 AI. y confirm. Any other key cancels.    0 jobs
-/ search  Ctrl+K commands  ? help  c collect  a ask agent  4 graph  g graph  s s
+ Accept 1 AI item? It keeps ◆ agent provenance.   y confirm   any other key canc
+ Armed — accept 1 AI item. It keeps ◆ agent provenance. y confirm. Any other key
+/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro

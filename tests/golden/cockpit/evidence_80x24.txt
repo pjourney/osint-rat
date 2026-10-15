@@ -12,13 +12,13 @@
 
 
 
- Inspector · acme-login.com
+ Inspector · acme-login.com is phishing infra
 TABS  ·Props·  Sources  Notes  History
-acme-login.com
-Domain
-acme-login.com
+F-1  acme-login.com is phishing infra
+◆ AI  medium  []
+
+SAN mimics acme.com
 
 
-
- Opened acme-phish    0 jobs
-/ search  Ctrl+K commands  ? help  c collect  a ask agent  4 graph  g graph  s s
+ Evidence. t toggles the time lens. Enter never writes.    0 jobs
+/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro

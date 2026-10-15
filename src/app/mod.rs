@@ -355,6 +355,8 @@ pub struct App {
     pub pending_resolve: Option<PendingResolve>,
     pub pending_unresolve: Option<Uuid>,
     pub pending_merges: Vec<PendingResolve>,
+    /// Scored merge suggestions the analyst rejected this session.
+    pub dismissed_suggestions: Vec<Vec<Uuid>>,
     pub review_armed: bool,
     pub review_marks: Vec<usize>,
     pub board_zoomed: bool,
@@ -412,6 +414,7 @@ impl App {
             pending_resolve: None,
             pending_unresolve: None,
             pending_merges: Vec::new(),
+            dismissed_suggestions: Vec::new(),
             review_armed: false,
             review_marks: Vec::new(),
             board_zoomed: false,
@@ -585,6 +588,19 @@ impl App {
         }) {
             self.agent_run_id = Some(run_id);
         }
+        if let Some(stored) = self.store.get_state(&scope, "dismissed_suggestions")? {
+            self.dismissed_suggestions = stored
+                .split(';')
+                .filter(|group| !group.is_empty())
+                .map(|group| {
+                    group
+                        .split(',')
+                        .filter_map(|part| Uuid::parse_str(part.trim()).ok())
+                        .collect::<Vec<_>>()
+                })
+                .filter(|ids| !ids.is_empty())
+                .collect();
+        }
         Ok(())
     }
 
@@ -619,6 +635,19 @@ impl App {
             self.store
                 .set_state(&scope, "agent_thread", &thread.to_string())?;
         }
+        let dismissed = self
+            .dismissed_suggestions
+            .iter()
+            .map(|ids| {
+                ids.iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .collect::<Vec<_>>()
+            .join(";");
+        self.store
+            .set_state(&scope, "dismissed_suggestions", &dismissed)?;
         self.store.set_state(
             GLOBAL_SCOPE,
             "last_investigation",
@@ -725,7 +754,7 @@ impl App {
                 self.time_lens = true;
                 self.switch_view(View::Evidence);
             }
-            Action::OpenAgent => self.switch_view(View::Review),
+            Action::OpenAgent => self.open_agent_history(),
             Action::OpenOverview => self.switch_view(View::Overview),
             Action::OpenEvidence => self.switch_view(View::Evidence),
             Action::OpenReview => self.open_review_lane(),
@@ -892,20 +921,29 @@ impl App {
         }
         self.review_armed = false;
         self.review_marks.clear();
-        if view != View::Evidence && view != View::Timeline {
+        if view != View::Evidence && view != View::Timeline && view != View::Graph {
             self.time_lens = false;
         }
-        if !matches!(view, View::Timeline | View::Entities | View::Evidence) {
+        if !matches!(
+            view,
+            View::Timeline | View::Entities | View::Evidence | View::Graph
+        ) {
             self.timeline.nearby = false;
             self.timeline.nearby_seed_id = None;
         }
         if view == View::Graph {
             self.open_graph();
+            self.pane = Pane::Main;
+            if self.time_lens {
+                self.status = self.view_status_line();
+            }
+            let _ = self.save_session();
             return;
         }
         self.view = view;
         self.selected = 0;
         self.scroll = 0;
+        self.pane = Pane::Main;
         if let Some(index) = self
             .nav_items()
             .iter()
@@ -914,7 +952,41 @@ impl App {
             self.nav_index = index;
         }
         self.overlay = Overlay::None;
+        self.sync_board_selection();
+        self.status = self.view_status_line();
         let _ = self.save_session();
+    }
+
+    fn view_status_line(&self) -> String {
+        match self.view {
+            View::Review => {
+                let count = self.pending_review_count();
+                if count == 0 {
+                    "Review is empty. Agent, playbook, and merge proposals land here.".into()
+                } else {
+                    format!("{count} item(s) waiting. Shift+A then y writes. Enter never writes.")
+                }
+            }
+            View::Evidence => "Evidence. t toggles the time lens. Enter never writes.".into(),
+            View::Graph => "Graph. t toggles the time lens. s Search Around.".into(),
+            View::Entities => "Entities. Space marks. m proposes a merge to Review.".into(),
+            View::Jobs => "Jobs. Enter opens the selected job. Cancel is in the palette.".into(),
+            View::Tools => "Tools. Enter opens a y-confirm. Active tools stay refused.".into(),
+            other => format!("{} — Enter opens. It never writes.", other.title()),
+        }
+    }
+
+    pub fn rail_view_is_current(&self, view: View) -> bool {
+        if self
+            .nav_items()
+            .iter()
+            .any(|(_, candidate)| *candidate == self.view)
+        {
+            return self.view == view;
+        }
+        self.nav_items()
+            .get(self.nav_index)
+            .is_some_and(|(_, candidate)| *candidate == view)
     }
 
     fn move_selection(&mut self, delta: i32) {
@@ -989,10 +1061,102 @@ impl App {
                     let count = self.listed_review_items().len().max(1);
                     self.selected =
                         (self.selected as i32 + delta).rem_euclid(count as i32) as usize;
+                    self.sync_board_selection();
                 } else {
-                    self.selected = (self.selected as i32 + delta).max(0) as usize;
+                    let count = self.board_len().max(1);
+                    self.selected =
+                        (self.selected as i32 + delta).rem_euclid(count as i32) as usize;
+                    self.sync_board_selection();
                 }
             }
+        }
+    }
+
+    fn board_len(&self) -> usize {
+        match self.view {
+            View::Overview | View::Pages => self
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.data.pages.len())
+                .unwrap_or(0),
+            View::Entities => self.listed_entities().len(),
+            View::Evidence if self.time_lens => self.timeline_list_len(),
+            View::Evidence => self.listed_evidence().len(),
+            View::Jobs => self.listed_job_ids().len(),
+            View::Tools => self.tools.tools().len(),
+            View::Findings => self
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.data.findings.len())
+                .unwrap_or(0),
+            View::Sources => self
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.data.sources.len())
+                .unwrap_or(0),
+            View::Artifacts => self
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.data.artifacts.len())
+                .unwrap_or(0),
+            View::Audit => self
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.data.audit.len())
+                .unwrap_or(0),
+            _ => 0,
+        }
+    }
+
+    pub(crate) fn sync_board_selection(&mut self) {
+        let Some(workspace) = self.workspace.as_ref() else {
+            return;
+        };
+        match self.view {
+            View::Overview | View::Pages => {
+                if let Some(page) = workspace.data.pages.get(self.selected) {
+                    self.page_id = Some(page.id);
+                }
+            }
+            View::Entities => {
+                if let Some(entity) = self.listed_entities().get(self.selected) {
+                    self.entity_id = Some(entity.id);
+                }
+            }
+            View::Evidence if self.time_lens => self.sync_timeline_selection(),
+            View::Evidence => match self.listed_evidence().get(self.selected) {
+                Some(EvidenceRow::Finding(id)) => {
+                    self.finding_id = Some(*id);
+                    if let Some(page_id) =
+                        workspace.finding(*id).and_then(|finding| finding.page_id)
+                    {
+                        self.page_id = Some(page_id);
+                    }
+                }
+                Some(EvidenceRow::Source(id)) => {
+                    self.source_id = Some(*id);
+                    self.finding_id = None;
+                }
+                None => {}
+            },
+            View::Review => {
+                if let Some(run_id) = self.selected_review_item().and_then(|item| item.run_id) {
+                    self.agent_run_id = Some(run_id);
+                }
+            }
+            View::Findings => {
+                if let Some(finding) = workspace.data.findings.get(self.selected) {
+                    self.finding_id = Some(finding.id);
+                }
+            }
+            View::Sources => {
+                if let Some(source) = workspace.data.sources.get(self.selected) {
+                    self.source_id = Some(source.id);
+                }
+            }
+            View::Graph if !self.time_lens => {}
+            View::Graph => self.sync_timeline_selection(),
+            _ => {}
         }
     }
 
@@ -1023,7 +1187,10 @@ impl App {
                     self.open_hit(&hit);
                 }
             }
-            Overlay::Suggestions { .. } => self.apply_highlighted_suggestion(),
+            Overlay::Suggestions { .. } => {
+                self.overlay = Overlay::None;
+                self.open_review_lane();
+            }
             Overlay::None if self.view == View::Welcome => match self.selected {
                 0 => self.open_new()?,
                 1 => self.open_open_form(),
@@ -1032,7 +1199,11 @@ impl App {
             },
             Overlay::None if self.pane == Pane::Nav => {
                 let view = self.nav_items()[self.nav_index].1;
-                self.switch_view(view);
+                if view == View::Review {
+                    self.open_review_lane();
+                } else {
+                    self.switch_view(view);
+                }
             }
             Overlay::None => self.select_main_item(),
             Overlay::Confirm { command, .. } => {
@@ -1056,6 +1227,27 @@ impl App {
     }
 
     fn select_main_item(&mut self) {
+        if self.view == View::Review {
+            self.expand_review_item();
+            return;
+        }
+        if self.view == View::Tools {
+            if let Some(entry) = self.tools.tools().get(self.selected) {
+                let name = entry.definition.name.clone();
+                self.overlay = Overlay::Confirm {
+                    title: format!("Run {name}"),
+                    message: format!(
+                        "Run {name}? This writes case data. Press y to confirm. Enter never runs a tool."
+                    ),
+                    command: format!("run_tool:{name}"),
+                };
+            }
+            return;
+        }
+        if self.view == View::Jobs {
+            self.expand_selected_job();
+            return;
+        }
         let listed_entity_id = if self.view == View::Entities {
             self.listed_entities()
                 .get(self.selected)
@@ -1073,10 +1265,6 @@ impl App {
                     let _ = self.save_session();
                     self.status = format!("Target {}", page.title);
                 }
-            }
-            View::Review => {
-                self.status =
-                    "Enter expands. Shift+A then y writes. Nothing is written yet.".into();
             }
             View::Evidence if self.time_lens => self.select_timeline_row(),
             View::Evidence => {
@@ -1125,29 +1313,6 @@ impl App {
                     self.agent_thread = Some(run.thread_id);
                 }
             }
-            View::Jobs => {
-                if let Some(job) = workspace.data.jobs.get(self.selected) {
-                    let body = format!(
-                        "Program: {}\nArguments: {}\nStatus: {}\n\n{}\n\n{}",
-                        job.program.as_deref().unwrap_or("-"),
-                        job.args.join(" "),
-                        job.status,
-                        job.log,
-                        job.stderr
-                    );
-                    self.overlay = Overlay::Text {
-                        title: format!("{} {}", job.short_ref(), job.description),
-                        body,
-                        scroll: 0,
-                    };
-                }
-            }
-            View::Tools => {
-                if let Some(entry) = self.tools.tools().get(self.selected) {
-                    let name = entry.definition.name.clone();
-                    let _ = self.spawn_tool(&name);
-                }
-            }
             View::Artifacts => {
                 if let Some(artifact) = workspace.data.artifacts.get(self.selected).cloned() {
                     self.open_artifact(&artifact);
@@ -1155,6 +1320,98 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    fn expand_review_item(&mut self) {
+        let item = self.selected_review_item();
+        let run = {
+            let workspace = self.workspace.as_ref();
+            let run_id = item
+                .as_ref()
+                .and_then(|item| item.run_id)
+                .or(self.agent_run_id);
+            workspace.and_then(|workspace| run_id.and_then(|id| workspace.agent_run(id).cloned()))
+        };
+        if let Some(item) = item {
+            let mut body = item.preview.join("\n");
+            if !item.citations.is_empty() {
+                body.push_str("\n\nCited evidence\n");
+                for citation in &item.citations {
+                    let mark = if citation.present { "ok" } else { "missing" };
+                    body.push_str(&format!(
+                        "  {mark} {}  {}\n",
+                        citation.reference, citation.label
+                    ));
+                }
+            }
+            if !item.rationale.is_empty() {
+                body.push_str("\nRationale\n");
+                body.push_str(&item.rationale);
+            }
+            if let Some(run) = &run {
+                body.push_str("\n\nTranscript\n");
+                body.push_str(&format!("Q  {}\n\n{}", run.question, run.response));
+            }
+            self.overlay = Overlay::Text {
+                title: item.title,
+                body,
+                scroll: 0,
+            };
+            self.status = "Expanded. Shift+A then y writes. Enter never writes.".into();
+            return;
+        }
+        if let Some(run) = run {
+            self.overlay = Overlay::Text {
+                title: format!("{} {}", run.short_ref(), run.agent_name),
+                body: format!("Q  {}\n\n{}", run.question, run.response),
+                scroll: 0,
+            };
+            self.status = "Agent transcript. Nothing to accept.".into();
+            return;
+        }
+        self.status = "Nothing to expand. Shift+A then y writes. Enter never writes.".into();
+    }
+
+    fn expand_selected_job(&mut self) {
+        let Some(job_id) = self.listed_job_ids().get(self.selected).copied() else {
+            return;
+        };
+        let stored = self
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.job(job_id));
+        let live = self.job_records.get(&job_id);
+        let title = live
+            .map(|job| job.description.clone())
+            .or_else(|| stored.map(|job| job.description.clone()))
+            .unwrap_or_else(|| job_id.to_string());
+        let reference = stored
+            .map(|job| job.short_ref().to_string())
+            .or_else(|| live.map(|job| job.short_ref().to_string()))
+            .unwrap_or_default();
+        let body = format!(
+            "Program: {}\nArguments: {}\nStatus: {}\n\n{}\n\n{}",
+            live.and_then(|job| job.program.clone())
+                .or_else(|| stored.and_then(|job| job.program.clone()))
+                .unwrap_or_else(|| "-".into()),
+            live.map(|job| job.args.join(" "))
+                .or_else(|| stored.map(|job| job.args.join(" ")))
+                .unwrap_or_default(),
+            live.map(|job| job.status.to_string())
+                .or_else(|| stored.map(|job| job.status.to_string()))
+                .unwrap_or_else(|| "-".into()),
+            live.map(|job| job.log.as_str())
+                .or_else(|| stored.map(|job| job.log.as_str()))
+                .unwrap_or(""),
+            live.map(|job| job.stderr.as_str())
+                .or_else(|| stored.map(|job| job.stderr.as_str()))
+                .unwrap_or("")
+        );
+        self.overlay = Overlay::Text {
+            title: format!("{reference} {title}"),
+            body,
+            scroll: 0,
+        };
     }
 
     fn open_hit(&mut self, hit: &SearchHit) {
@@ -1179,6 +1436,13 @@ impl App {
                     .map(|run| run.thread_id)
                 {
                     self.agent_thread = Some(thread_id);
+                }
+                if let Some(index) = self
+                    .listed_review_items()
+                    .iter()
+                    .position(|item| item.run_id == Some(hit.id))
+                {
+                    self.selected = index;
                 }
             }
             View::Artifacts => {
@@ -1462,7 +1726,7 @@ impl App {
                 }
                 self.apply_workspace_delta(delta)?;
                 self.view = View::Overview;
-                self.status = format!("Created {} — press r to run collectors", page.title);
+                self.status = format!("Created {} — press c to collect", page.title);
             }
             FormKind::NewFinding => {
                 let workspace = self
@@ -1662,7 +1926,7 @@ impl App {
             "toggle_nearby" => self.toggle_nearby(),
             "open_jobs" => self.switch_view(View::Jobs),
             "open_tools" => self.switch_view(View::Tools),
-            "open_agent" => self.switch_view(View::Review),
+            "open_agent" => self.open_agent_history(),
             "open_settings" => self.switch_view(View::Settings),
             "open_artifacts" => self.switch_view(View::Artifacts),
             "open_notes" => {
@@ -2308,33 +2572,6 @@ impl App {
         if self.view == View::Review {
             return self.decide_review(status);
         }
-        let Overlay::Proposals {
-            run_id,
-            selected,
-            armed,
-        } = self.overlay
-        else {
-            return Ok(());
-        };
-        if status == ProposalStatus::Accepted && !armed {
-            return Ok(());
-        }
-        let Some(proposal) = self.pending_proposals(run_id).get(selected).cloned() else {
-            return Ok(());
-        };
-        self.apply_decided_proposal(&proposal, status)?;
-        let pending_len = self.pending_proposals(run_id).len();
-        if pending_len == 0 {
-            self.overlay = Overlay::None;
-        } else if let Overlay::Proposals {
-            selected, armed, ..
-        } = &mut self.overlay
-        {
-            *armed = false;
-            if *selected >= pending_len {
-                *selected = pending_len - 1;
-            }
-        }
         Ok(())
     }
 
@@ -2358,6 +2595,7 @@ impl App {
             self.status = "A citation points at a missing source. Acceptance is blocked.".into();
             return Ok(());
         }
+        let accepted_ai = items.iter().any(|item| item.is_ai());
         for item in items {
             if let Some(proposal_id) = item.proposal_id {
                 let Some(proposal) = self.workspace.as_ref().and_then(|workspace| {
@@ -2377,6 +2615,7 @@ impl App {
                     self.pending_resolve = Some(merge);
                     self.confirm_resolve()?;
                 } else {
+                    self.dismiss_suggestion(&entity_ids);
                     self.status = "Merge suggestion rejected.".into();
                 }
                 self.pending_merges
@@ -2386,15 +2625,31 @@ impl App {
         self.review_armed = false;
         self.review_marks.clear();
         let remaining = self.listed_review_items().len();
-        if self.selected >= remaining && remaining > 0 {
-            self.selected = remaining - 1;
-        } else if remaining == 0 {
+        if remaining == 0 {
             self.selected = 0;
+        } else if self.selected >= remaining {
+            self.selected = remaining - 1;
         }
         if status == ProposalStatus::Accepted {
-            self.status = "Accepted. AI items keep ◆ agent provenance.".into();
+            self.status = if accepted_ai {
+                "Accepted. AI items keep ◆ agent provenance.".into()
+            } else {
+                "Accepted. Analyst / playbook items keep their provenance.".into()
+            };
         }
         Ok(())
+    }
+
+    fn dismiss_suggestion(&mut self, entity_ids: &[Uuid]) {
+        let mut key = entity_ids.to_vec();
+        key.sort();
+        if !self
+            .dismissed_suggestions
+            .iter()
+            .any(|existing| existing == &key)
+        {
+            self.dismissed_suggestions.push(key);
+        }
     }
 
     fn apply_decided_proposal(
@@ -2462,12 +2717,7 @@ impl App {
             } => {
                 let source_ids = sources
                     .iter()
-                    .filter_map(|reference| {
-                        reference
-                            .parse()
-                            .ok()
-                            .and_then(|parsed| workspace.resolve_ref(parsed))
-                    })
+                    .filter_map(|reference| review::resolve_source_citation(workspace, reference))
                     .collect();
                 self.store.create_finding(NewFinding {
                     investigation_id,
@@ -2512,12 +2762,7 @@ impl App {
                     resolve_entity(workspace, to).ok_or_else(|| eyre!("unknown entity {to}"))?;
                 let source_ids: Vec<Uuid> = sources
                     .iter()
-                    .filter_map(|reference| {
-                        reference
-                            .parse()
-                            .ok()
-                            .and_then(|parsed| workspace.resolve_ref(parsed))
-                    })
+                    .filter_map(|reference| review::resolve_source_citation(workspace, reference))
                     .collect();
                 self.store.link_entities(
                     investigation_id,
@@ -3848,11 +4093,7 @@ mod tests {
             )
             .expect("proposals");
         app.reload().expect("reload");
-        app.overlay = Overlay::Proposals {
-            run_id: run.id,
-            selected: 0,
-            armed: false,
-        };
+        app.open_review_lane();
         app.dispatch(Action::Arm).expect("arm");
         app.dispatch(Action::Accept).expect("accept");
         let data = app
@@ -3899,21 +4140,11 @@ mod tests {
             )
             .expect("proposals");
         app.reload().expect("reload");
-        app.overlay = Overlay::Proposals {
-            run_id: run.id,
-            selected: 0,
-            armed: false,
-        };
+        app.open_review_lane();
         app.dispatch(Action::Arm).expect("arm");
-        assert!(matches!(
-            app.overlay,
-            Overlay::Proposals { armed: true, .. }
-        ));
+        assert!(app.review_armed);
         app.dispatch(Action::Disarm).expect("disarm");
-        assert!(matches!(
-            app.overlay,
-            Overlay::Proposals { armed: false, .. }
-        ));
+        assert!(!app.review_armed);
         app.dispatch(Action::Arm).expect("re-arm");
         app.dispatch(Action::Accept).expect("accept");
         let data = app
@@ -3948,11 +4179,7 @@ mod tests {
             )
             .expect("proposals");
         app.reload().expect("reload");
-        app.overlay = Overlay::Proposals {
-            run_id: run.id,
-            selected: 0,
-            armed: false,
-        };
+        app.open_review_lane();
         app.dispatch(Action::Accept).expect("refused");
         let data = app
             .store
@@ -3964,10 +4191,7 @@ mod tests {
                 .iter()
                 .all(|note| !note.body.contains("must stay"))
         );
-        assert!(matches!(
-            app.overlay,
-            Overlay::Proposals { armed: false, .. }
-        ));
+        assert!(!app.review_armed);
     }
 
     #[test]
@@ -4116,11 +4340,7 @@ mod tests {
             machine_name: "desk-c".into(),
         });
         app.reload().expect("reload as reader");
-        app.overlay = Overlay::Proposals {
-            run_id: run.id,
-            selected: 0,
-            armed: false,
-        };
+        app.open_review_lane();
         app.dispatch(Action::Arm).expect("arm");
         let error = app.dispatch(Action::Accept).expect_err("reader accept");
         assert!(
@@ -4194,10 +4414,15 @@ mod tests {
             label: "Older".into(),
             kind: "agent".into(),
             id: older.id,
-            view: View::Agent,
+            view: View::Review,
         });
+        assert_eq!(app.view, View::Review);
         assert_eq!(app.agent_run_id, Some(older.id));
         assert_eq!(app.agent_thread, Some(older_thread));
+        assert_eq!(
+            app.selected_review_item().and_then(|item| item.run_id),
+            Some(older.id)
+        );
     }
 
     #[test]
@@ -4416,6 +4641,7 @@ mod tests {
         };
         assert_ne!(ip_index, 0);
         app.selected = ip_index;
+        app.sync_board_selection();
         app.dispatch(Action::OpenGraph).expect("graph");
         assert_eq!(app.view, View::Graph);
         app.dispatch(Action::Back).expect("close graph");
@@ -4661,11 +4887,7 @@ mod tests {
             )
             .expect("proposals");
         app.reload().expect("reload");
-        app.overlay = Overlay::Proposals {
-            run_id: run.id,
-            selected: 0,
-            armed: false,
-        };
+        app.open_review_lane();
         app.dispatch(Action::Arm).expect("arm");
         app.dispatch(Action::Accept).expect("accept");
         let data = app
@@ -4735,11 +4957,7 @@ mod tests {
             )
             .expect("proposals");
         app.reload().expect("reload");
-        app.overlay = Overlay::Proposals {
-            run_id: run.id,
-            selected: 0,
-            armed: false,
-        };
+        app.open_review_lane();
         app.dispatch(Action::Arm).expect("arm");
         app.dispatch(Action::Accept).expect("accept");
         let workspace = app.workspace.as_ref().expect("workspace");
@@ -5430,5 +5648,320 @@ mod tests {
         }
         app.dispatch(Action::Submit).expect("save");
         assert_eq!(app.config.ui.theme, "phosphor");
+    }
+
+    #[test]
+    fn tools_enter_opens_y_confirm_and_does_not_spawn() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Tools Confirm");
+        app.dispatch(Action::OpenTools).expect("tools");
+        assert_eq!(app.view, View::Tools);
+        assert!(!app.tools.tools().is_empty());
+        let name = app.tools.tools()[0].definition.name.clone();
+        app.pane = Pane::Main;
+        app.selected = 0;
+        app.dispatch(Action::Select).expect("enter");
+        assert!(
+            matches!(
+                &app.overlay,
+                Overlay::Confirm { command, .. } if command == &format!("run_tool:{name}")
+            ),
+            "{:?}",
+            app.overlay
+        );
+        assert!(app.job_records.is_empty());
+        app.dispatch(Action::Cancel).expect("esc");
+        assert_eq!(app.overlay, Overlay::None);
+        assert!(app.job_records.is_empty());
+    }
+
+    #[test]
+    fn board_jk_syncs_inspector_entity_and_page() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Inspector Follow");
+        create_page(&mut app, "alpha.example", "domain", "alpha.example");
+        create_page(&mut app, "beta.example", "domain", "beta.example");
+        app.reload().expect("reload");
+        app.dispatch(Action::OpenOverview).expect("case");
+        app.pane = Pane::Main;
+        app.selected = 0;
+        app.sync_board_selection();
+        let first_page = app.page_id;
+        app.dispatch(Action::Move(1)).expect("j");
+        assert_eq!(app.selected, 1);
+        assert_ne!(app.page_id, first_page);
+        assert_eq!(
+            app.page_id,
+            app.workspace.as_ref().and_then(|workspace| workspace
+                .data
+                .pages
+                .get(1)
+                .map(|page| page.id))
+        );
+
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = Pane::Main;
+        app.selected = 0;
+        app.sync_board_selection();
+        let first_entity = app.entity_id;
+        app.dispatch(Action::Move(1)).expect("j");
+        assert_eq!(app.selected, 1);
+        assert_ne!(app.entity_id, first_entity);
+        assert_eq!(
+            app.entity_id,
+            app.listed_entities().get(1).map(|entity| entity.id)
+        );
+
+        app.dispatch(Action::OpenEvidence).expect("evidence");
+        app.pane = Pane::Main;
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let page_a = app.workspace.as_ref().expect("workspace").data.pages[0].id;
+        let page_b = app.workspace.as_ref().expect("workspace").data.pages[1].id;
+        app.store
+            .create_finding(crate::storage::NewFinding {
+                investigation_id,
+                page_id: Some(page_a),
+                title: "first finding".into(),
+                details: "a".into(),
+                confidence: crate::model::Confidence::Low,
+                provenance: crate::model::Provenance::Analyst,
+                source_ids: Vec::new(),
+            })
+            .expect("finding a");
+        app.store
+            .create_finding(crate::storage::NewFinding {
+                investigation_id,
+                page_id: Some(page_b),
+                title: "second finding".into(),
+                details: "b".into(),
+                confidence: crate::model::Confidence::High,
+                provenance: crate::model::Provenance::Analyst,
+                source_ids: Vec::new(),
+            })
+            .expect("finding b");
+        app.reload().expect("reload");
+        app.dispatch(Action::OpenEvidence).expect("evidence again");
+        app.pane = Pane::Main;
+        app.selected = 0;
+        app.sync_board_selection();
+        let first_finding = app.finding_id;
+        app.dispatch(Action::Move(1)).expect("j on evidence");
+        assert_eq!(app.selected, 1);
+        assert_ne!(app.finding_id, first_finding);
+        assert_eq!(app.page_id, Some(page_b));
+    }
+
+    #[test]
+    fn switching_views_resets_board_status_and_one_rail_row() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Rail Current");
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = Pane::Nav;
+        app.status = "stale".into();
+        app.dispatch(Action::OpenEvidence).expect("evidence");
+        assert_eq!(app.view, View::Evidence);
+        assert_eq!(app.pane, Pane::Main);
+        assert_ne!(app.status, "stale");
+        assert!(app.status.contains("Evidence"));
+        assert!(app.rail_view_is_current(View::Evidence));
+        assert!(!app.rail_view_is_current(View::Entities));
+        assert!(!app.rail_view_is_current(View::Overview));
+        assert_eq!(
+            app.nav_items()
+                .iter()
+                .filter(|(_, view)| app.rail_view_is_current(*view))
+                .count(),
+            1
+        );
+        app.pane = Pane::Detail;
+        app.dispatch(Action::OpenGraph).expect("graph");
+        assert_eq!(app.view, View::Graph);
+        assert_eq!(app.pane, Pane::Main);
+        assert!(app.rail_view_is_current(View::Graph));
+        assert!(!app.rail_view_is_current(View::Evidence));
+    }
+
+    #[test]
+    fn graph_t_toggles_time_lens_on_the_same_view() {
+        let (_directory, mut app) = test_app();
+        seed_temporal_geo(&mut app);
+        app.dispatch(Action::OpenGraph).expect("graph");
+        assert_eq!(app.view, View::Graph);
+        assert!(!app.is_time_lens());
+        app.dispatch(Action::ToggleTimeLens).expect("t");
+        assert_eq!(app.view, View::Graph);
+        assert!(app.time_lens);
+        assert!(app.is_time_lens());
+        app.dispatch(Action::ToggleTimeLens).expect("t off");
+        assert_eq!(app.view, View::Graph);
+        assert!(!app.is_time_lens());
+    }
+
+    #[test]
+    fn agent_history_and_search_render_the_run_in_review() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Agent History");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let thread = Uuid::new_v4();
+        let mut run = sample_run(investigation_id, Uuid::new_v4(), thread, "Who owns this?");
+        run.response = "The registrar is Example".into();
+        run.status = JobStatus::Succeeded;
+        app.store.insert_agent_run(&mut run).expect("run");
+        app.reload().expect("reload");
+        app.agent_run_id = Some(run.id);
+        app.dispatch(Action::OpenAgent).expect("history");
+        assert_eq!(app.view, View::Review);
+        assert_eq!(app.agent_run_id, Some(run.id));
+        assert_eq!(app.agent_thread, Some(thread));
+        let item = app.selected_review_item().expect("history row");
+        assert_eq!(item.kind, crate::app::review::ReviewKind::History);
+        assert_eq!(item.run_id, Some(run.id));
+        assert!(item.written_as.is_none());
+        let hits = app.search_hits("Who owns");
+        assert!(
+            hits.iter()
+                .any(|hit| hit.id == run.id && hit.view == View::Review)
+        );
+    }
+
+    #[test]
+    fn review_preview_matches_write_and_shares_citation_resolve() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Preview Match");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let mut batch = crate::model::EvidenceBatch::new();
+        let mut source = crate::model::NewSource::collected(
+            crate::model::SourceKind::Dns,
+            "dns",
+            "DNS for preview",
+        );
+        source.content = "A 203.0.113.10".into();
+        batch.add_source(source);
+        app.store
+            .apply_batch(
+                crate::storage::ApplyContext {
+                    investigation_id,
+                    page_id: None,
+                    job_id: None,
+                },
+                &batch,
+            )
+            .expect("source");
+        app.reload().expect("source reload");
+        let stored_id = app.workspace.as_ref().expect("workspace").data.sources[0].id;
+        let mut playbook_run = sample_run(
+            investigation_id,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "playbook template",
+        );
+        playbook_run.agent_name = crate::storage::PLAYBOOK_AGENT_NAME.into();
+        playbook_run.status = JobStatus::Succeeded;
+        app.store.insert_agent_run(&mut playbook_run).expect("run");
+        app.store
+            .insert_proposals(
+                investigation_id,
+                playbook_run.id,
+                vec![(
+                    AgentAction::AssertFindingTemplate {
+                        title: "templated finding".into(),
+                        details: "from playbook".into(),
+                    },
+                    ProposalStatus::Pending,
+                    None,
+                )],
+            )
+            .expect("proposals");
+        app.reload().expect("reload");
+        app.open_review_lane();
+        let item = app.selected_review_item().expect("item");
+        assert_eq!(item.written_as, Some(Provenance::Analyst));
+        assert!(!item.is_ai());
+        assert!(
+            item.preview.iter().any(|line| line.contains("analyst")),
+            "{:?}",
+            item.preview
+        );
+        assert!(app.confirm_accept_text().contains("analyst"));
+        assert!(app.confirm_bar_text().contains("analyst"));
+        let workspace = app.workspace.as_ref().expect("workspace");
+        assert_eq!(
+            crate::app::review::resolve_source_citation(workspace, "S-1"),
+            Some(stored_id)
+        );
+        assert_eq!(
+            crate::app::review::resolve_source_citation(workspace, "DNS for preview"),
+            Some(stored_id)
+        );
+        app.dispatch(Action::Arm).expect("arm");
+        app.dispatch(Action::Accept).expect("accept");
+        let data = app
+            .store
+            .load_investigation(investigation_id)
+            .expect("loads");
+        assert_eq!(data.findings[0].title, "templated finding");
+        assert_eq!(data.findings[0].provenance, Provenance::Analyst);
+    }
+
+    #[test]
+    fn reject_dismisses_scored_merge_and_keeps_selection_valid() {
+        let (directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Reject Persist");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        app.store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Username,
+                "octocat",
+                crate::model::Provenance::Analyst,
+                None,
+            )
+            .expect("user");
+        app.store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Url,
+                "https://github.com/octocat",
+                crate::model::Provenance::External,
+                None,
+            )
+            .expect("url");
+        app.reload().expect("reload");
+        app.open_review_lane();
+        assert!(!app.listed_suggestions().is_empty());
+        let before = app.listed_review_items().len();
+        let merge_index = app
+            .listed_review_items()
+            .iter()
+            .position(|item| item.merge.is_some())
+            .expect("merge row");
+        app.selected = merge_index;
+        app.dispatch(Action::Reject).expect("reject");
+        assert!(app.listed_suggestions().is_empty());
+        assert!(
+            app.listed_review_items()
+                .iter()
+                .all(|item| item.merge.is_none())
+        );
+        assert!(app.listed_review_items().len() < before || before == 0);
+        let remaining = app.listed_review_items().len();
+        if remaining == 0 {
+            assert_eq!(app.selected, 0);
+        } else {
+            assert!(app.selected < remaining);
+        }
+        app.dispatch(Action::Quit).expect("save session");
+        let paths = AppPaths::new(
+            directory.path().join("config.toml"),
+            directory.path().join("data"),
+        );
+        let store = Store::open(&paths.database()).expect("reopen");
+        let mut restarted = App::new(Config::default(), paths, store);
+        restarted.open_last_or_welcome().expect("restore");
+        restarted.open_review_lane();
+        assert!(
+            restarted.listed_suggestions().is_empty(),
+            "rejected suggestions must stay dismissed after restart"
+        );
     }
 }

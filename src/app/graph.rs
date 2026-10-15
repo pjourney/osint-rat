@@ -288,15 +288,15 @@ impl App {
         {
             return Some(id);
         }
-        if let Some(id) = self.entity_id
-            && workspace.entity(id).is_some()
-        {
-            return Some(id);
-        }
         if self.view == View::Entities
             && let Some(entity) = workspace.visible_entities().get(self.selected)
         {
             return Some(entity.id);
+        }
+        if let Some(id) = self.entity_id
+            && workspace.entity(id).is_some()
+        {
+            return Some(id);
         }
         if let Some(page_id) = self.page_id
             && let Some(entity_id) = workspace.page(page_id).and_then(|page| page.entity_id)
@@ -344,7 +344,7 @@ impl App {
             ""
         };
         self.status = format!(
-            "Graph · {} hop(s) · {} nodes · {} edges{truncated}. s Search Around, +/- hops, f facet.",
+            "Graph · {} hop(s) · {} nodes · {} edges{truncated}. s Search Around, +/- hops, t time lens.",
             self.graph.hops,
             self.graph.result.nodes.len(),
             self.graph.result.edges.len()

@@ -1,40 +1,40 @@
  os-int ▸ acme-phish ▸ Jobs  unmarked                                                            ◆ 1 to review  ✓ jobs  agent ◇ Claude Code
- Rail         │┌Jobs──────────────────────────────────────────────────────────────────────────┐│ Inspector · acme-login.com
- 1 Case        │(no jobs yet — press c on a target)                                           │ TABS  ·Props·  Sources  Notes  History
- 2 Entities    │                                                                              │ Nothing selected.
- 3 Evidence    │                                                                              │
- 4 Graph       │                                                                              │
- 5 Review 1    │                                                                              │
-▌6 Jobs        │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               │                                                                              │
-               └──────────────────────────────────────────────────────────────────────────────┘
- 1 item(s) waiting. Shift+A then y writes. Enter never writes.    0 jobs
-/ search  Ctrl+K commands  ? help  c collect  a ask agent  4 graph  g graph  s search around
+ Rail         │▌Jobs                                                                           │ Inspector · acme-login.com
+ 1 Case        (no jobs yet — press c on a target)                                              TABS  ·Props·  Sources  Notes  History
+ 2 Entities                                                                                     Nothing selected.
+ 3 Evidence
+ 4 Graph
+ 5 Review 1
+▌6 Jobs
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Jobs. Enter opens the selected job. Cancel is in the palette.    0 jobs
+/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search around

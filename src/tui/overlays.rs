@@ -274,9 +274,9 @@ fn proposals(
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         if armed {
-            "Armed — y accept   any other key cancels"
+            "Leftover overlay. Accept lives in Review: Shift+A then y."
         } else {
-            "Shift+A arm   [R] Reject   Esc close"
+            "Leftover overlay. Proposals live in Review. Esc close"
         },
         theme.muted,
     )));
@@ -317,7 +317,7 @@ fn suggestions(frame: &mut Frame, area: Rect, app: &App, selected: usize, theme:
     let popup = centered(area, 72, height);
     frame.render_widget(Clear, popup);
     let mut lines = vec![
-        Line::from("Scored suggestions. Enter proposes a merge. Nothing auto-merges."),
+        Line::from("Leftover overlay. Enter opens Review. Nothing auto-merges."),
         Line::from(""),
     ];
     for (index, item) in items.iter().enumerate() {
@@ -333,7 +333,7 @@ fn suggestions(frame: &mut Frame, area: Rect, app: &App, selected: usize, theme:
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Enter confirm   Esc close",
+        "Enter opens Review   Esc close",
         theme.muted,
     )));
     frame.render_widget(
