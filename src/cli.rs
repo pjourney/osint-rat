@@ -1543,6 +1543,9 @@ fn marking_command(cli: &Cli, command: &MarkingCommand) -> Result<()> {
                 let data = runtime.store.load_investigation(investigation.id)?;
                 let workspace = Workspace::new(data);
                 let entity_id = resolve_entity_query(&workspace, query)?;
+                workspace
+                    .entity(entity_id)
+                    .ok_or_else(|| user_err(format!("unknown entity {query}")))?;
                 runtime.store.set_entity_marking(entity_id, parsed)?;
                 println!("Set object marking to {}", parsed.label());
             } else {
@@ -1728,6 +1731,9 @@ fn review_list(cli: &Cli, query: &str) -> Result<()> {
                     serde_json::json!({
                         "title": item.title,
                         "group": item.group,
+                        "kind": item.kind.as_str(),
+                        "short_ref": item.short_ref,
+                        "proposal_id": item.proposal_id.map(|id| id.to_string()),
                         "writable": item.is_writable(),
                         "ai": item.is_ai(),
                         "missing_citation": item.has_missing_citation(),
@@ -2027,7 +2033,10 @@ fn objects_command(cli: &Cli, query: &str, kind: Option<&str>) -> Result<()> {
     let investigation = runtime.store.require_investigation(query)?;
     let data = runtime.store.load_investigation(investigation.id)?;
     let workspace = Workspace::new(data);
-    let parsed = kind.map(EntityKind::parse);
+    let parsed = kind
+        .map(crate::query::parse_entity_kind_filter)
+        .transpose()
+        .map_err(user_err)?;
     let objects = crate::query::list_objects(&workspace, parsed.as_ref());
     print_json(&objects)
 }
@@ -2045,7 +2054,12 @@ fn search_around_command(
     let data = runtime.store.load_investigation(investigation.id)?;
     let workspace = Workspace::new(data);
     let kinds = kind
-        .map(|value| vec![EntityKind::parse(value)])
+        .map(|value| {
+            crate::query::parse_entity_kind_filter(value)
+                .map(|kind| vec![kind])
+                .map_err(user_err)
+        })
+        .transpose()?
         .unwrap_or_default();
     let links = link
         .map(|value| vec![value.to_string()])
@@ -2371,7 +2385,10 @@ fn run_bench_size(store: &mut Store, entity_count: usize) -> Result<serde_json::
 
 fn resolve_entity_query(workspace: &Workspace, query: &str) -> Result<uuid::Uuid> {
     if let Ok(uuid) = uuid::Uuid::parse_str(query) {
-        return Ok(uuid);
+        if workspace.entity(uuid).is_some() {
+            return Ok(uuid);
+        }
+        return Err(user_err(format!("unknown entity {query}")));
     }
     if let Ok(reference) = query.parse::<crate::model::ShortRef>()
         && let Some(id) = workspace.resolve_ref(reference)

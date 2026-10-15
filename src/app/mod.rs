@@ -2874,26 +2874,41 @@ impl App {
         match outcome {
             JobOutcome::Succeeded(output) => match *output {
                 JobOutput::Collection(collected) => {
-                    self.apply_collection(job_id, collected)?;
-                    patched_in_place = true;
-                    result_text = self
-                        .job_records
-                        .get(&job_id)
-                        .and_then(|job| job.result.clone());
+                    match self.apply_collection(job_id, collected) {
+                        Ok(()) => {
+                            patched_in_place = true;
+                            result_text = self
+                                .job_records
+                                .get(&job_id)
+                                .and_then(|job| job.result.clone());
+                        }
+                        Err(error) => {
+                            status = JobStatus::Failed;
+                            error_text = Some(error.to_string());
+                        }
+                    }
                 }
                 JobOutput::Agent(outcome) => {
-                    self.apply_agent(job_id, outcome)?;
+                    if let Err(error) = self.apply_agent(job_id, outcome) {
+                        status = JobStatus::Failed;
+                        error_text = Some(error.to_string());
+                    }
                 }
                 JobOutput::Report(report) => {
                     result_text = Some(format!("Wrote {}", report.relative_path));
                 }
-                JobOutput::Playbook(output) => {
-                    self.apply_playbook_output(*output)?;
-                    result_text = self
-                        .job_records
-                        .get(&job_id)
-                        .and_then(|job| job.result.clone());
-                }
+                JobOutput::Playbook(output) => match self.apply_playbook_output(*output) {
+                    Ok(()) => {
+                        result_text = self
+                            .job_records
+                            .get(&job_id)
+                            .and_then(|job| job.result.clone());
+                    }
+                    Err(error) => {
+                        status = JobStatus::Failed;
+                        error_text = Some(error.to_string());
+                    }
+                },
             },
             JobOutcome::Failed(error) => {
                 status = JobStatus::Failed;
@@ -3360,11 +3375,7 @@ impl App {
                 self.entity_id = listed_entity_id;
             }
             View::Graph => {
-                self.entity_id = self
-                    .visible_graph()
-                    .nodes
-                    .get(self.graph.selected)
-                    .map(|node| node.id);
+                self.entity_id = self.visible_graph_entity_id(self.graph.selected);
                 if self.entity_id.is_none() {
                     self.status = "No node selected.".into();
                     return;
@@ -5393,6 +5404,51 @@ mod tests {
     }
 
     #[test]
+    fn open_object_view_from_graph_uses_tree_walk_not_node_vector() {
+        let (_directory, mut app) = test_app();
+        seed_infra(&mut app);
+        app.dispatch(Action::OpenGraph).expect("graph");
+        let ip_id = app
+            .workspace
+            .as_ref()
+            .expect("workspace")
+            .data
+            .entities
+            .iter()
+            .find(|entity| {
+                entity.kind == crate::model::EntityKind::Ip && entity.value == "192.0.2.10"
+            })
+            .map(|entity| entity.id)
+            .expect("ip");
+        let node_ids: Vec<_> = app
+            .visible_graph()
+            .nodes
+            .iter()
+            .map(|node| node.id)
+            .collect();
+        assert!(
+            !node_ids.is_empty(),
+            "graph should have nodes after OpenGraph"
+        );
+        app.graph.focus_id = Some(ip_id);
+        let tree = app.graph_tree_ids();
+        assert_eq!(tree.first().copied(), Some(ip_id));
+        assert_ne!(
+            tree.first().copied(),
+            node_ids.first().copied(),
+            "tree walk order must differ from the node vector so this regression is real"
+        );
+        app.graph.selected = 0;
+        app.dispatch(Action::OpenObjectView).expect("v");
+        assert_eq!(app.view, View::Object);
+        assert_eq!(app.entity_id, Some(ip_id));
+        assert_eq!(
+            app.current_object_view().expect("object").title,
+            "192.0.2.10"
+        );
+    }
+
+    #[test]
     fn open_object_view_uses_highlighted_entity_not_leftover() {
         let (_directory, mut app) = test_app();
         create_named_investigation(&mut app, "Example Corp");
@@ -6982,6 +7038,63 @@ mod tests {
             app.listed_job_ids().is_empty(),
             "failed jobs must drop out of a running filter"
         );
+    }
+
+    #[test]
+    fn finish_job_persists_failed_when_apply_errors() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Apply Fail");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let mut job = sample_job("Playbook", JobStatus::Running, None);
+        job.investigation_id = Some(investigation_id);
+        job.kind = "playbook:domain-infra".into();
+        app.store.insert_job(&mut job).expect("store job");
+        app.job_records.insert(job.id, job.clone());
+        let playbook = crate::playbook::bundled("domain-infra").expect("playbook");
+        let output = crate::model::PlaybookOutput {
+            playbook_id: playbook.id.clone(),
+            playbook_name: playbook.name.clone(),
+            seed_kind: playbook.seed.kind.as_str().into(),
+            seed_value: String::new(),
+            dry_run: false,
+            automation: false,
+            batches: Vec::new(),
+            proposals: Vec::new(),
+            plan: crate::model::PlaybookPlan {
+                playbook_id: playbook.id.clone(),
+                playbook_name: playbook.name.clone(),
+                seed_kind: playbook.seed.kind.as_str().into(),
+                seed_value: String::new(),
+                automation: false,
+                actions: Vec::new(),
+                warnings: Vec::new(),
+            },
+            search_summary: None,
+            warnings: Vec::new(),
+            digest: String::new(),
+            previous_digest: None,
+            playbook,
+        };
+        let _ = app.handle_job(JobEvent::Finished {
+            job_id: job.id,
+            outcome: JobOutcome::Succeeded(Box::new(JobOutput::Playbook(Box::new(output)))),
+        });
+        assert_eq!(
+            app.job_records.get(&job.id).map(|row| row.status),
+            Some(JobStatus::Failed),
+            "apply errors must not leave the job Running"
+        );
+        let stored = app
+            .store
+            .load_investigation(investigation_id)
+            .expect("load");
+        let row = stored
+            .jobs
+            .iter()
+            .find(|candidate| candidate.id == job.id)
+            .expect("stored job");
+        assert_eq!(row.status, JobStatus::Failed);
+        assert!(row.error.as_ref().is_some_and(|text| !text.is_empty()));
     }
 
     #[test]

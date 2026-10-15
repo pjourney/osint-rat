@@ -7,9 +7,9 @@ use crate::jobs::JobContext;
 use std::collections::HashSet;
 
 use crate::model::{
-    AgentAction, EntityKind, EvidenceBatch, MAX_PLAYBOOK_PROPOSALS, Playbook, PlaybookOutput,
-    PlaybookPlan, PlaybookStep, ProposalStatus, SearchAroundQuery, Target, Workspace,
-    search_around, suggest_resolutions,
+    AgentAction, Entity, EntityKind, EvidenceBatch, InvestigationData, MAX_PLAYBOOK_PROPOSALS,
+    Playbook, PlaybookOutput, PlaybookPlan, PlaybookStep, ProposalStatus, SearchAroundQuery,
+    Target, search_around, suggest_resolutions,
 };
 use crate::storage::{ApplyContext, Store};
 use crate::tools::{Activity, ToolRegistry};
@@ -315,51 +315,21 @@ fn finish(
                 automation: options.automation,
                 digest: &digest,
                 previous_digest: previous_digest.as_deref(),
+                interval_seconds: options.interval_seconds,
+            },
+            |data, summary, digest_changed| {
+                let mut proposals = if options.automation {
+                    change_proposals(playbook, summary, &batches, digest_changed, &digest)
+                } else {
+                    let mut proposals = template_proposals(playbook);
+                    run_search_and_resolve_on(data, playbook, seed, &mut warnings, &mut proposals);
+                    proposals
+                };
+                proposals.truncate(MAX_PLAYBOOK_PROPOSALS);
+                Ok(dedupe_pending_actions_on(data, proposals))
             },
         )
         .map_err(|error| PlaybookError::new(error.to_string()))?;
-    let should_propose = outcome.digest_changed || outcome.summary.changed_observations > 0;
-    let mut proposals = if should_propose {
-        if options.automation {
-            change_proposals(
-                playbook,
-                &outcome.summary,
-                &batches,
-                outcome.digest_changed,
-                &digest,
-            )
-        } else {
-            let mut proposals = template_proposals(playbook);
-            run_search_and_resolve(
-                store,
-                apply.investigation_id,
-                playbook,
-                seed,
-                &mut warnings,
-                &mut proposals,
-            );
-            proposals
-        }
-    } else {
-        Vec::new()
-    };
-    proposals.truncate(MAX_PLAYBOOK_PROPOSALS);
-    proposals = dedupe_pending_actions(store, apply.investigation_id, proposals)
-        .map_err(|error| PlaybookError::new(error.to_string()))?;
-    store
-        .insert_playbook_proposals(apply.investigation_id, playbook, seed, &proposals)
-        .map_err(|error| PlaybookError::new(error.to_string()))?;
-    if options.automation {
-        store
-            .upsert_automation(
-                apply.investigation_id,
-                &playbook.id,
-                seed,
-                options.interval_seconds,
-                Some(&digest),
-            )
-            .map_err(|error| PlaybookError::new(error.to_string()))?;
-    }
     let output = PlaybookOutput {
         playbook: playbook.clone(),
         playbook_id: playbook.id.clone(),
@@ -369,7 +339,7 @@ fn finish(
         dry_run: false,
         automation: options.automation,
         batches,
-        proposals,
+        proposals: outcome.actions,
         plan,
         search_summary: warnings
             .iter()
@@ -382,12 +352,10 @@ fn finish(
     Ok(output)
 }
 
-fn dedupe_pending_actions(
-    store: &Store,
-    investigation_id: uuid::Uuid,
+fn dedupe_pending_actions_on(
+    data: &InvestigationData,
     actions: Vec<AgentAction>,
-) -> color_eyre::Result<Vec<AgentAction>> {
-    let data = store.load_investigation(investigation_id)?;
+) -> Vec<AgentAction> {
     let mut seen: HashSet<(String, String)> = data
         .proposals
         .iter()
@@ -403,7 +371,7 @@ fn dedupe_pending_actions(
         seen.insert(key);
         unique.push(action);
     }
-    Ok(unique)
+    unique
 }
 
 fn template_proposals(playbook: &Playbook) -> Vec<AgentAction> {
@@ -423,16 +391,15 @@ fn template_proposals(playbook: &Playbook) -> Vec<AgentAction> {
         .collect()
 }
 
-fn run_search_and_resolve(
-    store: &Store,
-    investigation_id: uuid::Uuid,
+fn run_search_and_resolve_on(
+    data: &InvestigationData,
     playbook: &Playbook,
     seed: &Target,
     warnings: &mut Vec<String>,
     proposals: &mut Vec<AgentAction>,
 ) {
     if let Some(search) = search_step(playbook) {
-        match run_search(store, investigation_id, seed, search) {
+        match run_search_on(data, seed, search) {
             Ok(summary) => warnings.push(summary),
             Err(error) => warnings.push(error),
         }
@@ -444,7 +411,7 @@ fn run_search_and_resolve(
     {
         return;
     }
-    match resolve_proposals(store, investigation_id, playbook) {
+    match resolve_proposals_on(data, playbook) {
         Ok(found) => {
             for action in found {
                 if proposals.len() >= MAX_PLAYBOOK_PROPOSALS {
@@ -464,9 +431,16 @@ fn search_step(playbook: &Playbook) -> Option<&PlaybookStep> {
         .find(|step| matches!(step, PlaybookStep::SearchAround { .. }))
 }
 
-fn run_search(
-    store: &Store,
-    investigation_id: uuid::Uuid,
+fn entity_for_seed<'a>(data: &'a InvestigationData, seed: &Target) -> Option<&'a Entity> {
+    let trimmed = seed.value();
+    data.entities.iter().find(|entity| {
+        entity.value.eq_ignore_ascii_case(trimmed.trim())
+            || entity.kind.normalize_value(trimmed.trim()) == entity.value
+    })
+}
+
+fn run_search_on(
+    data: &InvestigationData,
     seed: &Target,
     step: &PlaybookStep,
 ) -> Result<String, String> {
@@ -478,11 +452,7 @@ fn run_search(
     else {
         return Ok(String::new());
     };
-    let data = store
-        .load_investigation(investigation_id)
-        .map_err(|error| error.to_string())?;
-    let workspace = Workspace::new(data);
-    let Some(entity) = workspace.entity_by_any_value(&seed.value()) else {
+    let Some(entity) = entity_for_seed(data, seed) else {
         return Ok(format!(
             "search_around: seed {} not in the graph yet",
             seed.value()
@@ -494,7 +464,7 @@ fn run_search(
         .iter()
         .map(|kind| EntityKind::parse(kind))
         .collect();
-    let result = search_around(&workspace.data, &query);
+    let result = search_around(data, &query);
     Ok(format!(
         "search_around {} hop(s): {} node(s), {} edge(s)",
         result.hops_used,
@@ -503,9 +473,8 @@ fn run_search(
     ))
 }
 
-fn resolve_proposals(
-    store: &Store,
-    investigation_id: uuid::Uuid,
+fn resolve_proposals_on(
+    data: &InvestigationData,
     playbook: &Playbook,
 ) -> Result<Vec<AgentAction>, String> {
     let reason = playbook
@@ -516,10 +485,7 @@ fn resolve_proposals(
             _ => None,
         })
         .unwrap_or("");
-    let data = store
-        .load_investigation(investigation_id)
-        .map_err(|error| error.to_string())?;
-    let suggestions = suggest_resolutions(&data);
+    let suggestions = suggest_resolutions(data);
     let mut actions = Vec::new();
     for suggestion in suggestions.into_iter().take(4) {
         let refs: Vec<String> = suggestion
@@ -733,6 +699,49 @@ mod tests {
         assert_eq!(before.proposals.len(), after.proposals.len());
         assert!(after.entities.is_empty());
         assert!(after.sources.is_empty());
+    }
+
+    #[test]
+    fn failed_proposal_insert_rolls_back_applied_batches() {
+        let mut store = Store::open_in_memory().expect("store");
+        let investigation = store.create_investigation("Tx proposals", "").expect("inv");
+        let playbook = bundled("domain-infra").expect("playbook");
+        let seed = Target::parse(crate::model::TargetKind::Domain, "example.com").expect("seed");
+        let tools = ToolRegistry::detect(&Config::default().tools);
+        store
+            .connection()
+            .execute_batch(
+                "CREATE TRIGGER refuse_proposals BEFORE INSERT ON proposals
+                 BEGIN SELECT RAISE(ABORT, 'proposals blocked'); END;",
+            )
+            .expect("proposal insert fails after batches apply");
+        let before = store.load_investigation(investigation.id).expect("before");
+        let error = execute_prepared(
+            &mut store,
+            &playbook,
+            &seed,
+            ApplyContext {
+                investigation_id: investigation.id,
+                page_id: None,
+                job_id: None,
+            },
+            vec![fixture_batch()],
+            &tools,
+            ExecuteOptions::default(),
+        )
+        .expect_err("blocked proposal insert must fail");
+        assert!(!error.message.is_empty());
+        let after = store.load_investigation(investigation.id).expect("after");
+        assert_eq!(before.entities.len(), after.entities.len());
+        assert_eq!(before.sources.len(), after.sources.len());
+        assert!(after.entities.is_empty());
+        assert!(after.sources.is_empty());
+        assert!(
+            store
+                .list_playbook_runs(investigation.id)
+                .expect("runs")
+                .is_empty()
+        );
     }
 
     #[test]

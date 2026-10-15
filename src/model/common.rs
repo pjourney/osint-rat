@@ -64,6 +64,14 @@ macro_rules! open_enum {
                         .unwrap_or($name::Other(normalized)),
                 }
             }
+
+            /// Parses a built-in variant. Unknown values return `None` instead of `Other`.
+            pub fn parse_known(value: &str) -> Option<Self> {
+                match Self::parse(value) {
+                    $name::Other(_) => None,
+                    known => Some(known),
+                }
+            }
         }
 
         impl From<String> for $name {

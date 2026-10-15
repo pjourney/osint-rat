@@ -359,15 +359,18 @@ fn copy_tree_limited(from: &Path, to: &Path, depth: u32) -> Result<()> {
         }
         let source = entry.path();
         let destination = to.join(&name);
-        let metadata = entry.metadata()?;
-        if metadata.is_dir() {
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
             if let (Some(to_canon), Ok(source_canon)) = (&to_canon, source.canonicalize())
                 && (to_canon.starts_with(&source_canon) || source_canon.starts_with(to_canon))
             {
                 continue;
             }
             copy_tree_limited(&source, &destination, depth + 1)?;
-        } else if metadata.is_file() {
+        } else if file_type.is_file() {
             fs::copy(&source, &destination).wrap_err_with(|| {
                 format!(
                     "could not copy {} to {}",
@@ -426,6 +429,39 @@ mod tests {
                 .join("reports/note.md")
                 .exists()
         );
+    }
+
+    #[test]
+    fn copy_tree_skips_symlinks_instead_of_following_them() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let files_root = directory.path().join("orig-files");
+        fs::create_dir_all(files_root.join("reports")).expect("dirs");
+        fs::write(files_root.join("reports/note.md"), b"hello").expect("write");
+        let secret = directory.path().join("outside-secret.txt");
+        fs::write(&secret, b"do-not-copy-me").expect("secret");
+        std::os::unix::fs::symlink(&secret, files_root.join("leak.txt")).expect("symlink");
+        let store = Store::open_in_memory().expect("store");
+        let investigation = store
+            .create_investigation("Symlink Case", "")
+            .expect("created");
+        let data = store.load_investigation(investigation.id).expect("load");
+        let export_dir = directory.path().join("archive");
+        export_data(&data, &files_root, &export_dir).expect("export");
+        let copied_secret = export_dir.join("files/leak.txt");
+        assert!(
+            !copied_secret.exists(),
+            "import/export must not follow symlinks: {}",
+            copied_secret.display()
+        );
+        let files_listing = fs::read_dir(export_dir.join("files"))
+            .expect("files")
+            .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
+            .collect::<Vec<_>>();
+        assert!(
+            !files_listing.iter().any(|name| name == "leak.txt"),
+            "symlink target was copied as {files_listing:?}"
+        );
+        assert!(export_dir.join("files/reports/note.md").exists());
     }
 
     #[test]

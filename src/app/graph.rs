@@ -394,7 +394,7 @@ impl App {
             .or_else(|| workspace.data.entities.first().map(|entity| entity.id))
     }
 
-    fn visible_graph_entity_id(&self, index: usize) -> Option<uuid::Uuid> {
+    pub(crate) fn visible_graph_entity_id(&self, index: usize) -> Option<uuid::Uuid> {
         self.graph_tree_ids().get(index).copied()
     }
 

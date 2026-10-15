@@ -10,8 +10,8 @@ use super::evidence::{TimelineInsert, insert_timeline_event};
 use super::rows::{RowExt, id, opt_ts, ts};
 use super::{ApplyContext, ApplySummary, SeqTable, Store, next_seq, touch_investigation};
 use crate::model::{
-    AgentAction, AgentRun, Automation, EvidenceBatch, JobStatus, Playbook, PlaybookRun, Proposal,
-    ProposalStatus, Provenance, Target, TimelineKind, now,
+    AgentAction, AgentRun, Automation, EvidenceBatch, InvestigationData, JobStatus, Playbook,
+    PlaybookRun, Proposal, ProposalStatus, Provenance, Target, TimelineKind, now,
 };
 
 pub const PLAYBOOK_AGENT_NAME: &str = "playbook";
@@ -19,6 +19,7 @@ pub const PLAYBOOK_AGENT_NAME: &str = "playbook";
 pub struct PlaybookApplyOutcome {
     pub summary: ApplySummary,
     pub digest_changed: bool,
+    pub actions: Vec<AgentAction>,
 }
 
 /// Inputs for [`Store::apply_playbook_outcome`] besides the batches.
@@ -28,16 +29,21 @@ pub struct PlaybookApplyMeta<'a> {
     pub automation: bool,
     pub digest: &'a str,
     pub previous_digest: Option<&'a str>,
+    pub interval_seconds: Option<i64>,
 }
 
 impl Store {
-    /// Apply every batch in one transaction together with a playbook_run row and a timeline event.
-    pub fn apply_playbook_outcome(
+    /// Apply batches, pending proposals, and optional automation in one transaction.
+    pub fn apply_playbook_outcome<F>(
         &mut self,
         context: ApplyContext,
         batches: &[EvidenceBatch],
         meta: PlaybookApplyMeta<'_>,
-    ) -> Result<PlaybookApplyOutcome> {
+        propose: F,
+    ) -> Result<PlaybookApplyOutcome>
+    where
+        F: FnOnce(&InvestigationData, &ApplySummary, bool) -> Result<Vec<AgentAction>>,
+    {
         let playbook = meta.playbook;
         let seed = meta.seed;
         let automation = meta.automation;
@@ -48,6 +54,34 @@ impl Store {
         for batch in batches {
             let part = apply_batch_on(&transaction, context, batch)?;
             merge_summary(&mut summary, part);
+        }
+        let digest_changed = meta
+            .previous_digest
+            .map(|prior| prior != meta.digest)
+            .unwrap_or(summary.changed_observations > 0 || summary.new_sources > 0);
+        let should_propose = digest_changed || summary.changed_observations > 0;
+        let actions = if should_propose {
+            let data = super::load::load_investigation_on(&transaction, context.investigation_id)?;
+            propose(&data, &summary, digest_changed)?
+        } else {
+            Vec::new()
+        };
+        insert_playbook_proposals_on(
+            &transaction,
+            context.investigation_id,
+            playbook,
+            seed,
+            &actions,
+        )?;
+        if automation {
+            upsert_automation_on(
+                &transaction,
+                context.investigation_id,
+                &playbook.id,
+                seed,
+                meta.interval_seconds,
+                Some(meta.digest),
+            )?;
         }
         let timestamp = now();
         let run = PlaybookRun {
@@ -104,13 +138,10 @@ impl Store {
         )?;
         touch_investigation(&transaction, context.investigation_id)?;
         transaction.commit()?;
-        let digest_changed = meta
-            .previous_digest
-            .map(|prior| prior != meta.digest)
-            .unwrap_or(summary.changed_observations > 0 || summary.new_sources > 0);
         Ok(PlaybookApplyOutcome {
             summary,
             digest_changed,
+            actions,
         })
     }
 
@@ -127,46 +158,8 @@ impl Store {
         }
         self.assert_can_mutate(investigation_id)?;
         let transaction = self.connection_mut().transaction()?;
-        let timestamp = now();
-        let run = AgentRun {
-            id: Uuid::new_v4(),
-            investigation_id,
-            seq: next_seq(&transaction, SeqTable::AgentRuns, investigation_id)?,
-            thread_id: Uuid::new_v4(),
-            page_id: None,
-            agent_name: PLAYBOOK_AGENT_NAME.into(),
-            program: "os-int".into(),
-            args: vec![playbook.id.clone(), seed.value()],
-            question: format!("playbook run {}", playbook.id),
-            response: format!("{} planned proposal(s)", actions.len()),
-            status: JobStatus::Succeeded,
-            error: None,
-            focus: None,
-            context_artifact_id: None,
-            job_id: None,
-            model: None,
-            cost_usd: None,
-            created_at: timestamp,
-            finished_at: Some(timestamp),
-        };
-        insert_agent_run_record(&transaction, &run)?;
-        let mut proposals = Vec::with_capacity(actions.len());
-        for action in actions {
-            let proposal = Proposal {
-                id: Uuid::new_v4(),
-                investigation_id,
-                agent_run_id: run.id,
-                seq: next_seq(&transaction, SeqTable::Proposals, investigation_id)?,
-                action: action.clone(),
-                status: ProposalStatus::Pending,
-                error: None,
-                created_at: timestamp,
-                decided_at: None,
-                decided_by: None,
-            };
-            insert_proposal_record(&transaction, &proposal)?;
-            proposals.push(proposal);
-        }
+        let proposals =
+            insert_playbook_proposals_on(&transaction, investigation_id, playbook, seed, actions)?;
         transaction.commit()?;
         Ok(proposals)
     }
@@ -180,57 +173,14 @@ impl Store {
         digest: Option<&str>,
     ) -> Result<Automation> {
         self.assert_can_mutate(investigation_id)?;
-        let existing = self.find_automation(investigation_id, playbook_id, &seed.value())?;
-        let timestamp = now();
-        if let Some(mut row) = existing {
-            row.interval_seconds = interval_seconds;
-            row.enabled = true;
-            row.last_run_at = Some(timestamp);
-            if let Some(digest) = digest {
-                row.last_digest = Some(digest.to_string());
-            }
-            self.connection().execute(
-                "UPDATE automations SET interval_seconds = ?2, enabled = 1, last_run_at = ?3, last_digest = ?4
-                 WHERE id = ?1",
-                params![
-                    id(&row.id),
-                    row.interval_seconds,
-                    opt_ts(&row.last_run_at),
-                    row.last_digest,
-                ],
-            )?;
-            return Ok(row);
-        }
-        let automation = Automation {
-            id: Uuid::new_v4(),
+        upsert_automation_on(
+            self.connection(),
             investigation_id,
-            seq: next_seq(self.connection(), SeqTable::Automations, investigation_id)?,
-            playbook_id: playbook_id.to_string(),
-            seed_kind: seed.kind().as_str().to_string(),
-            seed_value: seed.value(),
+            playbook_id,
+            seed,
             interval_seconds,
-            enabled: true,
-            last_run_at: Some(timestamp),
-            last_digest: digest.map(str::to_string),
-            created_at: timestamp,
-        };
-        self.connection().execute(
-            "INSERT INTO automations (id, investigation_id, seq, playbook_id, seed_kind, seed_value, interval_seconds, enabled, last_run_at, last_digest, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10)",
-            params![
-                id(&automation.id),
-                id(&investigation_id),
-                automation.seq,
-                automation.playbook_id,
-                automation.seed_kind,
-                automation.seed_value,
-                automation.interval_seconds,
-                opt_ts(&automation.last_run_at),
-                automation.last_digest,
-                ts(&automation.created_at),
-            ],
-        )?;
-        Ok(automation)
+            digest,
+        )
     }
 
     pub fn find_automation(
@@ -239,17 +189,7 @@ impl Store {
         playbook_id: &str,
         seed_value: &str,
     ) -> Result<Option<Automation>> {
-        let mut statement = self.connection().prepare(
-            "SELECT id, investigation_id, seq, playbook_id, seed_kind, seed_value, interval_seconds, enabled, last_run_at, last_digest, created_at
-             FROM automations WHERE investigation_id = ?1 AND playbook_id = ?2 AND seed_value = ?3",
-        )?;
-        let row = statement
-            .query_row(
-                params![id(&investigation_id), playbook_id, seed_value],
-                read_automation,
-            )
-            .optional()?;
-        Ok(row)
+        find_automation_on(self.connection(), investigation_id, playbook_id, seed_value)
     }
 
     pub fn list_playbook_runs(&self, investigation_id: Uuid) -> Result<Vec<PlaybookRun>> {
@@ -277,6 +217,139 @@ impl Store {
         })?;
         rows.collect::<rusqlite::Result<_>>().map_err(Into::into)
     }
+}
+
+fn insert_playbook_proposals_on(
+    connection: &Connection,
+    investigation_id: Uuid,
+    playbook: &Playbook,
+    seed: &Target,
+    actions: &[AgentAction],
+) -> Result<Vec<Proposal>> {
+    if actions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let timestamp = now();
+    let run = AgentRun {
+        id: Uuid::new_v4(),
+        investigation_id,
+        seq: next_seq(connection, SeqTable::AgentRuns, investigation_id)?,
+        thread_id: Uuid::new_v4(),
+        page_id: None,
+        agent_name: PLAYBOOK_AGENT_NAME.into(),
+        program: "os-int".into(),
+        args: vec![playbook.id.clone(), seed.value()],
+        question: format!("playbook run {}", playbook.id),
+        response: format!("{} planned proposal(s)", actions.len()),
+        status: JobStatus::Succeeded,
+        error: None,
+        focus: None,
+        context_artifact_id: None,
+        job_id: None,
+        model: None,
+        cost_usd: None,
+        created_at: timestamp,
+        finished_at: Some(timestamp),
+    };
+    insert_agent_run_record(connection, &run)?;
+    let mut proposals = Vec::with_capacity(actions.len());
+    for action in actions {
+        let proposal = Proposal {
+            id: Uuid::new_v4(),
+            investigation_id,
+            agent_run_id: run.id,
+            seq: next_seq(connection, SeqTable::Proposals, investigation_id)?,
+            action: action.clone(),
+            status: ProposalStatus::Pending,
+            error: None,
+            created_at: timestamp,
+            decided_at: None,
+            decided_by: None,
+        };
+        insert_proposal_record(connection, &proposal)?;
+        proposals.push(proposal);
+    }
+    Ok(proposals)
+}
+
+fn find_automation_on(
+    connection: &Connection,
+    investigation_id: Uuid,
+    playbook_id: &str,
+    seed_value: &str,
+) -> Result<Option<Automation>> {
+    let mut statement = connection.prepare(
+        "SELECT id, investigation_id, seq, playbook_id, seed_kind, seed_value, interval_seconds, enabled, last_run_at, last_digest, created_at
+         FROM automations WHERE investigation_id = ?1 AND playbook_id = ?2 AND seed_value = ?3",
+    )?;
+    let row = statement
+        .query_row(
+            params![id(&investigation_id), playbook_id, seed_value],
+            read_automation,
+        )
+        .optional()?;
+    Ok(row)
+}
+
+fn upsert_automation_on(
+    connection: &Connection,
+    investigation_id: Uuid,
+    playbook_id: &str,
+    seed: &Target,
+    interval_seconds: Option<i64>,
+    digest: Option<&str>,
+) -> Result<Automation> {
+    let existing = find_automation_on(connection, investigation_id, playbook_id, &seed.value())?;
+    let timestamp = now();
+    if let Some(mut row) = existing {
+        row.interval_seconds = interval_seconds;
+        row.enabled = true;
+        row.last_run_at = Some(timestamp);
+        if let Some(digest) = digest {
+            row.last_digest = Some(digest.to_string());
+        }
+        connection.execute(
+            "UPDATE automations SET interval_seconds = ?2, enabled = 1, last_run_at = ?3, last_digest = ?4
+             WHERE id = ?1",
+            params![
+                id(&row.id),
+                row.interval_seconds,
+                opt_ts(&row.last_run_at),
+                row.last_digest,
+            ],
+        )?;
+        return Ok(row);
+    }
+    let automation = Automation {
+        id: Uuid::new_v4(),
+        investigation_id,
+        seq: next_seq(connection, SeqTable::Automations, investigation_id)?,
+        playbook_id: playbook_id.to_string(),
+        seed_kind: seed.kind().as_str().to_string(),
+        seed_value: seed.value(),
+        interval_seconds,
+        enabled: true,
+        last_run_at: Some(timestamp),
+        last_digest: digest.map(str::to_string),
+        created_at: timestamp,
+    };
+    connection.execute(
+        "INSERT INTO automations (id, investigation_id, seq, playbook_id, seed_kind, seed_value, interval_seconds, enabled, last_run_at, last_digest, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10)",
+        params![
+            id(&automation.id),
+            id(&investigation_id),
+            automation.seq,
+            automation.playbook_id,
+            automation.seed_kind,
+            automation.seed_value,
+            automation.interval_seconds,
+            opt_ts(&automation.last_run_at),
+            automation.last_digest,
+            ts(&automation.created_at),
+        ],
+    )?;
+    Ok(automation)
 }
 
 fn insert_playbook_run(connection: &Connection, run: &PlaybookRun) -> rusqlite::Result<()> {

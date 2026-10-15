@@ -1,7 +1,7 @@
 //! Loading a whole investigation and inserting a whole investigation (import).
 
 use color_eyre::eyre::{Result, eyre};
-use rusqlite::params;
+use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
 use super::Store;
@@ -22,32 +22,43 @@ use super::resolution::{insert_resolution_record, list_resolutions};
 use super::rows::{id, json, ts};
 use crate::model::InvestigationData;
 
+pub(crate) fn load_investigation_on(
+    connection: &Connection,
+    investigation_id: Uuid,
+) -> Result<InvestigationData> {
+    let investigation = connection
+        .query_row(
+            "SELECT id, name, description, tags, marking, created_at, updated_at FROM investigations WHERE id = ?1",
+            params![id(&investigation_id)],
+            super::investigation_from_row,
+        )
+        .optional()?
+        .ok_or_else(|| eyre!("investigation {investigation_id} does not exist"))?;
+    Ok(InvestigationData {
+        investigation,
+        pages: list_pages(connection, investigation_id)?,
+        sources: list_sources(connection, investigation_id)?,
+        findings: list_findings(connection, investigation_id)?,
+        entities: list_entities(connection, investigation_id)?,
+        relationships: list_relationships(connection, investigation_id)?,
+        notes: list_notes(connection, investigation_id)?,
+        artifacts: list_artifacts(connection, investigation_id)?,
+        timeline: list_timeline(connection, investigation_id)?,
+        jobs: list_jobs(connection, investigation_id)?,
+        agent_runs: list_agent_runs(connection, investigation_id)?,
+        proposals: list_proposals(connection, investigation_id)?,
+        page_entities: list_page_entities(connection, investigation_id)?,
+        resolutions: list_resolutions(connection, investigation_id)?,
+        events: list_events(connection, investigation_id)?,
+        audit: list_audit(connection, investigation_id)?,
+        members: list_members(connection, investigation_id)?,
+    })
+}
+
 impl Store {
     /// Loads every record of an investigation.
     pub fn load_investigation(&self, investigation_id: Uuid) -> Result<InvestigationData> {
-        let investigation = self
-            .get_investigation(investigation_id)?
-            .ok_or_else(|| eyre!("investigation {investigation_id} does not exist"))?;
-        let connection = self.connection();
-        Ok(InvestigationData {
-            investigation,
-            pages: list_pages(connection, investigation_id)?,
-            sources: list_sources(connection, investigation_id)?,
-            findings: list_findings(connection, investigation_id)?,
-            entities: list_entities(connection, investigation_id)?,
-            relationships: list_relationships(connection, investigation_id)?,
-            notes: list_notes(connection, investigation_id)?,
-            artifacts: list_artifacts(connection, investigation_id)?,
-            timeline: list_timeline(connection, investigation_id)?,
-            jobs: list_jobs(connection, investigation_id)?,
-            agent_runs: list_agent_runs(connection, investigation_id)?,
-            proposals: list_proposals(connection, investigation_id)?,
-            page_entities: list_page_entities(connection, investigation_id)?,
-            resolutions: list_resolutions(connection, investigation_id)?,
-            events: list_events(connection, investigation_id)?,
-            audit: list_audit(connection, investigation_id)?,
-            members: list_members(connection, investigation_id)?,
-        })
+        load_investigation_on(self.connection(), investigation_id)
     }
 
     /// Inserts a complete investigation with its existing IDs (used by import).

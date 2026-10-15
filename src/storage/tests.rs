@@ -2049,7 +2049,9 @@ fn playbook_apply_writes_playbook_run_audit() {
                 automation: false,
                 digest: "digest",
                 previous_digest: None,
+                interval_seconds: None,
             },
+            |_, _, _| Ok(Vec::new()),
         )
         .expect("apply");
     assert_eq!(outcome.summary.timeline_ids.len(), 1);

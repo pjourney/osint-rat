@@ -20,6 +20,17 @@ pub enum ReviewKind {
     History,
 }
 
+impl ReviewKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ReviewKind::Agent => "agent",
+            ReviewKind::Playbook => "playbook",
+            ReviewKind::Merge => "merge",
+            ReviewKind::History => "history",
+        }
+    }
+}
+
 /// One row in the Review board.
 #[derive(Clone, Debug)]
 pub struct ReviewItem {

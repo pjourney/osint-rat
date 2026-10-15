@@ -59,6 +59,13 @@ pub struct ResolutionSuggestionView {
     pub entities: Vec<ObjectSummary>,
 }
 
+/// Parses a user-supplied `--kind` / `?kind=` filter. Typos are errors, not `Other`.
+pub fn parse_entity_kind_filter(raw: &str) -> Result<EntityKind> {
+    EntityKind::parse_known(raw).ok_or_else(|| {
+        eyre!("unknown entity kind {raw:?}; use a built-in kind such as domain, ip, or email")
+    })
+}
+
 pub fn list_objects(workspace: &Workspace, kind: Option<&EntityKind>) -> Vec<ObjectSummary> {
     workspace
         .visible_entities()
@@ -314,5 +321,18 @@ mod tests {
         assert!(error.contains("no entity"), "{error}");
         assert!(!error.contains("S-12"), "{error}");
         assert!(!error.contains("not a valid reference"), "{error}");
+    }
+
+    #[test]
+    fn parse_entity_kind_filter_rejects_typos() {
+        assert_eq!(
+            parse_entity_kind_filter("domain").expect("domain"),
+            EntityKind::Domain
+        );
+        let error = parse_entity_kind_filter("domian")
+            .expect_err("typo")
+            .to_string();
+        assert!(error.contains("unknown entity kind"), "{error}");
+        assert!(error.contains("domian"), "{error}");
     }
 }
