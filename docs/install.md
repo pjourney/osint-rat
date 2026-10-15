@@ -9,7 +9,7 @@ A **published** tagged GitHub Release is the supported one-liner. It verifies a 
 Pin both the script URL and `OS_INT_VERSION` to the same tag. Do not fetch `install.sh` from `main`; a newer script on `main` may not match the tagged archive layout.
 
 ```bash
-OS_INT_VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/pjourney/osint-rat/v0.1.0/scripts/install.sh | bash
+OS_INT_VERSION=v0.2.0 curl -fsSL https://raw.githubusercontent.com/pjourney/osint-rat/v0.2.0/scripts/install.sh | bash
 ```
 
 `OS_INT_VERSION=latest` (the script default) calls GitHub `/releases/latest`. **Draft releases are not latest.** The Release workflow attaches binaries to a draft GitHub Release; `/releases/latest` stays empty until a maintainer publishes that draft. Pin a tag after publish, or install from source until then.
@@ -42,7 +42,7 @@ A formula is not published from this repository. If you maintain a tap, the rele
 | `os-int-x86_64-apple-darwin.tar.gz` | macOS Intel |
 | `os-int-x86_64-pc-windows-msvc.zip` | Windows x64 |
 
-A tap recipe would `url` one of those tarballs, `sha256` the matching `.sha256` file, and install the nested binary (`os-int-<target>/os-int`). Do not publish a tap from a phase pull request; tag `v0.1.0` on `main` first, then publish the draft GitHub Release. Linux aarch64 has no prebuilt archive; use the source install below.
+A tap recipe would `url` one of those tarballs, `sha256` the matching `.sha256` file, and install the nested binary (`os-int-<target>/os-int`). Do not publish a tap from a phase pull request; tag `v0.2.0` on `main` first, then publish the draft GitHub Release. Linux aarch64 has no prebuilt archive; use the source install below.
 
 ## Windows
 
