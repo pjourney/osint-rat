@@ -1795,17 +1795,7 @@ fn entity_inspector_props(
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("PROPERTIES", theme.header)));
         for (key, value) in entity.fields.iter().take(12) {
-            let source_ref = entity
-                .source_ids
-                .first()
-                .and_then(|id| {
-                    entity
-                        .source_ids
-                        .iter()
-                        .position(|candidate| candidate == id)
-                        .map(|index| format!(" S{}", index + 1))
-                })
-                .unwrap_or_default();
+            let source_ref = field_footnote(entity, workspace, key, value);
             lines.push(Line::from(vec![
                 Span::raw(format!("  {key:<12}  {}  ", truncate(value, 18))),
                 provenance_glyph(entity.provenance, theme),
@@ -2257,6 +2247,41 @@ fn detail_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'st
     vec![Line::from(Span::styled("Nothing selected.", theme.muted))]
 }
 
+fn field_footnote(entity: &Entity, workspace: &Workspace, key: &str, value: &str) -> String {
+    let chain = &entity.source_ids;
+    let from_source = chain.iter().position(|id| {
+        workspace
+            .source(*id)
+            .is_some_and(|source| source_supplied_field(source, key, value))
+    });
+    let from_member = from_source.or_else(|| {
+        workspace
+            .constituents_of(entity.id)
+            .into_iter()
+            .find_map(|member| {
+                if member.fields.get(key) != Some(value) {
+                    return None;
+                }
+                member
+                    .source_ids
+                    .iter()
+                    .find_map(|id| chain.iter().position(|candidate| candidate == id))
+            })
+    });
+    from_member
+        .or_else(|| chain.first().map(|_| 0))
+        .map(|index| format!(" S{}", index + 1))
+        .unwrap_or_default()
+}
+
+fn source_supplied_field(source: &crate::model::Source, key: &str, value: &str) -> bool {
+    source
+        .fields
+        .iter()
+        .any(|(field, found)| field.eq_ignore_ascii_case(key) && found == value)
+        || (!value.is_empty() && source.content.contains(value))
+}
+
 fn append_fields(lines: &mut Vec<Line<'static>>, fields: &crate::model::Fields, theme: &Theme) {
     if fields.is_empty() {
         return;
@@ -2282,4 +2307,81 @@ fn finding_line(
             workspace.format_source_refs(&finding.source_ids)
         )),
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{field_footnote, source_supplied_field};
+    use crate::model::{
+        Entity, EntityKind, Fields, Investigation, InvestigationData, Provenance, Source,
+        SourceKind, Workspace, now,
+    };
+
+    fn source_with_field(seq: i64, key: &str, value: &str) -> Source {
+        let timestamp = now();
+        let mut fields = Fields::new();
+        fields.push(key, value);
+        Source {
+            id: uuid::Uuid::new_v4(),
+            investigation_id: uuid::Uuid::nil(),
+            seq,
+            kind: SourceKind::Dns,
+            title: format!("source {seq}"),
+            url: None,
+            retrieved_at: timestamp,
+            last_seen_at: None,
+            published_at: None,
+            author: None,
+            collector: Some("dns".into()),
+            content_hash: None,
+            snapshot_path: None,
+            content: String::new(),
+            fields,
+            notes: String::new(),
+            provenance: Provenance::Collected,
+            page_id: None,
+            job_id: None,
+        }
+    }
+
+    #[test]
+    fn props_footnote_cites_the_source_that_supplied_the_field() {
+        let dns = source_with_field(1, "registrar", "examplereg");
+        let intel = source_with_field(2, "asn", "AS1");
+        let timestamp = now();
+        let mut entity = Entity {
+            id: uuid::Uuid::new_v4(),
+            investigation_id: uuid::Uuid::nil(),
+            seq: 1,
+            kind: EntityKind::Domain,
+            value: "example.com".into(),
+            label: String::new(),
+            notes: String::new(),
+            provenance: Provenance::Collected,
+            fields: Fields::new(),
+            source_ids: vec![dns.id, intel.id],
+            created_at: timestamp,
+            updated_at: timestamp,
+        };
+        entity.fields.push("registrar", "examplereg");
+        entity.fields.push("asn", "AS1");
+        let mut data = InvestigationData::empty(Investigation {
+            id: uuid::Uuid::nil(),
+            name: "case".into(),
+            description: String::new(),
+            tags: Vec::new(),
+            marking: crate::model::Marking::Unmarked,
+            created_at: timestamp,
+            updated_at: timestamp,
+        });
+        data.entities.push(entity.clone());
+        data.sources.extend([dns.clone(), intel.clone()]);
+        let workspace = Workspace::new(data);
+        assert!(source_supplied_field(&dns, "registrar", "examplereg"));
+        assert_eq!(
+            field_footnote(&entity, &workspace, "registrar", "examplereg"),
+            " S1"
+        );
+        assert_eq!(field_footnote(&entity, &workspace, "asn", "AS1"), " S2");
+    }
 }

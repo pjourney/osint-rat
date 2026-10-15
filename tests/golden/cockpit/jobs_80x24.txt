@@ -21,4 +21,4 @@ Nothing selected.
 
 
  Jobs. Enter opens the selected job. Cancel is in the palette.    0 jobs
-/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro
+/ filter  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro

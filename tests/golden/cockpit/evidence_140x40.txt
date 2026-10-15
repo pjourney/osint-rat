@@ -37,4 +37,4 @@
 
 
  Evidence. t toggles the time lens. Enter never writes.    0 jobs
-/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search around  t time
+/ filter  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search around  t time

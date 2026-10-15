@@ -21,4 +21,4 @@ Nothing selected.
 
 
  Entities. t toggles the time lens. Space marks. m proposes a merge.    0 jobs
-/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro
+/ filter  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro

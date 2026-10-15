@@ -567,4 +567,82 @@ mod tests {
         assert_eq!(SortKey::parse("provenance"), Some(SortKey::Prov));
         assert_eq!(SortKey::Prov.header(), "PROV");
     }
+
+    #[test]
+    fn sort_prov_orders_by_displayed_union() {
+        use crate::model::{EntityKind, Fields, Investigation, InvestigationData, SourceKind, now};
+
+        fn entity(kind: EntityKind, value: &str, provenance: Provenance) -> Entity {
+            let timestamp = now();
+            Entity {
+                id: uuid::Uuid::new_v4(),
+                investigation_id: uuid::Uuid::nil(),
+                seq: 1,
+                kind,
+                value: value.into(),
+                label: String::new(),
+                notes: String::new(),
+                provenance,
+                fields: Fields::new(),
+                source_ids: Vec::new(),
+                created_at: timestamp,
+                updated_at: timestamp,
+            }
+        }
+
+        let collected = entity(EntityKind::Domain, "a.example", Provenance::Collected);
+        let mut mixed = entity(EntityKind::Ip, "192.0.2.1", Provenance::Collected);
+        let timestamp = now();
+        let source_id = uuid::Uuid::new_v4();
+        mixed.source_ids.push(source_id);
+        let source = Source {
+            id: source_id,
+            investigation_id: uuid::Uuid::nil(),
+            seq: 1,
+            kind: SourceKind::Dns,
+            title: "dns".into(),
+            url: None,
+            retrieved_at: timestamp,
+            last_seen_at: None,
+            published_at: None,
+            author: None,
+            collector: Some("dns".into()),
+            content_hash: None,
+            snapshot_path: None,
+            content: String::new(),
+            fields: Fields::new(),
+            notes: String::new(),
+            provenance: Provenance::Agent,
+            page_id: None,
+            job_id: None,
+        };
+        let mut data = InvestigationData::empty(Investigation {
+            id: uuid::Uuid::nil(),
+            name: "case".into(),
+            description: String::new(),
+            tags: Vec::new(),
+            marking: crate::model::Marking::Unmarked,
+            created_at: timestamp,
+            updated_at: timestamp,
+        });
+        data.entities = vec![collected.clone(), mixed.clone()];
+        data.sources = vec![source];
+        let workspace = Workspace::new(data);
+        assert_eq!(
+            entity_provenances(&collected, &workspace),
+            vec![Provenance::Collected]
+        );
+        assert_eq!(
+            entity_provenances(&mixed, &workspace),
+            vec![Provenance::Collected, Provenance::Agent]
+        );
+        assert_eq!(
+            cmp_entities(&collected, &mixed, &workspace, (SortKey::Prov, false)),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            cmp_entities(&mixed, &collected, &workspace, (SortKey::Prov, true)),
+            std::cmp::Ordering::Less
+        );
+    }
 }

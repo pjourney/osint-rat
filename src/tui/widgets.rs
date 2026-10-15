@@ -179,13 +179,16 @@ pub fn context_line(view: View, pane: Pane, theme: &Theme) -> Line<'static> {
             spans.push(Span::raw("  "));
         }
         spans.push(Span::styled(command.hint.to_string(), theme.accent));
-        spans.push(Span::raw(format!(" {}", short_hint_label(command.title))));
+        spans.push(Span::raw(format!(" {}", hint_label(command, view))));
     }
     Line::from(spans)
 }
 
-fn short_hint_label(title: &str) -> String {
-    match title {
+fn hint_label(command: &crate::app::commands::Command, view: View) -> String {
+    if command.id == "search" && crate::app::App::view_uses_table_filter(view) {
+        return "filter".into();
+    }
+    match command.title {
         "Ask Agent" => "ask agent".into(),
         "Command palette" => "commands".into(),
         "Run Collectors" => "collect".into(),

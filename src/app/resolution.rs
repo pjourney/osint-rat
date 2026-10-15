@@ -26,7 +26,7 @@ impl App {
 
     fn listed_entity_ids(&self) -> Vec<Uuid> {
         if let Some(ids) = self.cached_board_rows(|cache| cache.entities.clone()) {
-            return ids;
+            return self.revalidate_listed_entity_ids(ids);
         }
         let Some(workspace) = self.workspace.as_ref() else {
             return Vec::new();

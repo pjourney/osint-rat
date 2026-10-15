@@ -17,7 +17,7 @@ pub mod review;
 pub mod timeline;
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -368,6 +368,8 @@ pub struct App {
     pub pending_editor: Option<EditorSession>,
     /// Last board row id used to remap selection across filter/sort edits.
     board_anchor_id: Option<Uuid>,
+    /// Bumped on workspace content changes so BoardListCache cannot outlive the case.
+    workspace_rev: u64,
     board_list_cache: RefCell<Option<BoardListCache>>,
 }
 
@@ -438,6 +440,7 @@ impl App {
             last_error: None,
             pending_editor: None,
             board_anchor_id: None,
+            workspace_rev: 0,
             board_list_cache: RefCell::new(None),
         };
         let _ = app.store.mark_interrupted_jobs();
@@ -491,6 +494,7 @@ impl App {
     pub fn open_investigation(&mut self, id: Uuid) -> Result<()> {
         let data = self.store.load_investigation(id)?;
         self.workspace = Some(Workspace::new(data));
+        self.touch_workspace();
         self.view = View::Overview;
         self.page_id = self
             .workspace
@@ -674,6 +678,7 @@ impl App {
         };
         let data = self.store.load_investigation(id)?;
         self.workspace = Some(Workspace::new(data));
+        self.touch_workspace();
         self.remap_focus_after_resolution();
         self.mark_dirty();
         Ok(())
@@ -683,15 +688,30 @@ impl App {
         if delta.is_empty() {
             return Ok(());
         }
-        match self.workspace.as_mut() {
-            Some(workspace) => {
-                workspace.apply_delta(delta);
-                self.remap_focus_after_resolution();
-                self.mark_dirty();
-                Ok(())
-            }
-            None => self.reload(),
+        if self.workspace.is_none() {
+            return self.reload();
         }
+        if let Some(workspace) = self.workspace.as_mut() {
+            workspace.apply_delta(delta);
+        }
+        self.touch_workspace();
+        self.remap_focus_after_resolution();
+        self.mark_dirty();
+        Ok(())
+    }
+
+    fn touch_workspace(&mut self) {
+        self.workspace_rev = self.workspace_rev.wrapping_add(1);
+        self.clear_board_list_cache();
+    }
+
+    fn clear_board_list_cache(&mut self) {
+        self.board_list_cache.replace(None);
+    }
+
+    fn track_job(&mut self, record: JobRecord) {
+        self.job_records.insert(record.id, record);
+        self.touch_workspace();
     }
 
     fn files(&self) -> Option<InvestigationFiles> {
@@ -920,7 +940,7 @@ impl App {
         };
     }
 
-    fn view_uses_table_filter(view: View) -> bool {
+    pub(crate) fn view_uses_table_filter(view: View) -> bool {
         matches!(
             view,
             View::Entities | View::Evidence | View::Jobs | View::Tools
@@ -2345,7 +2365,7 @@ impl App {
             page_id,
         };
         self.store.insert_job(&mut record)?;
-        self.job_records.insert(job_id, record);
+        self.track_job(record);
         let net_error = self.net.as_ref().err().cloned();
         if collector.needs_network() && net_error.is_some() {
             return Err(eyre!(net_error.unwrap_or_default()));
@@ -2451,7 +2471,7 @@ impl App {
             page_id: self.page_id,
         };
         self.store.insert_job(&mut record)?;
-        self.job_records.insert(job_id, record);
+        self.track_job(record);
         self.streaming.insert(job_id, String::new());
         let profile = self.agent.profile.clone();
         let files = self.files().ok_or_else(|| eyre!("no investigation"))?;
@@ -2597,6 +2617,7 @@ impl App {
                 self.finish_job(job_id, outcome)?;
             }
         }
+        self.touch_workspace();
         self.mark_dirty();
         Ok(())
     }
@@ -3284,7 +3305,7 @@ impl App {
     /// Findings then sources. The Evidence board is this list unless the time lens is on.
     pub fn listed_evidence(&self) -> Vec<EvidenceRow> {
         if let Some(rows) = self.cached_board_rows(|cache| cache.evidence.clone()) {
-            return rows;
+            return self.revalidate_listed_evidence(rows);
         }
         let Some(workspace) = self.workspace.as_ref() else {
             return Vec::new();
@@ -3323,7 +3344,7 @@ impl App {
     /// Jobs in the order the Jobs pane lists them: persisted rows, then live jobs not reloaded yet.
     pub fn listed_job_ids(&self) -> Vec<Uuid> {
         if let Some(ids) = self.cached_board_rows(|cache| cache.jobs.clone()) {
-            return ids;
+            return self.revalidate_listed_jobs(ids);
         }
         let mut ids = Vec::new();
         if let Some(workspace) = self.workspace.as_ref() {
@@ -3342,17 +3363,24 @@ impl App {
         ids.extend(live.iter().map(|job| job.id));
         let filter = self.parsed_board_filter();
         ids.retain(|id| {
-            let label = self
-                .job_records
-                .get(id)
+            let live = self.job_records.get(id);
+            let stored = self
+                .workspace
+                .as_ref()
+                .and_then(|workspace| workspace.job(*id));
+            let label = live
                 .map(|job| job.label.as_str())
-                .or_else(|| {
-                    self.workspace
-                        .as_ref()
-                        .and_then(|workspace| workspace.job(*id).map(|job| job.label.as_str()))
-                })
+                .or_else(|| stored.map(|job| job.label.as_str()))
                 .unwrap_or("");
-            filter.matches_text(label)
+            let status = live
+                .map(|job| job.status.as_str())
+                .or_else(|| stored.map(|job| job.status.as_str()))
+                .unwrap_or("");
+            let progress = live
+                .and_then(|job| job.progress.as_deref())
+                .or_else(|| stored.and_then(|job| job.progress.as_deref()))
+                .unwrap_or("");
+            filter.matches_text(&format!("{label} {status} {progress}"))
         });
         self.store_board_rows(|cache| cache.jobs = Some(ids.clone()));
         ids
@@ -3375,7 +3403,7 @@ impl App {
 
     pub fn listed_tool_indices(&self) -> Vec<usize> {
         if let Some(indices) = self.cached_board_rows(|cache| cache.tools.clone()) {
-            return indices;
+            return self.revalidate_listed_tools(indices);
         }
         let filter = self.parsed_board_filter();
         let indices: Vec<usize> = self
@@ -3400,18 +3428,92 @@ impl App {
 
     fn board_cache_key(&self) -> String {
         let workspace = self.workspace.as_ref();
+        let tools = self
+            .tools
+            .tools()
+            .iter()
+            .map(|entry| entry.definition.name.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
         format!(
-            "{:?}|{}|{}|{}|{}|{}|{}|{}|{:?}",
+            "{:?}|{}|{}|{}|{}|{}|{:?}|{}|{:?}",
             self.view,
             self.active_board_filter(),
             self.timeline.nearby,
             self.time_lens,
-            workspace.map(|ws| ws.data.entities.len()).unwrap_or(0),
-            workspace.map(|ws| ws.data.findings.len()).unwrap_or(0),
-            workspace.map(|ws| ws.data.sources.len()).unwrap_or(0),
-            workspace.map(|ws| ws.data.jobs.len()).unwrap_or(0) + self.job_records.len(),
+            workspace.map(Workspace::id).unwrap_or(Uuid::nil()),
+            self.workspace_rev,
+            self.timeline.nearby_seed_id,
+            tools,
             self.effective_sort()
         )
+    }
+
+    pub(crate) fn revalidate_listed_entity_ids(&self, ids: Vec<Uuid>) -> Vec<Uuid> {
+        let Some(workspace) = self.workspace.as_ref() else {
+            return Vec::new();
+        };
+        let universe: HashSet<Uuid> = if self.timeline.nearby && self.view == View::Entities {
+            self.listed_nearby()
+                .into_iter()
+                .map(|entity| entity.id)
+                .collect()
+        } else {
+            workspace
+                .visible_entities()
+                .into_iter()
+                .map(|entity| entity.id)
+                .collect()
+        };
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        for id in ids {
+            let canonical = workspace.canonical_id(id);
+            if universe.contains(&canonical) && seen.insert(canonical) {
+                out.push(canonical);
+            }
+        }
+        out
+    }
+
+    fn revalidate_listed_evidence(&self, rows: Vec<EvidenceRow>) -> Vec<EvidenceRow> {
+        let Some(workspace) = self.workspace.as_ref() else {
+            return Vec::new();
+        };
+        let mut seen = HashSet::new();
+        rows.into_iter()
+            .filter(|row| {
+                let id = match row {
+                    EvidenceRow::Finding(id) if workspace.finding(*id).is_some() => *id,
+                    EvidenceRow::Source(id) if workspace.source(*id).is_some() => *id,
+                    _ => return false,
+                };
+                seen.insert(id)
+            })
+            .collect()
+    }
+
+    fn revalidate_listed_jobs(&self, ids: Vec<Uuid>) -> Vec<Uuid> {
+        let mut seen = HashSet::new();
+        ids.into_iter()
+            .filter(|id| {
+                let exists = self.job_records.contains_key(id)
+                    || self
+                        .workspace
+                        .as_ref()
+                        .is_some_and(|workspace| workspace.job(*id).is_some());
+                exists && seen.insert(*id)
+            })
+            .collect()
+    }
+
+    fn revalidate_listed_tools(&self, indices: Vec<usize>) -> Vec<usize> {
+        let n = self.tools.tools().len();
+        let mut seen = HashSet::new();
+        indices
+            .into_iter()
+            .filter(|index| *index < n && seen.insert(*index))
+            .collect()
     }
 
     fn cached_board_rows<T>(&self, pick: impl Fn(&BoardListCache) -> Option<T>) -> Option<T> {
@@ -3544,7 +3646,7 @@ impl App {
             page_id,
         };
         self.store.insert_job(&mut record)?;
-        self.job_records.insert(job_id, record);
+        self.track_job(record);
         let definition = entry.definition.clone();
         self.jobs.spawn(job_id, move |job| async move {
             run_tool(&definition, program, &target, &job)
@@ -3756,7 +3858,7 @@ impl App {
             page_id,
         };
         self.store.insert_job(&mut record)?;
-        self.job_records.insert(job_id, record);
+        self.track_job(record);
         let net_error = self.net.as_ref().err().cloned();
         if net_error.is_some() {
             return Err(eyre!(net_error.unwrap_or_default()));
@@ -4072,6 +4174,8 @@ fn add_scroll(scroll: u16, delta: i32) -> u16 {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
 
     fn test_app() -> (tempfile::TempDir, App) {
@@ -6313,6 +6417,109 @@ mod tests {
         assert!(
             restarted.listed_suggestions().is_empty(),
             "rejected suggestions must stay dismissed after restart"
+        );
+    }
+
+    #[test]
+    fn switching_cases_with_identical_counts_shows_the_new_case_rows() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Case Alpha");
+        create_page(&mut app, "alpha.example", "domain", "alpha.example");
+        let alpha_id = app.workspace.as_ref().expect("workspace").id();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        let alpha = app.listed_entities()[0].value.clone();
+
+        create_named_investigation(&mut app, "Case Beta");
+        create_page(&mut app, "beta.example", "domain", "beta.example");
+        app.dispatch(Action::OpenEntities).expect("entities");
+        let beta = app.listed_entities()[0].value.clone();
+        assert_ne!(alpha, beta);
+        assert!(beta.contains("beta"), "{beta}");
+
+        app.open_investigation(alpha_id).expect("switch");
+        app.dispatch(Action::OpenEntities).expect("entities");
+        let restored = app.listed_entities()[0].value.clone();
+        assert_eq!(restored, alpha);
+        assert!(
+            !app.listed_entities()
+                .iter()
+                .any(|entity| entity.value == beta)
+        );
+    }
+
+    #[test]
+    fn accepting_a_merge_does_not_duplicate_board_rows() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Merge Cache");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let domain = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Domain,
+                "example.com",
+                Provenance::Analyst,
+                None,
+            )
+            .expect("domain");
+        let host = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Hostname,
+                "example.com",
+                Provenance::Collected,
+                None,
+            )
+            .expect("host");
+        app.reload().expect("reload");
+        app.dispatch(Action::OpenEntities).expect("entities");
+        assert_eq!(app.listed_entities().len(), 2);
+
+        let actor = app.store.identity().user_id.clone();
+        app.store
+            .resolve_entities(
+                investigation_id,
+                &[domain, host],
+                domain,
+                "same host",
+                &actor,
+            )
+            .expect("resolve");
+        let data = app
+            .store
+            .load_investigation(investigation_id)
+            .expect("load");
+        app.workspace = Some(Workspace::new(data));
+        let listed = app.listed_entities();
+        let unique: HashSet<_> = listed.iter().map(|entity| entity.id).collect();
+        assert_eq!(listed.len(), unique.len(), "canonical rows must be unique");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, domain);
+    }
+
+    #[test]
+    fn job_status_change_is_reflected_under_a_text_filter() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Job Filter");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let mut job = sample_job("DNS", JobStatus::Queued, None);
+        job.investigation_id = Some(investigation_id);
+        app.store.insert_job(&mut job).expect("store job");
+        app.job_records.insert(job.id, job.clone());
+        app.view = View::Jobs;
+        app.board_filter = "running".into();
+        app.handle_job(JobEvent::Started { job_id: job.id })
+            .expect("started");
+        assert_eq!(app.listed_job_ids(), vec![job.id]);
+        app.handle_job(JobEvent::Finished {
+            job_id: job.id,
+            outcome: JobOutcome::Failed("nope".into()),
+        })
+        .expect("failed");
+        assert!(
+            app.listed_job_ids().is_empty(),
+            "failed jobs must drop out of a running filter"
         );
     }
 }

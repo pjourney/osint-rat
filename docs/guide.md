@@ -161,7 +161,7 @@ Entities and Evidence are real tables (column headers, display-width truncation,
 │ 3 Evidence   │                                    │ ● 3 facts from 2 srcs  │
 │ 4 Graph      │                                    │                        │
 │ 5 Review     │                                    │ SOURCES                │
-│ 6 Jobs       │                                    │  S-1 ● dns             │
+│ 6 Jobs       │                                    │  S1 ● dns              │
 ├──────────────┴────────────────────────────────────┴────────────────────────┤
 │ c collect  n new target  a ask agent  s search around  Ctrl+K commands  ?  │
 └────────────────────────────────────────────────────────────────────────────┘
