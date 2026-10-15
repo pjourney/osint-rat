@@ -1036,7 +1036,8 @@ fn ingest_file(
         .map_err(user_err)?
         .unwrap_or_default();
     if let Some(kind) = kind {
-        mapping.default_kind = Some(crate::model::EntityKind::parse(kind));
+        mapping.default_kind =
+            Some(crate::query::parse_entity_kind_filter(kind).map_err(user_err)?);
     }
     let origin = path
         .file_name()

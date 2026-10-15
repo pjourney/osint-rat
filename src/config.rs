@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use color_eyre::eyre::{Result, WrapErr};
+use color_eyre::eyre::{Result, WrapErr, bail};
 use serde::{Deserialize, Serialize};
 
 /// Largest second count `Duration::from_secs` can hold (nanoseconds would overflow).
@@ -18,9 +18,18 @@ pub const MAX_WATCH_INTERVAL_SECONDS: u64 = 7 * 24 * 60 * 60;
 /// Builds a timeout/`sleep` duration from untrusted config or CLI seconds.
 ///
 /// Never panics: values above [`MAX_DURATION_SECONDS`] saturate instead of overflowing
-/// the nanosecond conversion inside `Duration::from_secs`.
+/// the nanosecond conversion inside `Duration::from_secs`. Config load rejects those
+/// values before they reach this helper.
 pub fn duration_from_secs(seconds: u64) -> Duration {
     Duration::from_secs(seconds.min(MAX_DURATION_SECONDS))
+}
+
+/// Rejects a `timeout_seconds` field that cannot be represented as a `Duration`.
+pub fn require_timeout_seconds(seconds: u64, field: &str) -> Result<()> {
+    if seconds > MAX_DURATION_SECONDS {
+        bail!("{field} = {seconds} is too large; maximum is {MAX_DURATION_SECONDS} seconds");
+    }
+    Ok(())
 }
 
 pub const DEFAULT_USER_AGENT: &str = concat!(
@@ -539,7 +548,44 @@ impl Config {
 
     pub fn parse(text: &str) -> Result<Config> {
         let config: Config = toml::from_str(text)?;
+        config.validate_timeouts()?;
         Ok(config)
+    }
+
+    fn validate_timeouts(&self) -> Result<()> {
+        require_timeout_seconds(self.agent.timeout_seconds, "agent.timeout_seconds")?;
+        require_timeout_seconds(
+            self.network.request_timeout_seconds,
+            "network.request_timeout_seconds",
+        )?;
+        require_timeout_seconds(
+            self.network.connect_timeout_seconds,
+            "network.connect_timeout_seconds",
+        )?;
+        for (id, profile) in &self.agents {
+            if let Some(seconds) = profile.timeout_seconds {
+                require_timeout_seconds(seconds, &format!("agents.{id}.timeout_seconds"))?;
+            }
+        }
+        for tool in &self.tools.custom {
+            require_timeout_seconds(
+                tool.timeout_seconds,
+                &format!("tools.custom.{}.timeout_seconds", tool.name),
+            )?;
+        }
+        for collector in &self.collectors.external {
+            require_timeout_seconds(
+                collector.timeout_seconds,
+                &format!("collectors.external.{}.timeout_seconds", collector.id),
+            )?;
+        }
+        for connector in &self.collectors.api {
+            require_timeout_seconds(
+                connector.timeout_seconds,
+                &format!("collectors.api.{}.timeout_seconds", connector.id),
+            )?;
+        }
+        Ok(())
     }
 
     /// Writes the configuration. Comments in an existing file are not preserved.
@@ -718,6 +764,17 @@ parser = "hostnames"
         assert_eq!(zero, Duration::from_secs(0));
         let one = duration_from_secs(1);
         assert_eq!(one, Duration::from_secs(1));
+    }
+
+    #[test]
+    fn huge_timeout_seconds_in_config_is_a_user_error() {
+        let error = Config::parse("[agent]\ntimeout_seconds = 18446744073709551615\n")
+            .expect_err("too large");
+        let text = error.to_string();
+        assert!(text.contains("too large"), "{text}");
+        assert!(text.contains("agent.timeout_seconds"), "{text}");
+        require_timeout_seconds(MAX_DURATION_SECONDS, "agent.timeout_seconds").expect("max ok");
+        let _ = require_timeout_seconds(u64::MAX, "agent.timeout_seconds").expect_err("max+");
     }
 
     #[test]

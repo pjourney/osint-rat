@@ -331,6 +331,31 @@ fn objects_kind_typo_is_a_user_error() {
 }
 
 #[test]
+fn ingest_kind_typo_is_a_user_error() {
+    let (dir, config, data) = sandbox();
+    seed_case(&config, &data);
+    let csv = dir.path().join("hosts.csv");
+    std::fs::write(&csv, "host.example.com\n").expect("csv");
+    let output = run(
+        &config,
+        &data,
+        &[
+            "ingest",
+            csv.to_str().expect("utf-8"),
+            "--format",
+            "csv",
+            "--kind",
+            "domian",
+            "--investigation",
+            "Case",
+        ],
+    );
+    assert!(!output.status.success(), "{}", stdout(&output));
+    let err = stderr(&output);
+    assert!(err.contains("unknown entity kind"), "{err}");
+}
+
+#[test]
 fn plain_review_list_uses_ascii_glyphs() {
     let (_dir, config, data) = sandbox();
     seed_pending_review(&config, &data);

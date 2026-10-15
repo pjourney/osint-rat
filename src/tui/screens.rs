@@ -1162,6 +1162,16 @@ fn graph_tree_pad(ascii: bool, last_child: bool) -> &'static str {
     }
 }
 
+fn graph_seen_mark(ascii: bool, seen: bool) -> &'static str {
+    if !seen {
+        ""
+    } else if ascii {
+        " (^ seen)"
+    } else {
+        " (↑ seen)"
+    }
+}
+
 fn graph_tree_node_line(ctx: &GraphTreeCtx<'_>, id: uuid::Uuid, seen: bool) -> Line<'static> {
     let Some(entity) = ctx.workspace.entity(id) else {
         return Line::from("(missing entity)".to_string());
@@ -1172,7 +1182,7 @@ fn graph_tree_node_line(ctx: &GraphTreeCtx<'_>, id: uuid::Uuid, seen: bool) -> L
         " "
     };
     let plus_mark = if ctx.plus.contains(&id) { " +" } else { "" };
-    let seen_mark = if seen { " (↑ seen)" } else { "" };
+    let seen_mark = graph_seen_mark(ctx.theme.glyphs.ascii, seen);
     Line::from(vec![
         Span::styled(cursor.to_string(), ctx.theme.accent),
         Span::raw(format!(
@@ -1229,15 +1239,7 @@ fn graph_tree_edge_line(
         ""
     };
     let plus_mark = if ctx.plus.contains(&child) { " +" } else { "" };
-    let seen_mark = if seen {
-        if ctx.theme.glyphs.ascii {
-            " (^ seen)"
-        } else {
-            " (↑ seen)"
-        }
-    } else {
-        ""
-    };
+    let seen_mark = graph_seen_mark(ctx.theme.glyphs.ascii, seen);
     spans.push(Span::styled(cursor.to_string(), ctx.theme.accent));
     spans.push(Span::raw(format!(
         "{} {}",
@@ -2754,7 +2756,7 @@ fn append_fields(lines: &mut Vec<Line<'static>>, fields: &crate::model::Fields, 
 
 #[cfg(test)]
 mod tests {
-    use super::{field_footnote, source_supplied_field};
+    use super::{field_footnote, graph_seen_mark, source_supplied_field};
     use crate::model::{
         Entity, EntityKind, Fields, Investigation, InvestigationData, Provenance, Source,
         SourceKind, Workspace, now,
@@ -2831,5 +2833,13 @@ mod tests {
             "",
             "unknown fields must not fall back to S1"
         );
+    }
+
+    #[test]
+    fn ascii_graph_seen_mark_is_caret_not_arrow() {
+        assert_eq!(graph_seen_mark(true, true), " (^ seen)");
+        assert_eq!(graph_seen_mark(false, true), " (↑ seen)");
+        assert_eq!(graph_seen_mark(true, false), "");
+        assert_eq!(graph_seen_mark(false, false), "");
     }
 }

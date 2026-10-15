@@ -38,7 +38,13 @@ impl ObservableMapping {
                     mapping.value_column = Some(value.trim().to_string())
                 }
                 "default" | "default_kind" => {
-                    mapping.default_kind = Some(EntityKind::parse(value.trim()));
+                    let kind = EntityKind::parse_known(value.trim()).ok_or_else(|| {
+                        IngestError::new(format!(
+                            "unknown entity kind {:?}; use a built-in kind such as domain, ip, or email",
+                            value.trim()
+                        ))
+                    })?;
+                    mapping.default_kind = Some(kind);
                 }
                 other => {
                     return Err(IngestError::new(format!(
@@ -420,6 +426,14 @@ mod tests {
         assert_eq!(actual.kind_column.as_deref(), Some("type"));
         assert_eq!(actual.value_column.as_deref(), Some("indicator"));
         assert!(ObservableMapping::parse("nope").is_err());
+    }
+
+    #[test]
+    fn mapping_default_kind_rejects_typos() {
+        let error = ObservableMapping::parse("default=domian").expect_err("typo");
+        assert!(error.message.contains("unknown entity kind"), "{error}");
+        let ok = ObservableMapping::parse("default=hostname").expect("host");
+        assert_eq!(ok.default_kind, Some(EntityKind::Hostname));
     }
 
     #[test]

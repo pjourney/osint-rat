@@ -255,7 +255,7 @@ When the object is a resolved canonical, Object View lists **Constituents** (the
 Graph is an edge-labelled tree from the focused node (TUI-first; there is no embedded webview). Nodes are entities. Edges are relationships. The Inspector reuses Object View data for the selected node.
 
 - Press `g`, pick **Graph** on the Rail (`4`), or run the palette command **Graph**. The seed is the current entity (Entities highlight, Object View, or the page's primary entity). If none is focused, the first entity is used. Opening Graph expands **1 hop**.
-- Press `s` or the palette command **Search Around** to expand **2 hops** from the current selection. On an open Graph, those hops **merge** into the tree. From any other screen, Search Around opens Graph at 2 hops.
+- Press `s` or the palette command **Search Around** to expand **2 hops** from the current selection. On an open Graph, those hops **merge** into the tree. From any other screen, Search Around opens Graph at 2 hops. The CLI seed may be an `E-n` short-ref, a UUID, or the entity's unique value (`example.com`).
 - `+` / `-` change hop depth and re-query from the original seed (0–8). `hops` follows the last result's `hops_used`.
 - Press `t` to toggle the **time lens** on Graph, Evidence, or Entities. The facet strip counts the unfiltered set by entity kind, top link types, and provenance. Palette **Previous facet** / **Next facet** / **Apply facet** move and apply a facet; `x` clears filters.
 - Render caps are **200 nodes** and **400 edges**. Crossing either threshold warns and asks for confirm before the first 200 / 400 are drawn. A capped result is labelled in the status line.
@@ -565,7 +565,7 @@ os-int import ./example-corp
 os-int import ./example-corp --rename
 ```
 
-The directory contains `investigation.osint.json` (format `os-int-investigation`, version 4) plus a `files/` tree of the investigation's snapshots, notes artifacts, and reports. Paths inside the manifest are relative. Version-1–3 archives still import (empty `data.resolutions` / `data.events` / `data.audit`; unmarked). Import refuses an archive whose investigation id already exists, unless you pass `--rename`, which assigns a new investigation id, remaps every record UUID (including resolution bags, Events, and audit rows), and copies the files under the new id. `--format geojson` writes a FeatureCollection instead of an archive. `--format stix` writes a STIX 2.1 bundle (see [connectors.md](connectors.md#stix-21)). The JSON fields, ingest batch, and version-bump rules are in [Ontology Exchange Format](ontology-exchange.md). Collaboration and the audit slice: [collaboration.md](collaboration.md).
+The directory contains `investigation.osint.json` (format `os-int-investigation`, version 4) plus a `files/` tree of the investigation's snapshots, notes artifacts, and reports. Paths inside the manifest are relative. Export and import skip symbolic links in that tree instead of following them. Version-1–3 archives still import (empty `data.resolutions` / `data.events` / `data.audit`; unmarked). Import refuses an archive whose investigation id already exists, unless you pass `--rename`, which assigns a new investigation id, remaps every record UUID (including resolution bags, Events, and audit rows), and copies the files under the new id. `--format geojson` writes a FeatureCollection instead of an archive. `--format stix` writes a STIX 2.1 bundle (see [connectors.md](connectors.md#stix-21)). The JSON fields, ingest batch, and version-bump rules are in [Ontology Exchange Format](ontology-exchange.md). Collaboration and the audit slice: [collaboration.md](collaboration.md).
 
 ## HTTP API and scriptable CLI
 
@@ -574,7 +574,7 @@ The directory contains `investigation.osint.json` (format `os-int-investigation`
 ```bash
 os-int get "Example Corp" E-1
 os-int objects "Example Corp" --kind domain
-os-int search-around "Example Corp" E-1 --hops 2
+os-int search-around "Example Corp" example.com --hops 2
 os-int resolve suggest "Example Corp"
 os-int serve --token "$OS_INT_API_TOKEN"
 ```
@@ -608,18 +608,18 @@ os-int [OPTIONS] [COMMAND]
 | `collect <kind> [target]` | Run collectors. `<kind>` may be a target value to guess from |
 | `collect --investigation <name>` | Case to write into. Created when the name is new |
 | `collect --collector <id>` | Run one collector instead of the defaults |
-| `ingest <path> [--format stix\|misp\|csv\|json\|batch]` | Import a file into a case |
+| `ingest <path> [--format stix\|misp\|csv\|json\|batch]` | Import a file into a case. `--kind` / the Kind form field must be a built-in entity kind |
 | `playbook list` | Print bundled playbooks (`--json` supported) |
 | `playbook validate <id-or-file>` | Parse YAML without writing |
 | `playbook run <id-or-file> --investigation <name> --target <seed>` | Run a playbook (`--dry-run` plans only) |
 | `watch --playbook <id-or-file> --investigation <name>` | Re-run collect steps (`--dry-run`, `--once`, `--interval`) |
 | `report <name> [--format markdown\|json] [-o <file>]` | Write a report |
-| `export <name> [-o <dir>] [--format archive\|geojson\|stix]` | Write a portable directory, GeoJSON, or a STIX 2.1 bundle |
+| `export <name> [-o <dir>] [--format archive\|geojson\|stix]` | Write a portable directory, GeoJSON, or a STIX 2.1 bundle. Archive copy skips symbolic links |
 | `geojson <name> [-o <file>]` | Write a GeoJSON FeatureCollection |
 | `cooccur <name> [--window <hours>]` | Print pairs that share an Event, source, or time window (`--json` supported) |
 | `get <name> <ref>` | Object View JSON for `E-n` / `P-n` |
-| `objects <name> [--kind domain]` | Visible entities as JSON |
-| `search-around <name> <seed> [--hops 2]` | Search Around JSON |
+| `objects <name> [--kind domain]` | Visible entities as JSON. Unknown `--kind` values are errors, not an empty list |
+| `search-around <name> <seed> [--hops 2]` | Search Around JSON. `<seed>` is `E-n`, a UUID, or a unique entity value |
 | `resolve suggest\|propose\|merge\|unresolve` | Suggestions stay scored; `propose` is pending; `merge` is an analyst action |
 | `serve [--bind 127.0.0.1:8743]` | Localhost ontology HTTP API |
 | `bench [--sizes 1000,10000,100000]` | Load/query timings for synthetic graphs |
@@ -631,7 +631,7 @@ os-int [OPTIONS] [COMMAND]
 | `config` | Print the resolved config, data, database, and log paths |
 | `theme preview [name\|--all]` | Print cockpit role swatches, a sample strip, and colour-blind ΔE without opening the TUI |
 | `case <name>` | Print the Case home dashboard (targets, glance, NEXT) |
-| `review list <name>` | Print pending Review items |
+| `review list <name>` | Print pending Review items. `--json` includes `short_ref`, `proposal_id`, and `kind` so `review accept` / `reject` can target a row |
 | `review accept\|reject <name> <X-n>` | Decide a proposal by exact `X-n` short-ref or UUID. Requires `--yes` or an interactive `y` |
 | `jobs <name>` | List jobs |
 | `evidence <name>` | List findings and sources |
@@ -717,7 +717,7 @@ max_ingest_bytes = 20971520
 | `ui.scanline` | `false` | Phosphor CRT scanline on alternate rows. Off by default; never encodes data |
 | `ui.editor` | unset | Long-form editor. Then `$VISUAL`, `$EDITOR`, `vi` |
 | `agent.active` | `claude` | Profile id: `claude`, `codex`, or a key under `[agents]` |
-| `agent.timeout_seconds` | `600` | Agent process timeout. `0` is warned about and would never time out |
+| `agent.timeout_seconds` | `600` | Agent process timeout. `0` is warned about and would never time out. Values larger than `Duration` can represent are refused |
 | `agent.max_context_bytes` | `204800` | Largest context pack sent with a question |
 | `agent.history_turns` | `4` | Earlier turns of the same thread included with a follow-up |
 | `agent.program` | unset | When set, this inline profile replaces `active` |
