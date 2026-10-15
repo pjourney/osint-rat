@@ -1,0 +1,24 @@
+ os-int ▸ acme-phish ▸ Entities  u…  ◆ 1 to review  ✓ jobs  agent ◇ Claude Code
+ Rail         │▌ENTITIES
+ 1 Case        KIND  VALUE                                      PROV  SRC   SEEN
+▌2 Entities     DOM  acme-login.com                             ✎●      1     0s
+ 3 Evidence     IP   203.0.113.7                                ●       1     0s
+ 4 Graph
+ 5 Review 1
+ 6 Jobs
+
+
+
+
+
+
+ Inspector · acme-login.com
+TABS  Props  ·Sources·  Notes  History
+SOURCES
+  S1 ●  dns  0s
+     DNS records for acme-login.com
+
+
+
+ Entities. t toggles the time lens. Space marks. m proposes a merge.    0 jobs
+/ filter  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro

@@ -37,4 +37,4 @@
 
 
  1 item(s) waiting. Shift+A then y writes. Enter never writes.    0 jobs
-/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search around  A arm  x reject
+/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search around  Shift+A arm  x reject

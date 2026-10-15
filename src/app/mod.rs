@@ -9,13 +9,15 @@
 
 pub mod action;
 pub mod commands;
+pub mod filter;
 pub mod graph;
 pub mod input;
 pub mod resolution;
 pub mod review;
 pub mod timeline;
 
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -244,14 +246,8 @@ pub enum Overlay {
     },
     /// The same checks `os-int doctor` prints.
     Doctor,
-    /// Actions proposed by one agent run. Shift+A arms; `y` accepts.
-    Proposals {
-        run_id: Uuid,
-        selected: usize,
-        armed: bool,
-    },
-    /// Scored resolution suggestions. Enter proposes; nothing auto-merges.
-    Suggestions { selected: usize },
+    /// Inline `/` filter for the current table. Typing updates the board live.
+    TableFilter { query: Input },
 }
 
 /// Which form [`Overlay::Form`] is editing. The field list is built to match the kind.
@@ -362,6 +358,7 @@ pub struct App {
     pub board_zoomed: bool,
     pub time_lens: bool,
     pub inspector_tab: InspectorTab,
+    pub board_filter: String,
     pub status: String,
     pub dirty: bool,
     pub should_quit: bool,
@@ -369,13 +366,27 @@ pub struct App {
     pub streaming: HashMap<Uuid, String>,
     pub last_error: Option<String>,
     pub pending_editor: Option<EditorSession>,
+    /// Last board row id used to remap selection across filter/sort edits.
+    board_anchor_id: Option<Uuid>,
+    /// Bumped on workspace content changes so BoardListCache cannot outlive the case.
+    workspace_rev: u64,
+    board_list_cache: RefCell<Option<BoardListCache>>,
 }
 
-/// External `$EDITOR` session for long-form page notes.
+struct BoardListCache {
+    key: String,
+    entities: Option<Vec<Uuid>>,
+    evidence: Option<Vec<EvidenceRow>>,
+    jobs: Option<Vec<Uuid>>,
+    tools: Option<Vec<usize>>,
+}
+
+/// External `$EDITOR` session for long-form page or entity notes.
 #[derive(Clone, Debug)]
 pub struct EditorSession {
     pub path: PathBuf,
-    pub page_id: Uuid,
+    pub page_id: Option<Uuid>,
+    pub entity_id: Option<Uuid>,
 }
 
 impl App {
@@ -420,6 +431,7 @@ impl App {
             board_zoomed: false,
             time_lens: false,
             inspector_tab: InspectorTab::Props,
+            board_filter: String::new(),
             status: "Press [?] for help, Ctrl+K for commands.".into(),
             dirty: true,
             should_quit: false,
@@ -427,6 +439,9 @@ impl App {
             streaming: HashMap::new(),
             last_error: None,
             pending_editor: None,
+            board_anchor_id: None,
+            workspace_rev: 0,
+            board_list_cache: RefCell::new(None),
         };
         let _ = app.store.mark_interrupted_jobs();
         app
@@ -479,6 +494,7 @@ impl App {
     pub fn open_investigation(&mut self, id: Uuid) -> Result<()> {
         let data = self.store.load_investigation(id)?;
         self.workspace = Some(Workspace::new(data));
+        self.touch_workspace();
         self.view = View::Overview;
         self.page_id = self
             .workspace
@@ -662,6 +678,7 @@ impl App {
         };
         let data = self.store.load_investigation(id)?;
         self.workspace = Some(Workspace::new(data));
+        self.touch_workspace();
         self.remap_focus_after_resolution();
         self.mark_dirty();
         Ok(())
@@ -671,15 +688,30 @@ impl App {
         if delta.is_empty() {
             return Ok(());
         }
-        match self.workspace.as_mut() {
-            Some(workspace) => {
-                workspace.apply_delta(delta);
-                self.remap_focus_after_resolution();
-                self.mark_dirty();
-                Ok(())
-            }
-            None => self.reload(),
+        if self.workspace.is_none() {
+            return self.reload();
         }
+        if let Some(workspace) = self.workspace.as_mut() {
+            workspace.apply_delta(delta);
+        }
+        self.touch_workspace();
+        self.remap_focus_after_resolution();
+        self.mark_dirty();
+        Ok(())
+    }
+
+    fn touch_workspace(&mut self) {
+        self.workspace_rev = self.workspace_rev.wrapping_add(1);
+        self.clear_board_list_cache();
+    }
+
+    fn clear_board_list_cache(&mut self) {
+        self.board_list_cache.replace(None);
+    }
+
+    fn track_job(&mut self, record: JobRecord) {
+        self.job_records.insert(record.id, record);
+        self.touch_workspace();
     }
 
     fn files(&self) -> Option<InvestigationFiles> {
@@ -717,12 +749,8 @@ impl App {
                     selected: 0,
                 }
             }
-            Action::Search => {
-                self.overlay = Overlay::Search {
-                    query: Input::default(),
-                    selected: 0,
-                }
-            }
+            Action::Search => self.open_search_or_filter(),
+            Action::ClearBoard => self.clear_board(),
             Action::AskAgent => {
                 self.require_open_write()?;
                 self.open_agent_prompt();
@@ -857,12 +885,11 @@ impl App {
             Overlay::Form(_)
             | Overlay::Palette { .. }
             | Overlay::Search { .. }
+            | Overlay::TableFilter { .. }
             | Overlay::AgentPrompt { .. }
             | Overlay::Help
             | Overlay::Text { .. }
-            | Overlay::Doctor
-            | Overlay::Proposals { .. }
-            | Overlay::Suggestions { .. } => {
+            | Overlay::Doctor => {
                 self.overlay = Overlay::None;
             }
         }
@@ -877,6 +904,9 @@ impl App {
             (Pane::Detail, 1) => Pane::Nav,
             _ => self.pane,
         };
+        if self.pane == Pane::Detail && matches!(self.view, View::Entities | View::Evidence) {
+            self.inspector_tab = InspectorTab::Sources;
+        }
     }
 
     fn canonicalize_view(view: View) -> View {
@@ -910,6 +940,105 @@ impl App {
         };
     }
 
+    pub(crate) fn view_uses_table_filter(view: View) -> bool {
+        matches!(
+            view,
+            View::Entities | View::Evidence | View::Jobs | View::Tools
+        )
+    }
+
+    fn open_search_or_filter(&mut self) {
+        if Self::view_uses_table_filter(self.view) && !self.is_time_lens() {
+            self.overlay = Overlay::TableFilter {
+                query: Input::new(self.board_filter.clone()),
+            };
+            self.status = "Filter: kind:ip src:ct prov:ai   Enter apply   x clear".into();
+            return;
+        }
+        self.overlay = Overlay::Search {
+            query: Input::default(),
+            selected: 0,
+        };
+    }
+
+    fn clear_board(&mut self) {
+        let had_error = self.last_error.take();
+        let had_filter = !self.board_filter.is_empty();
+        self.board_filter.clear();
+        if matches!(self.overlay, Overlay::TableFilter { .. }) {
+            self.overlay = Overlay::None;
+        }
+        if self.view == View::Graph {
+            self.clear_graph_filters();
+        } else if self.is_time_lens() {
+            self.clear_timeline_filter();
+        }
+        if had_error.is_some() {
+            self.status = "Error dismissed.".into();
+        } else if had_filter {
+            self.status = "Filter cleared.".into();
+            self.restore_board_selection();
+        }
+    }
+
+    pub fn active_board_filter(&self) -> &str {
+        if let Overlay::TableFilter { query } = &self.overlay {
+            query.value.as_str()
+        } else {
+            self.board_filter.as_str()
+        }
+    }
+
+    pub fn parsed_board_filter(&self) -> filter::TableFilter {
+        filter::TableFilter::parse(self.active_board_filter())
+    }
+
+    pub fn effective_sort(&self) -> Option<(filter::SortKey, bool)> {
+        self.parsed_board_filter().sort
+    }
+
+    fn set_error(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        self.last_error = Some(message.clone());
+        self.status = message;
+    }
+
+    fn select_tool_row(&mut self) {
+        let Some(entry) = self
+            .listed_tool_indices()
+            .get(self.selected)
+            .and_then(|index| self.tools.tools().get(*index))
+            .cloned()
+        else {
+            return;
+        };
+        let name = entry.definition.name.clone();
+        let refused = entry.definition.activity == Activity::Active
+            || entry
+                .problem
+                .as_deref()
+                .is_some_and(|problem| problem.contains("refused"));
+        if refused {
+            let reason = entry
+                .problem
+                .clone()
+                .unwrap_or_else(|| "os-int observes public information only".into());
+            let mark = if self.config.ui.ascii { "no" } else { "⊘" };
+            self.set_error(format!(
+                "{mark} {name}  {}  refused: {reason}",
+                entry.definition.activity.as_str()
+            ));
+            return;
+        }
+        self.overlay = Overlay::Confirm {
+            title: format!("Run {name}"),
+            message: format!(
+                "Run {name}? This writes case data. Press y to confirm. Enter never runs a tool."
+            ),
+            command: format!("run_tool:{name}"),
+        };
+    }
+
     fn switch_view(&mut self, view: View) {
         if self.workspace.is_none() && !matches!(view, View::Welcome | View::Settings | View::Tools)
         {
@@ -921,7 +1050,10 @@ impl App {
         }
         self.review_armed = false;
         self.review_marks.clear();
-        if view != View::Evidence && view != View::Timeline && view != View::Graph {
+        if !matches!(
+            view,
+            View::Evidence | View::Timeline | View::Graph | View::Entities
+        ) {
             self.time_lens = false;
         }
         if !matches!(
@@ -931,6 +1063,13 @@ impl App {
             self.timeline.nearby = false;
             self.timeline.nearby_seed_id = None;
         }
+        self.board_filter.clear();
+        self.board_anchor_id = None;
+        self.inspector_tab = if matches!(view, View::Entities | View::Evidence) {
+            InspectorTab::Sources
+        } else {
+            InspectorTab::Props
+        };
         if view == View::Graph {
             self.open_graph();
             self.pane = Pane::Main;
@@ -969,7 +1108,9 @@ impl App {
             }
             View::Evidence => "Evidence. t toggles the time lens. Enter never writes.".into(),
             View::Graph => "Graph. t toggles the time lens. s Search Around.".into(),
-            View::Entities => "Entities. Space marks. m proposes a merge to Review.".into(),
+            View::Entities => {
+                "Entities. t toggles the time lens. Space marks. m proposes a merge.".into()
+            }
             View::Jobs => "Jobs. Enter opens the selected job. Cancel is in the palette.".into(),
             View::Tools => "Tools. Enter opens a y-confirm. Active tools stay refused.".into(),
             other => format!("{} — Enter opens. It never writes.", other.title()),
@@ -995,16 +1136,6 @@ impl App {
         } else {
             None
         };
-        let proposal_count = if let Overlay::Proposals { run_id, .. } = &self.overlay {
-            Some(self.pending_proposals(*run_id).len().max(1))
-        } else {
-            None
-        };
-        let suggestion_count = if matches!(self.overlay, Overlay::Suggestions { .. }) {
-            Some(self.listed_suggestions().len().max(1))
-        } else {
-            None
-        };
         match &mut self.overlay {
             Overlay::Palette { selected, query } => {
                 let count = filtered(&query.value).len().max(1);
@@ -1018,14 +1149,6 @@ impl App {
                 let count = form.fields.len().max(1);
                 form.index = (form.index as i32 + delta).rem_euclid(count as i32) as usize;
             }
-            Overlay::Proposals { selected, .. } => {
-                let count = proposal_count.unwrap_or(1);
-                *selected = (*selected as i32 + delta).rem_euclid(count as i32) as usize;
-            }
-            Overlay::Suggestions { selected } => {
-                let count = suggestion_count.unwrap_or(1);
-                *selected = (*selected as i32 + delta).rem_euclid(count as i32) as usize;
-            }
             Overlay::Text { scroll, .. } => {
                 *scroll = add_scroll(*scroll, delta);
             }
@@ -1037,6 +1160,7 @@ impl App {
                 self.selected = (self.selected as i32 + delta).rem_euclid(WELCOME_CHOICES) as usize;
             }
             Overlay::None
+            | Overlay::TableFilter { .. }
             | Overlay::AgentPrompt { .. }
             | Overlay::Confirm { .. }
             | Overlay::Doctor => {
@@ -1051,7 +1175,8 @@ impl App {
                 } else if self.view == View::Graph && !self.time_lens {
                     self.move_graph_selection(delta);
                 } else if self.view == View::Timeline
-                    || (self.time_lens && matches!(self.view, View::Evidence | View::Graph))
+                    || (self.time_lens
+                        && matches!(self.view, View::Evidence | View::Graph | View::Entities))
                 {
                     let count = self.timeline_list_len().max(1);
                     self.selected =
@@ -1063,10 +1188,15 @@ impl App {
                         (self.selected as i32 + delta).rem_euclid(count as i32) as usize;
                     self.sync_board_selection();
                 } else {
-                    let count = self.board_len().max(1);
-                    self.selected =
-                        (self.selected as i32 + delta).rem_euclid(count as i32) as usize;
-                    self.sync_board_selection();
+                    let count = self.board_len();
+                    if count == 0 {
+                        self.selected = 0;
+                        self.sync_board_selection();
+                    } else {
+                        self.selected =
+                            (self.selected as i32 + delta).rem_euclid(count as i32) as usize;
+                        self.sync_board_selection();
+                    }
                 }
             }
         }
@@ -1079,11 +1209,12 @@ impl App {
                 .as_ref()
                 .map(|workspace| workspace.data.pages.len())
                 .unwrap_or(0),
+            View::Entities if self.time_lens => self.timeline_list_len(),
             View::Entities => self.listed_entities().len(),
             View::Evidence if self.time_lens => self.timeline_list_len(),
             View::Evidence => self.listed_evidence().len(),
             View::Jobs => self.listed_job_ids().len(),
-            View::Tools => self.tools.tools().len(),
+            View::Tools => self.listed_tool_indices().len(),
             View::Findings => self
                 .workspace
                 .as_ref()
@@ -1118,27 +1249,47 @@ impl App {
                     self.page_id = Some(page.id);
                 }
             }
+            View::Entities if self.time_lens => self.sync_timeline_selection(),
             View::Entities => {
-                if let Some(entity) = self.listed_entities().get(self.selected) {
-                    self.entity_id = Some(entity.id);
+                let selected_id = self
+                    .listed_entities()
+                    .get(self.selected)
+                    .map(|entity| entity.id);
+                if let Some(id) = selected_id {
+                    self.entity_id = Some(id);
+                    self.board_anchor_id = Some(id);
+                } else {
+                    self.entity_id = None;
+                    self.finding_id = None;
+                    self.source_id = None;
                 }
             }
             View::Evidence if self.time_lens => self.sync_timeline_selection(),
-            View::Evidence => match self.listed_evidence().get(self.selected) {
-                Some(EvidenceRow::Finding(id)) => {
-                    self.finding_id = Some(*id);
-                    if let Some(page_id) =
-                        workspace.finding(*id).and_then(|finding| finding.page_id)
-                    {
-                        self.page_id = Some(page_id);
+            View::Evidence => {
+                let row = self.listed_evidence().get(self.selected).copied();
+                match row {
+                    Some(EvidenceRow::Finding(id)) => {
+                        self.finding_id = Some(id);
+                        self.source_id = None;
+                        self.board_anchor_id = Some(id);
+                        if let Some(page_id) =
+                            workspace.finding(id).and_then(|finding| finding.page_id)
+                        {
+                            self.page_id = Some(page_id);
+                        }
+                    }
+                    Some(EvidenceRow::Source(id)) => {
+                        self.source_id = Some(id);
+                        self.finding_id = None;
+                        self.board_anchor_id = Some(id);
+                    }
+                    None => {
+                        self.entity_id = None;
+                        self.finding_id = None;
+                        self.source_id = None;
                     }
                 }
-                Some(EvidenceRow::Source(id)) => {
-                    self.source_id = Some(*id);
-                    self.finding_id = None;
-                }
-                None => {}
-            },
+            }
             View::Review => {
                 if let Some(run_id) = self.selected_review_item().and_then(|item| item.run_id) {
                     self.agent_run_id = Some(run_id);
@@ -1187,9 +1338,10 @@ impl App {
                     self.open_hit(&hit);
                 }
             }
-            Overlay::Suggestions { .. } => {
+            Overlay::TableFilter { query } => {
+                self.board_filter = query.value.clone();
                 self.overlay = Overlay::None;
-                self.open_review_lane();
+                self.restore_board_selection();
             }
             Overlay::None if self.view == View::Welcome => match self.selected {
                 0 => self.open_new()?,
@@ -1232,16 +1384,7 @@ impl App {
             return;
         }
         if self.view == View::Tools {
-            if let Some(entry) = self.tools.tools().get(self.selected) {
-                let name = entry.definition.name.clone();
-                self.overlay = Overlay::Confirm {
-                    title: format!("Run {name}"),
-                    message: format!(
-                        "Run {name}? This writes case data. Press y to confirm. Enter never runs a tool."
-                    ),
-                    command: format!("run_tool:{name}"),
-                };
-            }
+            self.select_tool_row();
             return;
         }
         if self.view == View::Jobs {
@@ -1493,6 +1636,15 @@ impl App {
     }
 
     fn open_edit(&mut self) -> Result<()> {
+        if self.inspector_tab == InspectorTab::Notes
+            && self.workspace.is_some()
+            && let Some(entity) = self
+                .selected_entity_id()
+                .and_then(|id| self.workspace.as_ref()?.entity(id))
+                .cloned()
+        {
+            return self.open_entity_notes_editor(&entity);
+        }
         if self.view == View::Settings {
             let form = FormState::new(
                 FormKind::SettingsAgent,
@@ -1522,7 +1674,7 @@ impl App {
             self.overlay = Overlay::Form(form);
             return Ok(());
         }
-        if matches!(self.view, View::Notes | View::Overview | View::Evidence)
+        if self.workspace.is_some()
             && let Some(page) = self.current_page().cloned()
         {
             return self.open_external_editor(&page);
@@ -1532,6 +1684,8 @@ impl App {
                 FormKind::NewNote,
                 vec![field("Notes", &page.notes, "Markdown")],
             ));
+        } else {
+            self.status = "Select a target first, then press e to edit notes in $EDITOR.".into();
         }
         Ok(())
     }
@@ -1549,7 +1703,28 @@ impl App {
         std::fs::write(&path, &page.notes).wrap_err("could not write notes for editing")?;
         self.pending_editor = Some(EditorSession {
             path,
-            page_id: page.id,
+            page_id: Some(page.id),
+            entity_id: None,
+        });
+        self.status = "Opening editor…".into();
+        Ok(())
+    }
+
+    fn open_entity_notes_editor(&mut self, entity: &crate::model::Entity) -> Result<()> {
+        let files = self.files().ok_or_else(|| eyre!("no investigation"))?;
+        files.ensure().ok();
+        let relative = format!("notes/entity-{}.md", entity.id.simple());
+        let path = files
+            .resolve(&relative)
+            .ok_or_else(|| eyre!("unsafe notes path"))?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).wrap_err("could not create notes directory")?;
+        }
+        std::fs::write(&path, &entity.notes).wrap_err("could not write notes for editing")?;
+        self.pending_editor = Some(EditorSession {
+            path,
+            page_id: None,
+            entity_id: Some(entity.id),
         });
         self.status = "Opening editor…".into();
         Ok(())
@@ -1562,8 +1737,23 @@ impl App {
     pub fn apply_editor_session(&mut self, session: EditorSession) -> Result<()> {
         let notes = std::fs::read_to_string(&session.path).unwrap_or_default();
         let _ = std::fs::remove_file(&session.path);
-        self.store.update_page_notes(session.page_id, &notes)?;
-        if let Some(page) = self.store.load_page(session.page_id)? {
+        if let Some(entity_id) = session.entity_id {
+            let label = self
+                .workspace
+                .as_ref()
+                .and_then(|workspace| workspace.entity(entity_id))
+                .map(|entity| entity.label.clone())
+                .unwrap_or_default();
+            self.store.update_entity(entity_id, &label, &notes)?;
+            self.reload()?;
+            self.status = "Entity notes updated.".into();
+            return Ok(());
+        }
+        let Some(page_id) = session.page_id else {
+            return Ok(());
+        };
+        self.store.update_page_notes(page_id, &notes)?;
+        if let Some(page) = self.store.load_page(page_id)? {
             self.apply_workspace_delta(WorkspaceDelta {
                 pages: vec![page],
                 ..WorkspaceDelta::default()
@@ -2019,6 +2209,9 @@ impl App {
                 query.insert(ch);
                 *selected = 0;
             }
+            Overlay::TableFilter { query } => {
+                query.insert(ch);
+            }
             Overlay::AgentPrompt { input } => input.insert(ch),
             Overlay::Form(form) => {
                 if let Some(field) = form.current_mut() {
@@ -2027,6 +2220,7 @@ impl App {
             }
             _ => {}
         }
+        self.sync_table_filter();
     }
 
     fn backspace(&mut self) {
@@ -2050,7 +2244,9 @@ impl App {
 
     fn with_input(&mut self, op: fn(&mut Input)) {
         match &mut self.overlay {
-            Overlay::Palette { query, .. } | Overlay::Search { query, .. } => op(query),
+            Overlay::Palette { query, .. }
+            | Overlay::Search { query, .. }
+            | Overlay::TableFilter { query } => op(query),
             Overlay::AgentPrompt { input } => op(input),
             Overlay::Form(form) => {
                 if let Some(field) = form.current_mut() {
@@ -2059,6 +2255,51 @@ impl App {
             }
             _ => {}
         }
+        self.sync_table_filter();
+    }
+
+    fn sync_table_filter(&mut self) {
+        if let Overlay::TableFilter { query } = &self.overlay {
+            self.board_filter = query.value.clone();
+            self.restore_board_selection();
+        }
+    }
+
+    fn restore_board_selection(&mut self) {
+        match self.view {
+            View::Entities if !self.time_lens => {
+                let keep = self.board_anchor_id.or(self.entity_id);
+                let ids: Vec<_> = self
+                    .listed_entities()
+                    .iter()
+                    .map(|entity| entity.id)
+                    .collect();
+                self.selected = keep
+                    .and_then(|id| ids.iter().position(|candidate| *candidate == id))
+                    .unwrap_or(0);
+            }
+            View::Evidence if !self.time_lens => {
+                let keep = self.board_anchor_id.or(self.finding_id).or(self.source_id);
+                let rows = self.listed_evidence();
+                self.selected = keep
+                    .and_then(|id| {
+                        rows.iter().position(|row| match row {
+                            EvidenceRow::Finding(row_id) | EvidenceRow::Source(row_id) => {
+                                *row_id == id
+                            }
+                        })
+                    })
+                    .unwrap_or(0);
+            }
+            View::Jobs | View::Tools => {
+                let len = self.board_len();
+                if len == 0 || self.selected >= len {
+                    self.selected = 0;
+                }
+            }
+            _ => {}
+        }
+        self.sync_board_selection();
     }
 
     fn run_default_collectors(&mut self) -> Result<()> {
@@ -2124,7 +2365,7 @@ impl App {
             page_id,
         };
         self.store.insert_job(&mut record)?;
-        self.job_records.insert(job_id, record);
+        self.track_job(record);
         let net_error = self.net.as_ref().err().cloned();
         if collector.needs_network() && net_error.is_some() {
             return Err(eyre!(net_error.unwrap_or_default()));
@@ -2230,7 +2471,7 @@ impl App {
             page_id: self.page_id,
         };
         self.store.insert_job(&mut record)?;
-        self.job_records.insert(job_id, record);
+        self.track_job(record);
         self.streaming.insert(job_id, String::new());
         let profile = self.agent.profile.clone();
         let files = self.files().ok_or_else(|| eyre!("no investigation"))?;
@@ -2376,6 +2617,7 @@ impl App {
                 self.finish_job(job_id, outcome)?;
             }
         }
+        self.touch_workspace();
         self.mark_dirty();
         Ok(())
     }
@@ -2546,26 +2788,6 @@ impl App {
             self.status = format!("{} replied", self.agent.profile.name);
         }
         Ok(())
-    }
-
-    fn proposals_for(&self, run_id: Uuid) -> Vec<Proposal> {
-        self.workspace
-            .as_ref()
-            .map(|workspace| {
-                workspace
-                    .proposals_for_run(run_id)
-                    .into_iter()
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    fn pending_proposals(&self, run_id: Uuid) -> Vec<Proposal> {
-        self.proposals_for(run_id)
-            .into_iter()
-            .filter(|proposal| proposal.status == ProposalStatus::Pending)
-            .collect()
     }
 
     fn decide_proposal(&mut self, status: ProposalStatus) -> Result<()> {
@@ -3082,6 +3304,9 @@ impl App {
 
     /// Findings then sources. The Evidence board is this list unless the time lens is on.
     pub fn listed_evidence(&self) -> Vec<EvidenceRow> {
+        if let Some(rows) = self.cached_board_rows(|cache| cache.evidence.clone()) {
+            return self.revalidate_listed_evidence(rows);
+        }
         let Some(workspace) = self.workspace.as_ref() else {
             return Vec::new();
         };
@@ -3100,11 +3325,27 @@ impl App {
                 .iter()
                 .map(|source| EvidenceRow::Source(source.id)),
         );
+        let filter = self.parsed_board_filter();
+        rows.retain(|row| filter::evidence_row_matches(&filter, *row, workspace));
+        if let Some(sort) = self.effective_sort() {
+            rows.sort_by(|left, right| filter::cmp_evidence(*left, *right, workspace, sort));
+        }
+        self.store_board_rows(|cache| cache.evidence = Some(rows.clone()));
         rows
+    }
+
+    pub fn unfiltered_evidence_count(&self) -> usize {
+        let Some(workspace) = self.workspace.as_ref() else {
+            return 0;
+        };
+        workspace.data.findings.len() + workspace.data.sources.len()
     }
 
     /// Jobs in the order the Jobs pane lists them: persisted rows, then live jobs not reloaded yet.
     pub fn listed_job_ids(&self) -> Vec<Uuid> {
+        if let Some(ids) = self.cached_board_rows(|cache| cache.jobs.clone()) {
+            return self.revalidate_listed_jobs(ids);
+        }
         let mut ids = Vec::new();
         if let Some(workspace) = self.workspace.as_ref() {
             ids.extend(workspace.data.jobs.iter().map(|job| job.id));
@@ -3120,7 +3361,188 @@ impl App {
                 .then_with(|| left.id.cmp(&right.id))
         });
         ids.extend(live.iter().map(|job| job.id));
+        let filter = self.parsed_board_filter();
+        ids.retain(|id| {
+            let live = self.job_records.get(id);
+            let stored = self
+                .workspace
+                .as_ref()
+                .and_then(|workspace| workspace.job(*id));
+            let label = live
+                .map(|job| job.label.as_str())
+                .or_else(|| stored.map(|job| job.label.as_str()))
+                .unwrap_or("");
+            let status = live
+                .map(|job| job.status.as_str())
+                .or_else(|| stored.map(|job| job.status.as_str()))
+                .unwrap_or("");
+            let progress = live
+                .and_then(|job| job.progress.as_deref())
+                .or_else(|| stored.and_then(|job| job.progress.as_deref()))
+                .unwrap_or("");
+            filter.matches_text(&format!("{label} {status} {progress}"))
+        });
+        self.store_board_rows(|cache| cache.jobs = Some(ids.clone()));
         ids
+    }
+
+    pub fn unfiltered_job_count(&self) -> usize {
+        let mut ids = Vec::new();
+        if let Some(workspace) = self.workspace.as_ref() {
+            ids.extend(workspace.data.jobs.iter().map(|job| job.id));
+        }
+        let extra: Vec<_> = self
+            .job_records
+            .keys()
+            .copied()
+            .filter(|id| !ids.contains(id))
+            .collect();
+        ids.extend(extra);
+        ids.len()
+    }
+
+    pub fn listed_tool_indices(&self) -> Vec<usize> {
+        if let Some(indices) = self.cached_board_rows(|cache| cache.tools.clone()) {
+            return self.revalidate_listed_tools(indices);
+        }
+        let filter = self.parsed_board_filter();
+        let indices: Vec<usize> = self
+            .tools
+            .tools()
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| {
+                let hay = format!(
+                    "{} {} {}",
+                    entry.definition.name,
+                    entry.definition.activity.as_str(),
+                    entry.problem.as_deref().unwrap_or("")
+                );
+                filter.matches_text(&hay)
+            })
+            .map(|(index, _)| index)
+            .collect();
+        self.store_board_rows(|cache| cache.tools = Some(indices.clone()));
+        indices
+    }
+
+    fn board_cache_key(&self) -> String {
+        let workspace = self.workspace.as_ref();
+        let tools = self
+            .tools
+            .tools()
+            .iter()
+            .map(|entry| entry.definition.name.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{:?}|{}|{}|{}|{}|{}|{:?}|{}|{:?}",
+            self.view,
+            self.active_board_filter(),
+            self.timeline.nearby,
+            self.time_lens,
+            workspace.map(Workspace::id).unwrap_or(Uuid::nil()),
+            self.workspace_rev,
+            self.timeline.nearby_seed_id,
+            tools,
+            self.effective_sort()
+        )
+    }
+
+    pub(crate) fn revalidate_listed_entity_ids(&self, ids: Vec<Uuid>) -> Vec<Uuid> {
+        let Some(workspace) = self.workspace.as_ref() else {
+            return Vec::new();
+        };
+        let universe: HashSet<Uuid> = if self.timeline.nearby && self.view == View::Entities {
+            self.listed_nearby()
+                .into_iter()
+                .map(|entity| entity.id)
+                .collect()
+        } else {
+            workspace
+                .visible_entities()
+                .into_iter()
+                .map(|entity| entity.id)
+                .collect()
+        };
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        for id in ids {
+            let canonical = workspace.canonical_id(id);
+            if universe.contains(&canonical) && seen.insert(canonical) {
+                out.push(canonical);
+            }
+        }
+        out
+    }
+
+    fn revalidate_listed_evidence(&self, rows: Vec<EvidenceRow>) -> Vec<EvidenceRow> {
+        let Some(workspace) = self.workspace.as_ref() else {
+            return Vec::new();
+        };
+        let mut seen = HashSet::new();
+        rows.into_iter()
+            .filter(|row| {
+                let id = match row {
+                    EvidenceRow::Finding(id) if workspace.finding(*id).is_some() => *id,
+                    EvidenceRow::Source(id) if workspace.source(*id).is_some() => *id,
+                    _ => return false,
+                };
+                seen.insert(id)
+            })
+            .collect()
+    }
+
+    fn revalidate_listed_jobs(&self, ids: Vec<Uuid>) -> Vec<Uuid> {
+        let mut seen = HashSet::new();
+        ids.into_iter()
+            .filter(|id| {
+                let exists = self.job_records.contains_key(id)
+                    || self
+                        .workspace
+                        .as_ref()
+                        .is_some_and(|workspace| workspace.job(*id).is_some());
+                exists && seen.insert(*id)
+            })
+            .collect()
+    }
+
+    fn revalidate_listed_tools(&self, indices: Vec<usize>) -> Vec<usize> {
+        let n = self.tools.tools().len();
+        let mut seen = HashSet::new();
+        indices
+            .into_iter()
+            .filter(|index| *index < n && seen.insert(*index))
+            .collect()
+    }
+
+    fn cached_board_rows<T>(&self, pick: impl Fn(&BoardListCache) -> Option<T>) -> Option<T> {
+        let key = self.board_cache_key();
+        let cache = self.board_list_cache.borrow();
+        let cache = cache.as_ref()?;
+        if cache.key != key {
+            return None;
+        }
+        pick(cache)
+    }
+
+    fn store_board_rows(&self, write: impl FnOnce(&mut BoardListCache)) {
+        let key = self.board_cache_key();
+        let mut cache = self.board_list_cache.borrow_mut();
+        match cache.as_mut() {
+            Some(existing) if existing.key == key => write(existing),
+            _ => {
+                let mut fresh = BoardListCache {
+                    key,
+                    entities: None,
+                    evidence: None,
+                    jobs: None,
+                    tools: None,
+                };
+                write(&mut fresh);
+                *cache = Some(fresh);
+            }
+        }
     }
 
     pub fn cancel_selected_job(&mut self) {
@@ -3144,6 +3566,7 @@ impl App {
             self.overlay,
             Overlay::Palette { .. }
                 | Overlay::Search { .. }
+                | Overlay::TableFilter { .. }
                 | Overlay::AgentPrompt { .. }
                 | Overlay::Form(_)
         )
@@ -3159,28 +3582,22 @@ impl App {
 
     fn spawn_tool(&mut self, name: &str) -> Result<()> {
         let Some(entry) = self.tools.find(name).cloned() else {
-            bail_status(&mut self.status, &format!("unknown tool {name}"));
+            self.set_error(format!("unknown tool {name}"));
             return Ok(());
         };
         if !entry.is_available() {
-            bail_status(
-                &mut self.status,
-                &format!(
-                    "{} is not available: {}",
-                    entry.definition.name,
-                    entry.problem.as_deref().unwrap_or("not found on PATH")
-                ),
-            );
+            self.set_error(format!(
+                "{} is not available: {}",
+                entry.definition.name,
+                entry.problem.as_deref().unwrap_or("not found on PATH")
+            ));
             return Ok(());
         }
         if entry.definition.activity == Activity::Active {
-            bail_status(
-                &mut self.status,
-                &format!(
-                    "{} is an active probe. os-int only runs passive observation and diagnostic tools.",
-                    entry.definition.name
-                ),
-            );
+            self.set_error(format!(
+                "{} is an active probe. os-int only runs passive observation and diagnostic tools.",
+                entry.definition.name
+            ));
             return Ok(());
         }
         self.spawn_tool_inner(entry)
@@ -3229,7 +3646,7 @@ impl App {
             page_id,
         };
         self.store.insert_job(&mut record)?;
-        self.job_records.insert(job_id, record);
+        self.track_job(record);
         let definition = entry.definition.clone();
         self.jobs.spawn(job_id, move |job| async move {
             run_tool(&definition, program, &target, &job)
@@ -3272,14 +3689,14 @@ impl App {
             Ok(()) => {
                 if !matches!(
                     self.overlay,
-                    Overlay::AgentPrompt { .. } | Overlay::Text { .. } | Overlay::Proposals { .. }
+                    Overlay::AgentPrompt { .. } | Overlay::Text { .. }
                 ) {
                     self.overlay = Overlay::None;
                 }
                 Ok(())
             }
             Err(error) => {
-                self.status = error.to_string();
+                self.set_error(error.to_string());
                 Ok(())
             }
         }
@@ -3441,7 +3858,7 @@ impl App {
             page_id,
         };
         self.store.insert_job(&mut record)?;
-        self.job_records.insert(job_id, record);
+        self.track_job(record);
         let net_error = self.net.as_ref().err().cloned();
         if net_error.is_some() {
             return Err(eyre!(net_error.unwrap_or_default()));
@@ -3757,6 +4174,8 @@ fn add_scroll(scroll: u16, delta: i32) -> u16 {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
 
     fn test_app() -> (tempfile::TempDir, App) {
@@ -5676,6 +6095,42 @@ mod tests {
     }
 
     #[test]
+    fn tools_enter_on_an_active_tool_sets_error_and_does_not_enable() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Tools Refused");
+        app.config
+            .tools
+            .custom
+            .push(crate::config::ToolDefinitionConfig {
+                name: "nmap".into(),
+                program: "nmap".into(),
+                args: vec!["{target}".into()],
+                accepts: vec!["ip".into()],
+                description: "active probe".into(),
+                activity: "active".into(),
+                ..Default::default()
+            });
+        app.tools = Arc::new(crate::tools::ToolRegistry::detect(&app.config.tools));
+        app.dispatch(Action::OpenTools).expect("tools");
+        let index = app
+            .tools
+            .tools()
+            .iter()
+            .position(|entry| entry.definition.name == "nmap")
+            .expect("nmap listed");
+        app.pane = Pane::Main;
+        app.selected = index;
+        app.dispatch(Action::Select).expect("enter");
+        assert_eq!(app.overlay, Overlay::None, "no enable or confirm path");
+        let error = app.last_error.as_deref().unwrap_or("");
+        assert!(
+            error.contains("refused") || error.contains("nmap"),
+            "{error}"
+        );
+        assert!(app.job_records.is_empty());
+    }
+
+    #[test]
     fn board_jk_syncs_inspector_entity_and_page() {
         let (_directory, mut app) = test_app();
         create_named_investigation(&mut app, "Inspector Follow");
@@ -5962,6 +6417,109 @@ mod tests {
         assert!(
             restarted.listed_suggestions().is_empty(),
             "rejected suggestions must stay dismissed after restart"
+        );
+    }
+
+    #[test]
+    fn switching_cases_with_identical_counts_shows_the_new_case_rows() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Case Alpha");
+        create_page(&mut app, "alpha.example", "domain", "alpha.example");
+        let alpha_id = app.workspace.as_ref().expect("workspace").id();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        let alpha = app.listed_entities()[0].value.clone();
+
+        create_named_investigation(&mut app, "Case Beta");
+        create_page(&mut app, "beta.example", "domain", "beta.example");
+        app.dispatch(Action::OpenEntities).expect("entities");
+        let beta = app.listed_entities()[0].value.clone();
+        assert_ne!(alpha, beta);
+        assert!(beta.contains("beta"), "{beta}");
+
+        app.open_investigation(alpha_id).expect("switch");
+        app.dispatch(Action::OpenEntities).expect("entities");
+        let restored = app.listed_entities()[0].value.clone();
+        assert_eq!(restored, alpha);
+        assert!(
+            !app.listed_entities()
+                .iter()
+                .any(|entity| entity.value == beta)
+        );
+    }
+
+    #[test]
+    fn accepting_a_merge_does_not_duplicate_board_rows() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Merge Cache");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let domain = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Domain,
+                "example.com",
+                Provenance::Analyst,
+                None,
+            )
+            .expect("domain");
+        let host = app
+            .store
+            .add_entity(
+                investigation_id,
+                crate::model::EntityKind::Hostname,
+                "example.com",
+                Provenance::Collected,
+                None,
+            )
+            .expect("host");
+        app.reload().expect("reload");
+        app.dispatch(Action::OpenEntities).expect("entities");
+        assert_eq!(app.listed_entities().len(), 2);
+
+        let actor = app.store.identity().user_id.clone();
+        app.store
+            .resolve_entities(
+                investigation_id,
+                &[domain, host],
+                domain,
+                "same host",
+                &actor,
+            )
+            .expect("resolve");
+        let data = app
+            .store
+            .load_investigation(investigation_id)
+            .expect("load");
+        app.workspace = Some(Workspace::new(data));
+        let listed = app.listed_entities();
+        let unique: HashSet<_> = listed.iter().map(|entity| entity.id).collect();
+        assert_eq!(listed.len(), unique.len(), "canonical rows must be unique");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, domain);
+    }
+
+    #[test]
+    fn job_status_change_is_reflected_under_a_text_filter() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Job Filter");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let mut job = sample_job("DNS", JobStatus::Queued, None);
+        job.investigation_id = Some(investigation_id);
+        app.store.insert_job(&mut job).expect("store job");
+        app.job_records.insert(job.id, job.clone());
+        app.view = View::Jobs;
+        app.board_filter = "running".into();
+        app.handle_job(JobEvent::Started { job_id: job.id })
+            .expect("started");
+        assert_eq!(app.listed_job_ids(), vec![job.id]);
+        app.handle_job(JobEvent::Finished {
+            job_id: job.id,
+            outcome: JobOutcome::Failed("nope".into()),
+        })
+        .expect("failed");
+        assert!(
+            app.listed_job_ids().is_empty(),
+            "failed jobs must drop out of a running filter"
         );
     }
 }

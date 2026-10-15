@@ -55,7 +55,6 @@ fn map_review_key(key: KeyEvent, armed: bool) -> Option<Action> {
     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
     match key.code {
         KeyCode::Char('A') | KeyCode::Char('a') if shift => Some(Action::Arm),
-        KeyCode::Char('A') => Some(Action::Arm),
         KeyCode::Char('y' | 'Y') => None,
         _ => None,
     }
@@ -66,7 +65,9 @@ fn map_editing_key(key: KeyEvent, overlay: &Overlay) -> Option<Action> {
     match key.code {
         KeyCode::Esc => Some(Action::Cancel),
         KeyCode::Enter => match overlay {
-            Overlay::Palette { .. } | Overlay::Search { .. } => Some(Action::Select),
+            Overlay::Palette { .. } | Overlay::Search { .. } | Overlay::TableFilter { .. } => {
+                Some(Action::Select)
+            }
             _ => None,
         },
         KeyCode::Char('s') if ctrl => Some(Action::Submit),
@@ -177,11 +178,19 @@ mod tests {
         ));
         assert!(matches!(
             map(press(KeyCode::Char('x')), &overlay, View::Graph),
-            Some(Action::GraphClearFilters)
+            Some(Action::ClearBoard)
         ));
         assert!(matches!(
             map(press(KeyCode::Char('t')), &overlay, View::Evidence),
             Some(Action::ToggleTimeLens)
+        ));
+        assert!(matches!(
+            map(press(KeyCode::Char('t')), &overlay, View::Entities),
+            Some(Action::ToggleTimeLens)
+        ));
+        assert!(matches!(
+            map(press(KeyCode::Char('x')), &overlay, View::Entities),
+            Some(Action::ClearBoard)
         ));
         assert!(matches!(
             map(press(KeyCode::Char('z')), &overlay, View::Overview),
@@ -253,16 +262,8 @@ mod tests {
         ));
     }
 
-    fn proposals(armed: bool) -> Overlay {
-        Overlay::Proposals {
-            run_id: uuid::Uuid::nil(),
-            selected: 0,
-            armed,
-        }
-    }
-
     #[test]
-    fn review_and_proposals_require_shift_a_then_y() {
+    fn review_requires_shift_a_then_y() {
         let overlay = Overlay::None;
         assert!(
             map_key(
@@ -297,6 +298,18 @@ mod tests {
             )
             .is_none()
         );
+        assert!(
+            map_key(
+                press(KeyCode::Char('A')),
+                &overlay,
+                View::Review,
+                false,
+                false,
+                false
+            )
+            .is_none_or(|action| !matches!(action, Action::Arm)),
+            "Caps Lock A without Shift must not arm"
+        );
         let shift_a = KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT);
         assert!(matches!(
             map_key(shift_a, &overlay, View::Review, false, false, false),
@@ -327,25 +340,6 @@ mod tests {
         assert!(matches!(
             map(press(KeyCode::Char('x')), &overlay, View::Review),
             Some(Action::Reject)
-        ));
-        let modal = proposals(false);
-        assert!(!matches!(
-            map(press(KeyCode::Enter), &modal, View::Review),
-            Some(Action::Accept)
-        ));
-        assert!(map(press(KeyCode::Char('y')), &modal, View::Review).is_none());
-        assert!(!matches!(
-            map(press(KeyCode::Char('A')), &modal, View::Review),
-            Some(Action::Arm)
-        ));
-        let armed = proposals(true);
-        assert!(!matches!(
-            map(press(KeyCode::Char('y')), &armed, View::Review),
-            Some(Action::Accept)
-        ));
-        assert!(!matches!(
-            map(press(KeyCode::Enter), &armed, View::Review),
-            Some(Action::Accept)
         ));
     }
 

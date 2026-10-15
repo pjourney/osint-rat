@@ -33,8 +33,10 @@ pub enum Action {
     Help,
     /// Open the command palette.
     Palette,
-    /// Open search across pages, entities, findings, sources, artifacts, and agent runs.
+    /// Filter the current table inline, or search the case when the board is not a table.
     Search,
+    /// Clear the table filter, dismiss a persisted error, or clear the time lens / graph filters.
+    ClearBoard,
     /// Prompt for a question to the active agent.
     AskAgent,
     /// Create the record this screen creates: an investigation, a page, or a finding.
@@ -67,7 +69,7 @@ pub enum Action {
     OpenEvidence,
     /// Jump to Review.
     OpenReview,
-    /// Toggle the time lens on Evidence or Graph.
+    /// Toggle the time lens on Evidence, Graph, or Entities.
     ToggleTimeLens,
     /// Zoom the Board (Inspector hidden until any key).
     ToggleZoom,
@@ -113,7 +115,7 @@ pub enum Action {
     Accept,
     /// Reject the highlighted agent proposal.
     Reject,
-    /// Arm Review (or the proposals overlay) so `y` can accept. Shift+A.
+    /// Arm Review so `y` can accept. Shift+A.
     Arm,
     /// Drop the armed accept. Any key other than `y` after `A`.
     Disarm,

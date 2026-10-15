@@ -1,9 +1,9 @@
  os-int ▸ acme-phish ▸ Jobs  unmar…  ◆ 1 to review  ✓ jobs  agent ◇ Claude Code
- Rail         │▌Jobs
- 1 Case        (no jobs yet — press c on a target)
- 2 Entities
- 3 Evidence
- 4 Graph
+ Rail         │▌JOBS
+ 1 Case
+ 2 Entities                ◇  No jobs yet
+ 3 Evidence                Collect on a target to start a job.
+ 4 Graph                   c collect
  5 Review 1
 ▌6 Jobs
 
@@ -21,4 +21,4 @@ Nothing selected.
 
 
  Jobs. Enter opens the selected job. Cancel is in the palette.    0 jobs
-/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro
+/ filter  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro

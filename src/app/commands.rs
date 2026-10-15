@@ -155,7 +155,7 @@ pub const COMMANDS: &[Command] = &[
         "search",
         "Search",
         "/",
-        "Filter the current table, or search the case.",
+        "Filter the current table (`kind:ip src:ct prov:ai sort:-seen`). Search the case on other views.",
         false,
         true,
         false,
@@ -381,7 +381,7 @@ pub const COMMANDS: &[Command] = &[
         "add_note",
         "Add Note",
         "e",
-        "Edit notes in $EDITOR, or open Settings from that screen.",
+        "Edit entity notes from the Inspector Notes tab, or page notes, in $EDITOR. Settings from that screen.",
         true,
         false,
         true,
@@ -608,7 +608,7 @@ pub const COMMANDS: &[Command] = &[
         "unresolve_entity",
         "Unresolve entity",
         "",
-        "Propose unresolving the current bag. Lands in Review.",
+        "Propose unresolving the current bag. Opens a y-confirm overlay. Enter never writes.",
         true,
         false,
         true,
@@ -651,7 +651,7 @@ pub const COMMANDS: &[Command] = &[
         false,
         false,
         false,
-        &[View::Graph, View::Evidence, View::Timeline],
+        &[View::Graph, View::Evidence, View::Timeline, View::Entities],
     ),
     cmd_views(
         "graph_hops_dec",
@@ -661,7 +661,7 @@ pub const COMMANDS: &[Command] = &[
         false,
         false,
         false,
-        &[View::Graph, View::Evidence, View::Timeline],
+        &[View::Graph, View::Evidence, View::Timeline, View::Entities],
     ),
     cmd_views(
         "facet_prev",
@@ -707,17 +707,32 @@ pub const COMMANDS: &[Command] = &[
         "clear_filters",
         "Clear filters",
         "x",
-        "Clear the filter or time lens.",
+        "Clear the filter, error panel, or time lens.",
         false,
         false,
         false,
-        &[View::Graph, View::Evidence, View::Timeline],
+        &[
+            View::Graph,
+            View::Evidence,
+            View::Timeline,
+            View::Entities,
+            View::Jobs,
+            View::Tools,
+            View::Overview,
+            View::Audit,
+            View::Artifacts,
+            View::Pages,
+            View::Sources,
+            View::Findings,
+            View::Notes,
+            View::Object,
+        ],
     ),
     cmd_views(
         "toggle_time_lens",
         "Time lens",
         "t",
-        "Toggle the time lens on Evidence or Graph.",
+        "Toggle the time lens on Evidence, Graph, or Entities.",
         false,
         false,
         false,
@@ -735,8 +750,8 @@ pub const COMMANDS: &[Command] = &[
     cmd_views(
         "arm_review",
         "Select for accept",
-        "A",
-        "Arm the highlighted Review item. y confirms.",
+        "Shift+A",
+        "Arm the highlighted Review item. Requires Shift. y confirms.",
         false,
         false,
         false,
@@ -831,7 +846,7 @@ pub fn help_text() -> String {
     lines.push(String::new());
     lines.push("  Ctrl+C       Quit from anywhere".into());
     lines.push("  Ctrl+K       Command palette (also :)".into());
-    lines.push("  Ctrl+F       Search (same as /)".into());
+    lines.push("  Ctrl+F       Filter the current table, or search the case (same as /)".into());
     lines.push(String::new());
     lines.push("  1 Case  2 Entities  3 Evidence  4 Graph  5 Review  6 Jobs".into());
     lines.push("  Tools, settings, audit, artifacts, ingest, playbooks: palette.".into());
@@ -914,8 +929,7 @@ fn action_for_command(id: &str, view: View) -> Option<Action> {
         "facet_next" => Action::TimelineFacetMove(1),
         "apply_facet" if view == View::Graph => Action::GraphApplyFacet,
         "apply_facet" => Action::TimelineApplyFilter,
-        "clear_filters" if view == View::Graph => Action::GraphClearFilters,
-        "clear_filters" => Action::TimelineClearFilter,
+        "clear_filters" => Action::ClearBoard,
         "mark" => Action::ToggleMergeMark,
         _ => return None,
     })
@@ -996,8 +1010,26 @@ mod tests {
             "help must list x as reject\n{help}"
         );
         assert!(
-            help.contains("Clear the filter or time lens"),
+            help.contains("Clear the filter, error panel, or time lens"),
             "help must list x as clear filters\n{help}"
+        );
+        assert!(
+            help.contains("Filter the current table") && help.contains("Ctrl+F"),
+            "help must distinguish table filter from case search\n{help}"
+        );
+        let unresolve = COMMANDS
+            .iter()
+            .find(|command| command.id == "unresolve_entity")
+            .expect("unresolve_entity");
+        assert!(
+            unresolve.summary.contains("y-confirm"),
+            "{}",
+            unresolve.summary
+        );
+        assert!(
+            !unresolve.summary.contains("Lands in Review"),
+            "{}",
+            unresolve.summary
         );
         for command in COMMANDS.iter().filter(|command| !command.hint.is_empty()) {
             assert!(

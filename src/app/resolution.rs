@@ -15,14 +15,60 @@ pub struct PendingResolve {
 
 impl App {
     pub fn listed_entities(&self) -> Vec<&Entity> {
-        match &self.workspace {
-            Some(workspace) => {
-                if self.timeline.nearby && self.view == View::Entities {
-                    return self.listed_nearby();
-                }
-                workspace.visible_entities()
-            }
-            None => Vec::new(),
+        let ids = self.listed_entity_ids();
+        let Some(workspace) = self.workspace.as_ref() else {
+            return Vec::new();
+        };
+        ids.into_iter()
+            .filter_map(|id| workspace.entity(workspace.canonical_id(id)))
+            .collect()
+    }
+
+    fn listed_entity_ids(&self) -> Vec<Uuid> {
+        if let Some(ids) = self.cached_board_rows(|cache| cache.entities.clone()) {
+            return self.revalidate_listed_entity_ids(ids);
+        }
+        let Some(workspace) = self.workspace.as_ref() else {
+            return Vec::new();
+        };
+        let mut entities = if self.timeline.nearby && self.view == View::Entities {
+            self.listed_nearby()
+        } else {
+            workspace.visible_entities()
+        };
+        let filter = self.parsed_board_filter();
+        entities.retain(|entity| filter.matches_entity(entity, workspace));
+        if let Some(sort) = self.effective_sort() {
+            entities
+                .sort_by(|left, right| super::filter::cmp_entities(left, right, workspace, sort));
+        }
+        let ids: Vec<Uuid> = entities.iter().map(|entity| entity.id).collect();
+        self.store_board_rows(|cache| cache.entities = Some(ids.clone()));
+        ids
+    }
+
+    pub fn selected_entity_id(&self) -> Option<Uuid> {
+        if self.view == View::Entities && !self.time_lens {
+            return self
+                .listed_entities()
+                .get(self.selected)
+                .map(|entity| entity.id);
+        }
+        self.entity_id.filter(|id| {
+            self.workspace
+                .as_ref()
+                .is_some_and(|workspace| workspace.entity(*id).is_some())
+        })
+    }
+
+    pub fn unfiltered_entity_count(&self) -> usize {
+        let Some(workspace) = self.workspace.as_ref() else {
+            return 0;
+        };
+        if self.timeline.nearby && self.view == View::Entities {
+            self.listed_nearby().len()
+        } else {
+            workspace.visible_entities().len()
         }
     }
 

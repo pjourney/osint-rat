@@ -1,0 +1,24 @@
+ os-int ▸ acme-phish ▸ Entities  u…  ◆ 1 to review  ✓ jobs  agent ◇ Claude Code
+ Rail         │▌ENTITIES
+ 1 Case          ✗  unknown tool missing-tool
+▌2 Entities         Check the cause, then Ctrl+K doctor.  x dismiss
+ 3 Evidence    KIND  VALUE                                      PROV  SRC   SEEN
+ 4 Graph        DOM  acme-login.com                             ✎●      1     0s
+ 5 Review 1     IP   203.0.113.7                                ●       1     0s
+ 6 Jobs
+
+
+
+
+
+
+ Inspector · acme-login.com
+TABS  Props  ·Sources·  Notes  History
+SOURCES
+  S1 ●  dns  0s
+     DNS records for acme-login.com
+
+
+
+ unknown tool missing-tool    0 jobs
+/ filter  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro

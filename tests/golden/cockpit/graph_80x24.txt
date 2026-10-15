@@ -14,11 +14,11 @@
                E-1  Domain      hop 0  acme-login.com
  Inspector · acme-login.com
 TABS  ·Props·  Sources  Notes  History
-E-1  acme-login.com
-Domain  ✎ ANL
-Sources  S-1
+DOM  acme-login.com  ✎●
+✎ 1 facts · 1 sources
 
-Relationships
-  --resolves_to-->  E-2 203.0.113.7
+LINKS  (1)
+  ─▶ resolves_to  IP  203.0.113.7
+
  Graph · 1 hop(s) · 2 nodes · 1 edges. s Search Around, +/- hops, t time lens.
 / search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro

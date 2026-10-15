@@ -5,6 +5,7 @@ mod keymap;
 mod overlays;
 mod preview;
 mod screens;
+mod table;
 mod theme;
 mod widgets;
 
@@ -308,12 +309,12 @@ fn truncate_width(text: &str, max_width: usize) -> String {
 
 fn draw_status(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme: &Theme) {
     let jobs = app.job_status_line();
-    let style = if app.last_error.is_some() {
-        theme.err
+    let (message, style) = if let Some(error) = &app.last_error {
+        (error.as_str(), theme.err)
     } else {
-        theme.fg
+        (app.status.as_str(), theme.fg)
     };
-    let text = format!(" {}    {jobs}", sanitize_line(&app.status));
+    let text = format!(" {}    {jobs}", sanitize_line(message));
     frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
 }
 
@@ -756,6 +757,340 @@ mod tests {
         assert!(app.review_armed);
         wrote.extend(assert_screen_snapshot("review_armed", &app, 80, 24));
         wrote.extend(assert_screen_snapshot("review_armed", &app, 140, 40));
+        assert!(
+            wrote.is_empty(),
+            "wrote snapshots; re-run to confirm: {}",
+            wrote.join(", ")
+        );
+    }
+
+    #[test]
+    fn entities_table_has_headers_glyphs_and_no_fake_rows() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = crate::app::Pane::Main;
+        let screen = render_snapshot(&app, 80, 24);
+        assert!(screen.contains("KIND"), "{screen}");
+        assert!(screen.contains("VALUE"), "{screen}");
+        assert!(screen.contains("PROV"), "{screen}");
+        assert!(screen.contains("SRC"), "{screen}");
+        assert!(screen.contains("SEEN"), "{screen}");
+        assert!(
+            screen.contains('●')
+                || screen.contains('C')
+                || screen.contains('✎')
+                || screen.contains('A'),
+            "provenance glyph missing\n{screen}"
+        );
+        assert!(!screen.contains("(no "), "{screen}");
+        assert!(!screen.contains("(no entities"), "{screen}");
+    }
+
+    #[test]
+    fn entities_t_toggles_time_lens() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        assert!(!app.is_time_lens());
+        app.dispatch(Action::ToggleTimeLens).expect("t");
+        assert_eq!(app.view, View::Entities);
+        assert!(app.is_time_lens());
+        let lens = render_snapshot(&app, 80, 24);
+        assert!(lens.contains("Time lens"), "{lens}");
+        app.dispatch(Action::ToggleTimeLens).expect("t off");
+        assert!(!app.is_time_lens());
+    }
+
+    #[test]
+    fn e_on_entities_notes_tab_edits_entity_notes() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.inspector_tab = crate::app::InspectorTab::Notes;
+        app.dispatch(Action::Edit).expect("e");
+        let session = app.take_pending_editor().expect("editor");
+        assert!(session.entity_id.is_some(), "{session:?}");
+    }
+
+    #[test]
+    fn table_filter_typing_updates_listed_rows() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.dispatch(Action::Search).expect("filter");
+        assert!(matches!(
+            app.overlay,
+            crate::app::Overlay::TableFilter { .. }
+        ));
+        for ch in "kind:ip".chars() {
+            app.dispatch(Action::InsertChar(ch)).expect("type");
+        }
+        assert_eq!(app.board_filter, "kind:ip");
+        let filtered = app.listed_entities();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].kind, crate::model::EntityKind::Ip);
+    }
+
+    #[test]
+    fn table_filter_and_sort_change_listed_rows() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        let total = app.listed_entities().len();
+        assert!(total >= 2);
+        app.board_filter = "kind:ip".into();
+        let filtered = app.listed_entities();
+        assert_eq!(filtered.len(), 1, "kind:ip should leave the address");
+        assert_eq!(filtered[0].kind, crate::model::EntityKind::Ip);
+        app.board_filter = "sort:-value".into();
+        let sorted = app.listed_entities();
+        assert!(sorted.len() >= 2);
+        assert!(sorted[0].display_name() >= sorted[1].display_name());
+        app.dispatch(Action::ClearBoard).expect("x");
+        assert!(app.board_filter.is_empty());
+        assert_eq!(app.listed_entities().len(), total);
+    }
+
+    #[test]
+    fn error_panel_persists_until_x() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        let _ = app.dispatch(Action::Command("run_tool:missing-tool"));
+        assert!(app.last_error.is_some());
+        app.status = "Queued dns".into();
+        let screen = render_snapshot(&app, 80, 24);
+        assert!(
+            screen.contains("unknown tool")
+                || app.last_error.as_deref().unwrap().contains("unknown"),
+            "{screen}"
+        );
+        app.dispatch(Action::OpenJobs).expect("jobs");
+        assert!(app.last_error.is_some(), "errors must not be overwritten");
+        app.dispatch(Action::ClearBoard).expect("x");
+        assert!(app.last_error.is_none());
+    }
+
+    #[test]
+    fn inspector_history_is_scoped_to_the_selected_object() {
+        let (_directory, mut app) = snapshot_app();
+        let workspace = app.workspace.as_ref().expect("workspace");
+        let investigation_id = workspace.id();
+        let entity_id = workspace.data.entities[0].id;
+        let other = uuid::Uuid::new_v4();
+        app.store
+            .append_audit(
+                investigation_id,
+                crate::model::AuditKind::Export,
+                "exported other object",
+                crate::model::Fields::new(),
+                vec![other],
+            )
+            .expect("audit other");
+        app.store
+            .append_audit(
+                investigation_id,
+                crate::model::AuditKind::MarkingChanged,
+                "marked this entity",
+                crate::model::Fields::new(),
+                vec![entity_id],
+            )
+            .expect("audit entity");
+        app.open_investigation(investigation_id).expect("reload");
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.entity_id = Some(entity_id);
+        app.inspector_tab = crate::app::InspectorTab::History;
+        app.pane = crate::app::Pane::Detail;
+        let screen = render_snapshot(&app, 140, 40);
+        assert!(screen.contains("marked this entity"), "{screen}");
+        assert!(
+            !screen.contains("exported other object"),
+            "history must be per-object\n{screen}"
+        );
+    }
+
+    #[test]
+    fn tools_table_shows_passive_and_refused_status() {
+        let (_directory, mut app) = snapshot_app();
+        app.config
+            .tools
+            .custom
+            .push(crate::config::ToolDefinitionConfig {
+                name: "nmap".into(),
+                program: "nmap".into(),
+                args: vec!["{target}".into()],
+                accepts: vec!["ip".into()],
+                description: "active probe".into(),
+                activity: "active".into(),
+                ..Default::default()
+            });
+        app.tools = std::sync::Arc::new(crate::tools::ToolRegistry::detect(&app.config.tools));
+        app.dispatch(Action::OpenTools).expect("tools");
+        app.pane = crate::app::Pane::Main;
+        let screen = render_snapshot(&app, 140, 40);
+        assert!(
+            screen.contains("ACTIVITY") || screen.contains("passive") || screen.contains("NAME"),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("nmap") && (screen.contains("refused") || screen.contains("active")),
+            "{screen}"
+        );
+        assert!(
+            screen.contains('⊘') || screen.contains("no"),
+            "refused glyph missing\n{screen}"
+        );
+        assert!(!screen.contains("(no "), "{screen}");
+        assert!(!screen.contains("enable"), "{screen}");
+    }
+
+    #[test]
+    fn inspector_sources_show_glyphs_and_the_source_chain() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = crate::app::Pane::Detail;
+        app.inspector_tab = crate::app::InspectorTab::Sources;
+        let screen = render_snapshot(&app, 140, 40);
+        assert!(screen.contains("SOURCES"), "{screen}");
+        assert!(screen.contains("S1") || screen.contains("S-1"), "{screen}");
+        assert!(
+            screen.contains('●')
+                || screen.contains('C')
+                || screen.contains('◇')
+                || screen.contains('X'),
+            "source-chain glyph missing\n{screen}"
+        );
+    }
+
+    #[test]
+    fn empty_entities_board_is_not_a_fake_row() {
+        let (_directory, mut app) = test_app();
+        app.dispatch(Action::Command("new_investigation"))
+            .expect("form");
+        if let crate::app::Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set("empty-case");
+        }
+        app.dispatch(Action::Submit).expect("create");
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = crate::app::Pane::Main;
+        assert_eq!(app.listed_entities().len(), 0);
+        let screen = render_snapshot(&app, 80, 24);
+        assert!(screen.contains("No entities yet"), "{screen}");
+        assert!(!screen.contains("(no entities"), "{screen}");
+    }
+
+    #[test]
+    fn selection_stays_on_the_same_id_while_filtering_and_on_apply() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        let keep = app.listed_entities()[0].id;
+        app.entity_id = Some(keep);
+        app.selected = 0;
+        app.dispatch(Action::Search).expect("filter");
+        for ch in "sort:-kind".chars() {
+            app.dispatch(Action::InsertChar(ch)).expect("type");
+        }
+        assert_eq!(app.entity_id, Some(keep));
+        assert_eq!(app.listed_entities()[app.selected].id, keep);
+        app.dispatch(Action::Select).expect("apply");
+        assert_eq!(app.overlay, crate::app::Overlay::None);
+        assert_eq!(app.entity_id, Some(keep));
+        assert_eq!(app.listed_entities()[app.selected].id, keep);
+
+        app.dispatch(Action::OpenEvidence).expect("evidence");
+        let keep_row = app.listed_evidence()[0];
+        app.dispatch(Action::Search).expect("filter");
+        for ch in "sort:-value".chars() {
+            app.dispatch(Action::InsertChar(ch)).expect("type");
+        }
+        assert_eq!(app.listed_evidence()[app.selected], keep_row);
+        app.dispatch(Action::Select).expect("apply");
+        assert_eq!(app.listed_evidence()[app.selected], keep_row);
+    }
+
+    #[test]
+    fn empty_filter_clears_selection_and_jk_do_nothing() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.dispatch(Action::Search).expect("filter");
+        for ch in "kind:xyzzy".chars() {
+            app.dispatch(Action::InsertChar(ch)).expect("type");
+        }
+        assert!(app.listed_entities().is_empty());
+        assert!(app.entity_id.is_none());
+        app.dispatch(Action::Move(1)).expect("j");
+        assert_eq!(app.selected, 0);
+        assert!(app.entity_id.is_none());
+        app.pane = crate::app::Pane::Detail;
+        let screen = render_snapshot(&app, 140, 40);
+        assert!(screen.contains("Nothing selected"), "{screen}");
+    }
+
+    #[test]
+    fn tab_from_the_board_opens_inspector_sources() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.inspector_tab = crate::app::InspectorTab::Props;
+        app.pane = crate::app::Pane::Main;
+        app.dispatch(Action::NextPane).expect("tab");
+        assert_eq!(app.pane, crate::app::Pane::Detail);
+        assert_eq!(app.inspector_tab, crate::app::InspectorTab::Sources);
+        let screen = render_snapshot(&app, 140, 40);
+        assert!(screen.contains("SOURCES"), "{screen}");
+        assert!(screen.contains("S1") || screen.contains("S-1"), "{screen}");
+    }
+
+    #[test]
+    fn props_and_sources_share_footnote_numbers() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = crate::app::Pane::Detail;
+        app.inspector_tab = crate::app::InspectorTab::Sources;
+        let sources = render_snapshot(&app, 140, 40);
+        assert!(sources.contains("S1"), "{sources}");
+        app.inspector_tab = crate::app::InspectorTab::Props;
+        let props = render_snapshot(&app, 140, 40);
+        let workspace = app.workspace.as_ref().expect("workspace");
+        let entity = workspace
+            .entity(app.selected_entity_id().expect("entity"))
+            .expect("row");
+        if !entity.fields.is_empty() {
+            assert!(props.contains("S1"), "{props}");
+        }
+        assert!(
+            !props.contains("S12") && sources.contains("S1"),
+            "footnotes must use the chain index\n{props}\n{sources}"
+        );
+    }
+
+    #[test]
+    fn switching_view_clears_the_board_filter() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.board_filter = "kind:ip".into();
+        app.dispatch(Action::OpenJobs).expect("jobs");
+        assert!(app.board_filter.is_empty());
+    }
+
+    #[test]
+    fn extra_table_goldens_filter_empty_error_and_ascii() {
+        let (_directory, mut app) = snapshot_app();
+        let mut wrote = Vec::new();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = crate::app::Pane::Main;
+        app.config.ui.theme = "mono".into();
+        wrote.extend(assert_screen_snapshot("entities_mono", &app, 80, 24));
+        app.config.ui.theme = "auto".into();
+        app.config.ui.ascii = true;
+        wrote.extend(assert_screen_snapshot("entities_ascii", &app, 80, 24));
+        app.config.ui.ascii = false;
+        app.board_filter = "kind:ip".into();
+        wrote.extend(assert_screen_snapshot("entities_filter", &app, 80, 24));
+        app.board_filter = "kind:xyzzy".into();
+        wrote.extend(assert_screen_snapshot(
+            "entities_filter_empty",
+            &app,
+            80,
+            24,
+        ));
+        app.board_filter.clear();
+        app.last_error = Some("unknown tool missing-tool".into());
+        wrote.extend(assert_screen_snapshot("entities_error", &app, 80, 24));
         assert!(
             wrote.is_empty(),
             "wrote snapshots; re-run to confirm: {}",

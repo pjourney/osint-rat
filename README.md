@@ -191,11 +191,11 @@ The screen is **Rail**, **Board**, and **Inspector**. `Tab` / `h` `l` move betwe
 | `q` | Quit, or close an overlay |
 | `Esc` | Back, or close an overlay |
 | `Ctrl+C` | Quit from anywhere |
-| `/` or `Ctrl+F` | Filter the current table, or search the case |
+| `/` or `Ctrl+F` | Filter the current table on Entities, Evidence, Jobs, and Tools; search the case elsewhere |
 | `Ctrl+K` or `:` | Command palette |
 | `a` | Ask the active agent. Results land in Review |
 | `n` | New investigation, target, or finding, depending on the screen |
-| `e` | Edit the current page notes in `$EDITOR` |
+| `e` | Edit entity notes from the Inspector Notes tab, or page notes, in `$EDITOR` |
 | `c` | Collect on the selected target (passive collectors only) |
 | `g` | Graph: entities as nodes, relationships as edges |
 | `s` | Search Around from the current selection |
