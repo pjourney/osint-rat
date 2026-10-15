@@ -168,13 +168,18 @@ pub fn loading_state_spin(
     theme: &Theme,
     spin: &str,
 ) -> Vec<Line<'static>> {
+    let bar = if theme.glyphs.ascii {
+        "  ...................."
+    } else {
+        "  ░░░░░░░░░░░░░░░░░░░░"
+    };
     vec![
         Line::from(Span::styled(
             format!("  {spin} {job_ref}  {label}"),
             theme.muted,
         )),
-        Line::from(Span::styled("  ░░░░░░░░░░░░░░░░░░░░", theme.muted)),
-        Line::from(Span::styled("  ░░░░░░░░░░░░░░░░░░░░", theme.muted)),
+        Line::from(Span::styled(bar, theme.muted)),
+        Line::from(Span::styled(bar, theme.muted)),
     ]
 }
 
@@ -287,5 +292,24 @@ mod tests {
             false,
         );
         assert_eq!(rule_span(&unicode).content.as_ref(), "│");
+    }
+
+    #[test]
+    fn ascii_loading_skeleton_does_not_use_shade_blocks() {
+        let ascii = Theme::build(
+            ThemeName::Mono,
+            DetectedDepth {
+                depth: ColorDepth::None,
+                reason: "test".into(),
+            },
+            true,
+        );
+        let lines = super::loading_state("J-1", "dns", &ascii);
+        let text: String = lines
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|span| span.content.as_ref()))
+            .collect();
+        assert!(!text.contains('░'), "{text}");
+        assert!(text.contains("..."), "{text}");
     }
 }

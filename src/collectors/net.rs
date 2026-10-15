@@ -8,7 +8,7 @@ use reqwest::header::{ACCEPT, HeaderMap, LOCATION};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
-use crate::config::NetworkConfig;
+use crate::config::{NetworkConfig, duration_from_secs};
 use crate::model::target::is_non_public_ip;
 use crate::sanitize::sanitize_line;
 
@@ -43,11 +43,11 @@ impl std::fmt::Debug for NetContext {
 
 impl NetContext {
     pub fn new(config: &NetworkConfig) -> Result<Self, String> {
-        let request_timeout = Duration::from_secs(config.request_timeout_seconds.max(1));
+        let request_timeout = duration_from_secs(config.request_timeout_seconds.max(1));
         let mut builder = reqwest::Client::builder()
             .user_agent(config.user_agent.clone())
             .timeout(request_timeout)
-            .connect_timeout(Duration::from_secs(config.connect_timeout_seconds.max(1)))
+            .connect_timeout(duration_from_secs(config.connect_timeout_seconds.max(1)))
             .redirect(reqwest::redirect::Policy::none());
         let proxy = config
             .proxy

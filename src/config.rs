@@ -5,9 +5,23 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use color_eyre::eyre::{Result, WrapErr};
 use serde::{Deserialize, Serialize};
+
+/// Largest second count `Duration::from_secs` can hold (nanoseconds would overflow).
+pub const MAX_DURATION_SECONDS: u64 = u64::MAX / 1_000_000_000;
+/// Longest watch loop interval the CLI accepts (7 days). Wider values error.
+pub const MAX_WATCH_INTERVAL_SECONDS: u64 = 7 * 24 * 60 * 60;
+
+/// Builds a timeout/`sleep` duration from untrusted config or CLI seconds.
+///
+/// Never panics: values above [`MAX_DURATION_SECONDS`] saturate instead of overflowing
+/// the nanosecond conversion inside `Duration::from_secs`.
+pub fn duration_from_secs(seconds: u64) -> Duration {
+    Duration::from_secs(seconds.min(MAX_DURATION_SECONDS))
+}
 
 pub const DEFAULT_USER_AGENT: &str = concat!(
     "os-int/",
@@ -694,6 +708,16 @@ parser = "hostnames"
     fn invalid_config_reports_error() {
         let input = "[network]\nrequest_timeout_seconds = \"soon\"\n";
         assert!(Config::parse(input).is_err());
+    }
+
+    #[test]
+    fn huge_timeout_seconds_do_not_panic_duration() {
+        let actual = duration_from_secs(u64::MAX);
+        assert_eq!(actual, Duration::from_secs(MAX_DURATION_SECONDS));
+        let zero = duration_from_secs(0);
+        assert_eq!(zero, Duration::from_secs(0));
+        let one = duration_from_secs(1);
+        assert_eq!(one, Duration::from_secs(1));
     }
 
     #[test]

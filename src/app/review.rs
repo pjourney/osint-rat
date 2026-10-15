@@ -215,7 +215,10 @@ impl App {
         {
             self.selected = index;
         }
-        self.status = format!("Agent run {reference} — transcript in Inspector.");
+        self.status = format!(
+            "Agent run {reference} {} transcript in Inspector.",
+            crate::tui::chrome_dash(self.config.ui.ascii)
+        );
     }
 
     pub fn confirm_accept_text(&self) -> String {
@@ -298,7 +301,7 @@ fn review_item_from_merge(
         .entity(pending.canonical_id)
         .map(|entity| format!("{} {}", entity.short_ref(), entity.display_name()))
         .unwrap_or_else(|| pending.canonical_id.to_string());
-    let _ = ascii;
+    let approx = if ascii { "~" } else { "≈" };
     ReviewItem {
         kind: ReviewKind::Merge,
         proposal_id: None,
@@ -306,7 +309,7 @@ fn review_item_from_merge(
         merge: Some(pending.clone()),
         short_ref: None,
         title: format!("Merge {}", labels.join(" + ")),
-        group: format!("≈ {rule}"),
+        group: format!("{approx} {rule}"),
         preview: vec![
             "+ Resolution bag".into(),
             format!("  canonical  {canonical}"),
@@ -378,21 +381,27 @@ fn confirm_status(items: &[ReviewItem], ascii: bool) -> String {
     match (items.len(), ai, analyst) {
         (1, 1, _) => {
             format!(
-                "Armed — accept 1 AI item. It keeps {mark} agent provenance. y confirm. Any other key cancels."
+                "Armed {} accept 1 AI item. It keeps {mark} agent provenance. y confirm. Any other key cancels.",
+                crate::tui::chrome_dash(ascii)
             )
         }
         (1, _, 1) => {
-            "Armed — accept 1 analyst item. It keeps analyst provenance. y confirm. Any other key cancels."
-                .into()
+            format!(
+                "Armed {} accept 1 analyst item. It keeps analyst provenance. y confirm. Any other key cancels.",
+                crate::tui::chrome_dash(ascii)
+            )
         }
         (count, ai, 0) if ai == count => format!(
-            "Armed — accept {count} AI item(s). They keep {mark} agent provenance. y confirm. Any other key cancels."
+            "Armed {} accept {count} AI item(s). They keep {mark} agent provenance. y confirm. Any other key cancels.",
+            crate::tui::chrome_dash(ascii)
         ),
         (count, 0, analyst) if analyst == count => format!(
-            "Armed — accept {count} analyst item(s). They keep analyst provenance. y confirm. Any other key cancels."
+            "Armed {} accept {count} analyst item(s). They keep analyst provenance. y confirm. Any other key cancels.",
+            crate::tui::chrome_dash(ascii)
         ),
         (count, ai, analyst) => format!(
-            "Armed — accept {count} item(s): {ai} AI keep {mark}, {analyst} analyst. y confirm. Any other key cancels."
+            "Armed {} accept {count} item(s): {ai} AI keep {mark}, {analyst} analyst. y confirm. Any other key cancels.",
+            crate::tui::chrome_dash(ascii)
         ),
     }
 }
@@ -597,5 +606,45 @@ mod tests {
         );
         assert!(!ten.matches_reference("X"));
         assert!(one.matches_reference(&one.proposal_id.unwrap().to_string()));
+    }
+
+    #[test]
+    fn ascii_confirm_copy_has_no_em_dash_or_middle_dot() {
+        let one = item("X-1", uuid::Uuid::new_v4());
+        let status = super::confirm_status(std::slice::from_ref(&one), true);
+        let bar = super::confirm_bar(&[one], true);
+        for text in [&status, &bar] {
+            assert!(!text.contains('—'), "{text}");
+            assert!(!text.contains('·'), "{text}");
+            assert!(!text.contains('◆'), "{text}");
+        }
+        assert!(status.contains("Armed -"), "{status}");
+        assert!(bar.contains('*'), "{bar}");
+    }
+
+    #[test]
+    fn ascii_merge_group_does_not_use_almost_equal() {
+        let pending = crate::app::PendingResolve {
+            entity_ids: vec![uuid::Uuid::new_v4(), uuid::Uuid::new_v4()],
+            canonical_id: uuid::Uuid::new_v4(),
+            reason: "same value".into(),
+        };
+        let timestamp = crate::model::now();
+        let workspace = crate::model::Workspace::new(crate::model::InvestigationData::empty(
+            crate::model::Investigation {
+                id: uuid::Uuid::new_v4(),
+                name: "case".into(),
+                description: String::new(),
+                tags: Vec::new(),
+                marking: crate::model::Marking::Unmarked,
+                created_at: timestamp,
+                updated_at: timestamp,
+            },
+        ));
+        let item = super::review_item_from_merge(&workspace, &pending, "same_value", true);
+        assert!(!item.group.contains('≈'), "{}", item.group);
+        assert!(item.group.starts_with("~ "), "{}", item.group);
+        let unicode = super::review_item_from_merge(&workspace, &pending, "same_value", false);
+        assert!(unicode.group.starts_with("≈ "), "{}", unicode.group);
     }
 }

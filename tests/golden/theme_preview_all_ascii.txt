@@ -28,7 +28,7 @@ sample (80×12)
 --------------------------------------------------------------------------------
 >Case    │KIND VALUE            PROV SRC            >Inspector
  Entities│DOM acme-login.com    C    6              DOM acme-login.com
- Evidence│IP  203.0.113.7       X    3              C 14 facts · 6 sources
+ Evidence│IP  203.0.113.7       X    3              C 14 facts | 6 sources
  Graph   │*? Finding: phishing host                 Will write
 >Review 3│Accept 1 AI finding? It will keep agent pr+ Finding  * AI
  Jobs    │
@@ -70,7 +70,7 @@ sample (80×12)
 --------------------------------------------------------------------------------
 >Case    │KIND VALUE            PROV SRC            >Inspector
  Entities│DOM acme-login.com    C    6              DOM acme-login.com
- Evidence│IP  203.0.113.7       X    3              C 14 facts · 6 sources
+ Evidence│IP  203.0.113.7       X    3              C 14 facts | 6 sources
  Graph   │*? Finding: phishing host                 Will write
 >Review 3│Accept 1 AI finding? It will keep agent pr+ Finding  * AI
  Jobs    │
@@ -90,29 +90,29 @@ resolved: Mono
 depth: none (mono theme)
 
 role     hex       256 16           vs bg  vs panel
-bg       —           — default          —         —
-panel    —           — default          —         —
-fg       —           — default          —         —
-muted    —           — default          —         —
-rule     —           — default          —         —
-accent   —           — default          —         —
-ok       —           — default          —         —
-warn     —           — default          —         —
-err      —           — default          —         —
-col      —           — default          —         —
-ext      —           — default          —         —
-anl      —           — default          —         —
-ai       —           — default          —         —
-heat0    —           — default          —         —
-heat1    —           — default          —         —
-heat2    —           — default          —         —
-heat3    —           — default          —         —
+bg       -           - default          -         -
+panel    -           - default          -         -
+fg       -           - default          -         -
+muted    -           - default          -         -
+rule     -           - default          -         -
+accent   -           - default          -         -
+ok       -           - default          -         -
+warn     -           - default          -         -
+err      -           - default          -         -
+col      -           - default          -         -
+ext      -           - default          -         -
+anl      -           - default          -         -
+ai       -           - default          -         -
+heat0    -           - default          -         -
+heat1    -           - default          -         -
+heat2    -           - default          -         -
+heat3    -           - default          -         -
 
 sample (80×12)
 --------------------------------------------------------------------------------
 >Case    │KIND VALUE            PROV SRC            >Inspector
  Entities│DOM acme-login.com    C    6              DOM acme-login.com
- Evidence│IP  203.0.113.7       X    3              C 14 facts · 6 sources
+ Evidence│IP  203.0.113.7       X    3              C 14 facts | 6 sources
  Graph   │*? Finding: phishing host                 Will write
 >Review 3│Accept 1 AI finding? It will keep agent pr+ Finding  * AI
  Jobs    │
@@ -150,7 +150,7 @@ sample (80×12)
 --------------------------------------------------------------------------------
 >Case    │KIND VALUE            PROV SRC            >Inspector
  Entities│DOM acme-login.com    C    6              DOM acme-login.com
- Evidence│IP  203.0.113.7       X    3              C 14 facts · 6 sources
+ Evidence│IP  203.0.113.7       X    3              C 14 facts | 6 sources
  Graph   │*? Finding: phishing host                 Will write
 >Review 3│Accept 1 AI finding? It will keep agent pr+ Finding  * AI
  Jobs    │
@@ -192,7 +192,7 @@ sample (80×12)
 --------------------------------------------------------------------------------
 >Case    │KIND VALUE            PROV SRC            >Inspector
  Entities│DOM acme-login.com    C    6              DOM acme-login.com
- Evidence│IP  203.0.113.7       X    3              C 14 facts · 6 sources
+ Evidence│IP  203.0.113.7       X    3              C 14 facts | 6 sources
  Graph   │*? Finding: phishing host                 Will write
 >Review 3│Accept 1 AI finding? It will keep agent pr+ Finding  * AI
  Jobs    │

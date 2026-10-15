@@ -2417,3 +2417,43 @@ fn concurrent_reopen_does_not_lock_after_catalog_exists() {
         second.join().expect("second thread").expect("second open");
     });
 }
+
+fn sqlite_busy() -> rusqlite::Error {
+    rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(5),
+        Some("database is locked".into()),
+    )
+}
+
+#[test]
+fn with_busy_retry_does_not_stack_sleeps_on_busy_timeout() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    let calls = AtomicU32::new(0);
+    let started = std::time::Instant::now();
+    let result: rusqlite::Result<()> = super::with_busy_retry(|| {
+        calls.fetch_add(1, Ordering::SeqCst);
+        Err(sqlite_busy())
+    });
+    assert!(result.is_err(), "busy should surface as an error");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "connection already waited BUSY_TIMEOUT_MS; at most one extra attempt"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(200),
+        "must not sleep-retry on top of the 30s SQLite busy timeout"
+    );
+}
+
+#[test]
+fn with_busy_retry_returns_ok_without_extra_attempt() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    let calls = AtomicU32::new(0);
+    let result = super::with_busy_retry(|| {
+        calls.fetch_add(1, Ordering::SeqCst);
+        Ok(7u8)
+    });
+    assert_eq!(result.expect("ok"), 7);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}

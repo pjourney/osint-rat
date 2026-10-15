@@ -141,7 +141,7 @@ impl App {
         }
     }
 
-    pub fn case_target_status_label(target: &CaseTarget) -> String {
+    pub fn case_target_status_label(target: &CaseTarget, ascii: bool) -> String {
         if target.running {
             return "running".into();
         }
@@ -151,7 +151,7 @@ impl App {
         if let Some(when) = target.last_collect {
             return relative_time_from(when, now());
         }
-        "—".into()
+        crate::tui::chrome_dash(ascii).into()
     }
 }
 

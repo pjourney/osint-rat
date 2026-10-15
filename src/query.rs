@@ -155,17 +155,36 @@ pub fn propose_actions(
 }
 
 pub fn parse_entity_seed(workspace: &Workspace, raw: &str) -> Result<Uuid> {
-    if let Ok(uuid) = Uuid::parse_str(raw.trim()) {
+    let raw = raw.trim();
+    if let Ok(uuid) = Uuid::parse_str(raw) {
         if workspace.entity(uuid).is_some() {
             return Ok(uuid);
         }
         return Err(eyre!("no entity {raw}"));
     }
-    let reference: crate::model::ShortRef = raw.parse().map_err(|error| eyre!("{error}"))?;
-    workspace
-        .resolve_ref(reference)
-        .filter(|_| reference.kind == RefKind::Entity)
-        .ok_or_else(|| eyre!("no entity {raw}"))
+    if let Ok(reference) = raw.parse::<crate::model::ShortRef>() {
+        return workspace
+            .resolve_ref(reference)
+            .filter(|_| reference.kind == RefKind::Entity)
+            .ok_or_else(|| eyre!("no entity {raw}"));
+    }
+    let matches: Vec<_> = workspace
+        .visible_entities()
+        .into_iter()
+        .filter(|entity| {
+            entity.value.eq_ignore_ascii_case(raw)
+                || entity.display_name().eq_ignore_ascii_case(raw)
+        })
+        .collect();
+    match matches.as_slice() {
+        [entity] => Ok(entity.id),
+        [] => Err(eyre!(
+            "no entity {raw:?}; use a short ref such as E-1, a UUID, or an exact entity value"
+        )),
+        _ => Err(eyre!(
+            "multiple entities match {raw:?}; use a short ref such as E-1"
+        )),
+    }
 }
 
 fn search_view(workspace: &Workspace, result: &SearchAroundResult) -> SearchAroundView {
@@ -234,5 +253,66 @@ fn object_summary(
         value: value.to_string(),
         label: label.to_string(),
         provenance: provenance.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{
+        Entity, EntityKind, Fields, Investigation, InvestigationData, Provenance, now,
+    };
+
+    fn workspace_with_domain(value: &str) -> (Workspace, Uuid) {
+        let timestamp = now();
+        let investigation_id = Uuid::new_v4();
+        let entity_id = Uuid::new_v4();
+        let mut data = InvestigationData::empty(Investigation {
+            id: investigation_id,
+            name: "case".into(),
+            description: String::new(),
+            tags: Vec::new(),
+            marking: crate::model::Marking::Unmarked,
+            created_at: timestamp,
+            updated_at: timestamp,
+        });
+        data.entities.push(Entity {
+            id: entity_id,
+            investigation_id,
+            seq: 1,
+            kind: EntityKind::Domain,
+            value: value.into(),
+            label: String::new(),
+            notes: String::new(),
+            provenance: Provenance::Collected,
+            fields: Fields::new(),
+            source_ids: Vec::new(),
+            created_at: timestamp,
+            updated_at: timestamp,
+        });
+        (Workspace::new(data), entity_id)
+    }
+
+    #[test]
+    fn entity_seed_accepts_value_as_well_as_short_ref() {
+        let (workspace, id) = workspace_with_domain("example.com");
+        assert_eq!(
+            parse_entity_seed(&workspace, "example.com").expect("value"),
+            id
+        );
+        assert_eq!(
+            parse_entity_seed(&workspace, "Example.COM").expect("case"),
+            id
+        );
+        assert_eq!(
+            parse_entity_seed(&workspace, &id.to_string()).expect("uuid"),
+            id
+        );
+        let error = parse_entity_seed(&workspace, "missing.example")
+            .expect_err("unknown value")
+            .to_string();
+        assert!(error.contains("no entity"), "{error}");
+        assert!(!error.contains("S-12"), "{error}");
+        assert!(!error.contains("not a valid reference"), "{error}");
     }
 }

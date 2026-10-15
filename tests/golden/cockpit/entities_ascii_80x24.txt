@@ -12,8 +12,8 @@
 
 
 
- Inspector · acme-login.com
-TABS  Props  ·Sources·  Notes  History
+ Inspector | acme-login.com
+TABS  Props  [Sources]  Notes  History
 SOURCES
   S1 C  dns  0s
      DNS records for acme-login.com

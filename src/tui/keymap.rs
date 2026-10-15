@@ -133,8 +133,8 @@ fn map_overlay_key(key: KeyEvent) -> Option<Action> {
     }
 }
 
-pub fn help_text() -> String {
-    crate::app::commands::help_text()
+pub fn help_text_for(ascii: bool) -> String {
+    crate::app::commands::help_text(ascii)
 }
 
 #[cfg(test)]

@@ -268,7 +268,7 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
         lines.extend(empty_state(
             "No entities yet",
             "Collect on a target to populate this case.",
-            "c collect · n new target",
+            &["c collect", "n new target"].join(theme.glyphs.sep()),
             theme,
         ));
     } else if home.targets.is_empty() {
@@ -288,13 +288,13 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
             let glyph = target
                 .provenance
                 .map(|provenance| provenance_glyph(provenance, theme))
-                .unwrap_or_else(|| Span::styled("—", theme.muted));
+                .unwrap_or_else(|| Span::styled(theme.glyphs.dash(), theme.muted));
             let src = if target.source_count == 0 {
-                "—".into()
+                theme.glyphs.dash().to_string()
             } else {
                 target.source_count.to_string()
             };
-            let mut status = App::case_target_status_label(target);
+            let mut status = App::case_target_status_label(target, theme.glyphs.ascii);
             if target.never_collected {
                 status = format!("{status}  c collect");
             }
@@ -474,7 +474,7 @@ fn evidence(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
         theme,
         "No evidence yet",
         "Collect on a target to populate this case.",
-        "c collect · n new target",
+        &["c collect", "n new target"].join(theme.glyphs.sep()),
     );
     draw_table_board(
         frame,
@@ -572,7 +572,7 @@ fn render_board_list(
             Paragraph::new(empty_state(
                 &format!("No {title} yet"),
                 "Nothing to show on this board.",
-                "n new · c collect",
+                &["n new", "c collect"].join(theme.glyphs.sep()),
                 theme,
             )),
             rows[1],
@@ -635,13 +635,19 @@ fn draw_table_board(
             let mut filter_line = vec![Span::styled("/", theme.accent)];
             filter_line.extend(input_line(query).spans);
             filter_line.push(Span::raw("  "));
-            filter_line.push(Span::styled(format!("{total} → {shown}"), theme.muted));
+            filter_line.push(Span::styled(
+                format!("{total} {} {shown}", theme.glyphs.arrow()),
+                theme.muted,
+            ));
             lines.push(Line::from(filter_line));
         } else {
             lines.push(Line::from(vec![
                 Span::styled(format!("/{filter}"), theme.accent),
                 Span::raw("  "),
-                Span::styled(format!("{total} → {shown}"), theme.muted),
+                Span::styled(
+                    format!("{total} {} {shown}", theme.glyphs.arrow()),
+                    theme.muted,
+                ),
             ]));
         }
     }
@@ -825,20 +831,23 @@ fn graph(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool)
     }
     let visible = app.visible_graph();
     let mut lines = vec![pane_title("Graph", focused, theme)];
-    lines.push(Line::from(Span::styled(graph_title(app), theme.header)));
+    lines.push(Line::from(Span::styled(
+        graph_title(app, theme.glyphs.ascii),
+        theme.header,
+    )));
     lines.push(graph_kind_counts_line(app, &visible, theme));
     if !app.graph_facet_chips().is_empty() {
         lines.push(graph_facet_line(app, &app.graph_facet_chips(), theme));
     }
     lines.push(Line::from(Span::styled(
-        graph_filter_line(&app.graph.filters),
+        graph_filter_line(&app.graph.filters, theme.glyphs.ascii),
         theme.muted,
     )));
     if visible.nodes.is_empty() {
         lines.extend(empty_state(
             "No graph yet",
             "Collect on a target, then press g or s.",
-            "c collect · n new target · g graph",
+            &["c collect", "n new target", "g graph"].join(theme.glyphs.sep()),
             theme,
         ));
     } else {
@@ -888,11 +897,16 @@ fn graph_kind_counts_line(
     Line::from(spans)
 }
 
-fn graph_title(app: &App) -> String {
+fn graph_title(app: &App, ascii: bool) -> String {
     let result = &app.graph.result;
-    let cap = if result.truncated { " · capped" } else { "" };
+    let sep = super::glyphs::chrome_sep(ascii);
+    let cap = if result.truncated {
+        format!("{sep}capped")
+    } else {
+        String::new()
+    };
     format!(
-        "{} hop(s) · {} nodes · {} edges · cap {}/{}{cap}",
+        "{} hop(s){sep}{} nodes{sep}{} edges{sep}cap {}/{}{cap}",
         app.graph.hops,
         result.nodes.len(),
         result.edges.len(),
@@ -938,7 +952,7 @@ fn graph_facet_line(app: &App, chips: &[crate::model::FacetChip], theme: &Theme)
     Line::from(spans)
 }
 
-fn graph_filter_line(filters: &GraphFilters) -> String {
+fn graph_filter_line(filters: &GraphFilters, ascii: bool) -> String {
     if filters.is_empty() {
         return "x clear   +/- hops   s Search Around   t time lens".into();
     }
@@ -952,7 +966,10 @@ fn graph_filter_line(filters: &GraphFilters) -> String {
     if let Some(provenance) = filters.provenance {
         parts.push(format!("prov={}", provenance.badge()));
     }
-    format!("Filter {}   x clear", parts.join(" · "))
+    format!(
+        "Filter {}   x clear",
+        parts.join(super::glyphs::chrome_sep(ascii))
+    )
 }
 
 fn graph_canvas_lines(
@@ -1049,7 +1066,7 @@ fn graph_tree_lines(
         .count();
     if hidden > 0 {
         lines.push(Line::from(Span::styled(
-            format!(" +{hidden} more · + expand"),
+            format!(" +{hidden} more{}+ expand", theme.glyphs.sep()),
             theme.muted,
         )));
     }
@@ -1406,7 +1423,7 @@ fn entities(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
         theme,
         "No entities yet",
         "Collect on a target to populate this case.",
-        "c collect · n new target",
+        &["c collect", "n new target"].join(theme.glyphs.sep()),
     );
     draw_table_board(
         frame,
@@ -1469,7 +1486,11 @@ fn timeline(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
     let header = vec![
         pane_title("Timeline", focused, theme),
         Line::from(Span::styled(
-            format!("Time lens {mode} · {filter} · x clear"),
+            format!(
+                "Time lens {mode}{}{filter}{}x clear",
+                theme.glyphs.sep(),
+                theme.glyphs.sep()
+            ),
             theme.header,
         )),
         Line::from(Span::styled(
@@ -1497,7 +1518,7 @@ fn timeline(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
             .map(|event| {
                 let end = event
                     .ended_at
-                    .map(|ended| format!("→{}", ended.format("%H:%M")))
+                    .map(|ended| format!("{}{}", theme.glyphs.arrow(), ended.format("%H:%M")))
                     .unwrap_or_default();
                 format!(
                     "{}  {}{end}  {:<16}  {}",
@@ -1631,7 +1652,7 @@ fn agent(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool)
             lines.push(Line::from(format!(
                 "{marker} {}  {}  {}",
                 previous.short_ref(),
-                previous.status.symbol(),
+                previous.status.symbol(theme.glyphs.ascii),
                 ellipsize(&previous.question, 50, theme.glyphs.ascii)
             )));
         }
@@ -1795,7 +1816,7 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool)
         } else if entry.is_available() {
             theme.glyphs.done
         } else {
-            "·"
+            theme.glyphs.missing()
         };
         let status = if refused {
             format!(
@@ -1889,7 +1910,7 @@ fn settings(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
                 .proxy
                 .as_deref()
                 .filter(|value| !value.is_empty())
-                .unwrap_or("—")
+                .unwrap_or(theme.glyphs.dash())
         )),
         Line::from(""),
         Line::from(Span::styled("Storage", theme.header)),
@@ -1982,7 +2003,12 @@ fn inspector_heading(
     } else {
         None
     };
-    super::widgets::pane_title_pulse(&format!("Inspector · {name}"), focused, theme, pulse)
+    super::widgets::pane_title_pulse(
+        &format!("Inspector{}{name}", theme.glyphs.sep()),
+        focused,
+        theme,
+        pulse,
+    )
 }
 
 fn tab_bar(app: &App, theme: &Theme) -> Vec<Line<'static>> {
@@ -1990,7 +2016,11 @@ fn tab_bar(app: &App, theme: &Theme) -> Vec<Line<'static>> {
         .iter()
         .map(|tab| {
             if *tab == app.inspector_tab {
-                format!("·{}·", tab.label())
+                if theme.glyphs.ascii {
+                    format!("[{}]", tab.label())
+                } else {
+                    format!("·{}·", tab.label())
+                }
             } else {
                 tab.label().to_string()
             }
@@ -2043,9 +2073,10 @@ fn case_inspector_props(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<
         )));
         lines.push(Line::from(Span::styled(
             format!(
-                "{} {} facts · {} sources",
+                "{} {} facts{}{} sources",
                 theme.glyphs.provenance(entity.provenance),
                 facts.max(entity.source_ids.len()),
+                theme.glyphs.sep(),
                 source_ids.len().max(entity.source_ids.len())
             ),
             theme.muted,
@@ -2057,7 +2088,7 @@ fn case_inspector_props(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<
             page.target.as_deref().unwrap_or(page.title.as_str())
         )));
         lines.push(Line::from(Span::styled(
-            format!("0 facts · {} sources", source_ids.len()),
+            format!("0 facts{}{} sources", theme.glyphs.sep(), source_ids.len()),
             theme.muted,
         )));
     } else {
@@ -2193,9 +2224,10 @@ fn entity_inspector_props(
         Line::from(heading),
         Line::from(Span::styled(
             format!(
-                "{} {} facts · {} sources",
+                "{} {} facts{}{} sources",
                 theme.glyphs.provenance(entity.provenance),
                 facts.max(entity.source_ids.len()),
+                theme.glyphs.sep(),
                 entity.source_ids.len()
             ),
             theme.muted,

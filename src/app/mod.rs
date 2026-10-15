@@ -559,7 +559,10 @@ impl App {
     fn apply_theme_preview(&mut self, index: usize) {
         let name = Self::THEME_CYCLE[index % Self::THEME_CYCLE.len()];
         self.config.ui.theme = name.into();
-        self.status = format!("Theme {name} — y saves, Esc reverts.");
+        self.status = format!(
+            "Theme {name} {} y saves, Esc reverts.",
+            crate::tui::chrome_dash(self.config.ui.ascii)
+        );
         self.mark_dirty();
     }
 
@@ -589,12 +592,12 @@ impl App {
 
     pub fn current_role_label(&self) -> String {
         let Some(workspace) = self.workspace.as_ref() else {
-            return "—".into();
+            return crate::tui::chrome_dash(self.config.ui.ascii).into();
         };
         self.store
             .role_for(workspace.id())
             .map(|role| role.as_str().to_string())
-            .unwrap_or_else(|_| "—".into())
+            .unwrap_or_else(|_| crate::tui::chrome_dash(self.config.ui.ascii).into())
     }
 
     pub fn nav_items(&self) -> Vec<(&'static str, View)> {
@@ -1209,7 +1212,10 @@ impl App {
             ));
             self.motion.push_toast(
                 crate::tui::motion::ToastKind::Refused,
-                format!("active tool refused: {name} — {reason}"),
+                format!(
+                    "active tool refused: {name} {} {reason}",
+                    crate::tui::chrome_dash(self.config.ui.ascii)
+                ),
             );
             return;
         }
@@ -1296,7 +1302,11 @@ impl App {
             }
             View::Jobs => "Jobs. Enter opens the selected job. Cancel is in the palette.".into(),
             View::Tools => "Tools. Enter opens a y-confirm. Active tools stay refused.".into(),
-            other => format!("{} — Enter opens. It never writes.", other.title()),
+            other => format!(
+                "{} {} Enter opens. It never writes.",
+                other.title(),
+                crate::tui::chrome_dash(self.config.ui.ascii)
+            ),
         }
     }
 
@@ -1907,7 +1917,7 @@ impl App {
             page_id: Some(page.id),
             entity_id: None,
         });
-        self.status = "Opening editor…".into();
+        self.status = self.opening_editor_status();
         Ok(())
     }
 
@@ -1927,8 +1937,15 @@ impl App {
             page_id: None,
             entity_id: Some(entity.id),
         });
-        self.status = "Opening editor…".into();
+        self.status = self.opening_editor_status();
         Ok(())
+    }
+
+    fn opening_editor_status(&self) -> String {
+        format!(
+            "Opening editor{}",
+            crate::tui::Glyphs::from_ascii_flag(self.config.ui.ascii).ellipsis()
+        )
     }
 
     pub fn take_pending_editor(&mut self) -> Option<EditorSession> {
@@ -2117,7 +2134,11 @@ impl App {
                 }
                 self.apply_workspace_delta(delta)?;
                 self.view = View::Overview;
-                self.status = format!("Created {} — press c to collect", page.title);
+                self.status = format!(
+                    "Created {} {} press c to collect",
+                    page.title,
+                    crate::tui::chrome_dash(self.config.ui.ascii)
+                );
             }
             FormKind::NewFinding => {
                 let workspace = self
@@ -2507,7 +2528,10 @@ impl App {
     fn run_default_collectors(&mut self) -> Result<()> {
         let target = self.current_target().ok_or_else(|| {
             eyre!(
-                "this page has no collectable target — create a Domain, IP, URL, or Repository page"
+                format!(
+                    "this page has no collectable target {} create a Domain, IP, URL, or Repository page",
+                    crate::tui::chrome_dash(self.config.ui.ascii)
+                )
             )
         })?;
         let collectors = self.collectors.defaults_for(target.kind(), &self.tools);
@@ -2693,8 +2717,9 @@ impl App {
         });
         self.view = View::Review;
         self.status = format!(
-            "Asking {}… Results land in Review.",
-            self.agent.profile.name
+            "Asking {}{} Results land in Review.",
+            self.agent.profile.name,
+            crate::tui::Glyphs::from_ascii_flag(self.config.ui.ascii).ellipsis()
         );
         let _ = run_id;
         Ok(())
@@ -2915,14 +2940,23 @@ impl App {
             } else {
                 crate::tui::motion::ToastKind::Err
             };
-            self.motion.push_toast(kind, format!("{label} — {error}"));
+            self.motion.push_toast(
+                kind,
+                format!(
+                    "{label} {} {error}",
+                    crate::tui::chrome_dash(self.config.ui.ascii)
+                ),
+            );
         } else if status == JobStatus::Succeeded {
             let job = self.job_records.get(&job_id);
             let label = job.map(|job| job.label.as_str()).unwrap_or("job");
             let detail = job.and_then(|job| job.result.as_deref()).unwrap_or("done");
             self.motion.push_toast(
                 crate::tui::motion::ToastKind::Ok,
-                format!("{label} done · {detail}"),
+                format!(
+                    "{label} done{}{detail}",
+                    crate::tui::chrome_sep(self.config.ui.ascii)
+                ),
             );
         }
         if patched_in_place {
@@ -3107,7 +3141,10 @@ impl App {
             let glyph = if self.config.ui.ascii { "*" } else { "◆" };
             self.motion.push_toast(
                 crate::tui::motion::ToastKind::Ok,
-                format!("written · {glyph} AI"),
+                format!(
+                    "written{}{glyph} AI",
+                    crate::tui::chrome_sep(self.config.ui.ascii)
+                ),
             );
             self.status = if accepted_ai {
                 format!("Accepted. AI items keep {glyph} agent provenance.")
@@ -3553,7 +3590,7 @@ impl App {
         }
         let parts: Vec<String> = active
             .iter()
-            .map(|job| format!("{} {}", job.label, job.status.symbol()))
+            .map(|job| format!("{} {}", job.label, job.status.symbol(self.config.ui.ascii)))
             .collect();
         format!("{} jobs | {}", active.len(), parts.join(" | "))
     }

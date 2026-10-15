@@ -92,10 +92,16 @@ pub fn column_widths(columns: &[Column], total: u16) -> Vec<u16> {
         return Vec::new();
     }
     let gutters = 2 * columns.len().saturating_sub(1);
-    let min_sum: u16 = columns.iter().map(|column| column.min).sum();
+    let min_sum = columns.iter().fold(0u32, |sum, column| {
+        sum.saturating_add(u32::from(column.min))
+    });
     let mut widths: Vec<u16> = columns.iter().map(|column| column.min).collect();
-    let available = total.saturating_sub(min_sum.saturating_add(gutters as u16));
-    let weight_sum: u16 = columns.iter().map(|column| column.weight).sum();
+    let available = u32::from(total)
+        .saturating_sub(min_sum.saturating_add(gutters as u32))
+        .min(u32::from(u16::MAX)) as u16;
+    let weight_sum = columns.iter().fold(0u32, |sum, column| {
+        sum.saturating_add(u32::from(column.weight))
+    });
     if available == 0 || weight_sum == 0 {
         return widths;
     }
@@ -111,7 +117,7 @@ pub fn column_widths(columns: &[Column], total: u16) -> Vec<u16> {
         let share = if index == last_flex {
             available.saturating_sub(used)
         } else {
-            available * column.weight / weight_sum
+            ((u32::from(available) * u32::from(column.weight)) / weight_sum) as u16
         };
         widths[index] = widths[index].saturating_add(share);
         used = used.saturating_add(share);
@@ -139,7 +145,7 @@ pub fn relative_time_from(timestamp: Timestamp, now: Timestamp) -> String {
 
 pub fn provenance_cells(provenances: &[Provenance], theme: &Theme) -> TableCell {
     if provenances.is_empty() {
-        return TableCell::styled("—", theme.muted);
+        return TableCell::styled(theme.glyphs.dash(), theme.muted);
     }
     let spans = provenances
         .iter()
@@ -354,6 +360,39 @@ mod tests {
         assert_eq!(widths[0], 4);
         assert_eq!(widths[2], 3);
         assert_eq!(widths[1], 40 - 4 - 3 - 4);
+    }
+
+    #[test]
+    fn column_widths_do_not_overflow_on_huge_mins_or_weights() {
+        let heavy = [
+            Column {
+                key: SortKey::Value,
+                header: "A",
+                min: 40_000,
+                weight: 40_000,
+                align: Align::Left,
+            },
+            Column {
+                key: SortKey::Name,
+                header: "B",
+                min: 40_000,
+                weight: 40_000,
+                align: Align::Left,
+            },
+        ];
+        let widths = column_widths(&heavy, 80);
+        assert_eq!(widths.len(), 2);
+        let many: Vec<Column> = (0..8)
+            .map(|_| Column {
+                key: SortKey::Name,
+                header: "X",
+                min: 10_000,
+                weight: 1,
+                align: Align::Left,
+            })
+            .collect();
+        let many_widths = column_widths(&many, u16::MAX);
+        assert_eq!(many_widths.len(), 8);
     }
 
     #[test]

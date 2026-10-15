@@ -10,7 +10,7 @@ use std::time::Duration;
 use futures::future::BoxFuture;
 
 use super::{CollectResult, CollectionOutput, Collector, CollectorContext};
-use crate::config::ExternalCollectorConfig;
+use crate::config::{ExternalCollectorConfig, duration_from_secs};
 use crate::exec::{CommandSpec, ExecError, run};
 use crate::ingest::{BATCH_FORMAT_VERSION, IngestFormat, IngestOptions, ingest};
 use crate::model::{Target, TargetKind};
@@ -84,7 +84,7 @@ impl ExternalCollector {
             program: config.program.trim().to_string(),
             args: config.args.clone(),
             accepts,
-            timeout: Duration::from_secs(config.timeout_seconds.max(1)),
+            timeout: duration_from_secs(config.timeout_seconds.max(1)),
             activity: Activity::Passive,
             runs_by_default: config.runs_by_default,
             working_directory: config

@@ -269,7 +269,7 @@ pub enum Command {
     SearchAround {
         /// Investigation name, UUID, or unique UUID prefix.
         investigation: String,
-        /// Seed entity short reference (`E-1`) or UUID.
+        /// Seed entity short reference (`E-1`), UUID, or exact value (`example.com`).
         seed: String,
         /// Hop depth (default 2).
         #[arg(long)]
@@ -1080,7 +1080,7 @@ fn ingest_file(
         &report.batch,
     )?;
     println!(
-        "Ingested {} into {} — {}",
+        "Ingested {} into {} - {}",
         path.display(),
         investigation.name,
         if report.batch.summary.is_empty() {
@@ -1218,6 +1218,7 @@ async fn watch_command(
     once: bool,
     interval: Option<u64>,
 ) -> Result<()> {
+    let interval = interval.map(parse_watch_interval).transpose()?;
     let mut runtime = Runtime::load(cli)?;
     let guard = CtrlCGuard::spawn();
     let cancel = guard.token.clone();
@@ -1255,7 +1256,7 @@ async fn watch_command(
                 eprintln!("watch cancelled");
                 return Ok(());
             }
-            _ = tokio::time::sleep(std::time::Duration::from_secs(seconds.max(1))) => {}
+            _ = tokio::time::sleep(crate::config::duration_from_secs(seconds.max(1))) => {}
         }
     }
 }
@@ -1386,7 +1387,7 @@ async fn run_playbook_on(
     runtime.store.update_job(&record)?;
     let output = result.map_err(user_err)?;
     println!(
-        "Playbook {} on {} {} — {}",
+        "Playbook {} on {} {} - {}",
         playbook.id,
         seed.kind(),
         seed.value(),
@@ -1665,13 +1666,13 @@ fn case_command(cli: &Cli, query: &str) -> Result<()> {
         let glyph = target
             .provenance
             .map(|provenance| theme.glyphs.provenance(provenance).to_string())
-            .unwrap_or_else(|| "—".into());
+            .unwrap_or_else(|| theme.glyphs.dash().to_string());
         println!(
             "  {} {:<22} {glyph} {}  {}",
             target.kind_tag(),
             truncate(&target.value, 22, cli.plain),
             target.source_count,
-            App::case_target_status_label(target)
+            App::case_target_status_label(target, theme.glyphs.ascii)
         );
     }
     println!("AT A GLANCE");
@@ -1848,18 +1849,7 @@ fn jobs_command(cli: &Cli, query: &str) -> Result<()> {
         return Ok(());
     }
     for job in &data.jobs {
-        let mark = match job.status {
-            crate::model::JobStatus::Succeeded => theme.glyphs.done,
-            crate::model::JobStatus::Failed => theme.glyphs.failed,
-            crate::model::JobStatus::Cancelled => theme.glyphs.refused,
-            _ => {
-                if theme.glyphs.ascii {
-                    "..."
-                } else {
-                    "…"
-                }
-            }
-        };
+        let mark = job.status.symbol(theme.glyphs.ascii);
         println!(
             "{} {}  {}  {}",
             mark,
@@ -1937,7 +1927,7 @@ fn tools_command(cli: &Cli) -> Result<()> {
         } else if entry.is_available() {
             theme.glyphs.done
         } else {
-            "·"
+            theme.glyphs.missing()
         };
         let status = if refused {
             format!(
@@ -2073,9 +2063,11 @@ fn search_around_command(
     }
     let theme = cli_theme(cli);
     println!(
-        "GRAPH  {} hop(s) · {} nodes · {} edges",
+        "GRAPH  {} hop(s){}{} nodes{}{} edges",
         view.hops_used,
+        theme.glyphs.sep(),
         view.nodes.len(),
+        theme.glyphs.sep(),
         view.edges.len()
     );
     if view.nodes.is_empty() {
@@ -2457,6 +2449,16 @@ fn show_config(cli: &Cli) -> Result<()> {
     Ok(())
 }
 
+fn parse_watch_interval(seconds: u64) -> Result<u64> {
+    if seconds > crate::config::MAX_WATCH_INTERVAL_SECONDS {
+        return Err(user_err(format!(
+            "watch interval {seconds} seconds is too large; maximum is {} seconds",
+            crate::config::MAX_WATCH_INTERVAL_SECONDS
+        )));
+    }
+    Ok(seconds.max(1))
+}
+
 fn parse_cooccur_window(hours: u64) -> Result<chrono::Duration> {
     if hours > crate::model::MAX_WINDOW_HOURS {
         return Err(user_err(format!(
@@ -2723,6 +2725,19 @@ mod tests {
     }
 
     #[test]
+    fn huge_watch_interval_is_a_user_error() {
+        let error = parse_watch_interval(u64::MAX).expect_err("too large");
+        let text = error.to_string();
+        assert!(
+            text.contains("too large") || text.contains("interval"),
+            "{text}"
+        );
+        assert!(!text.contains("panic"), "{text}");
+        assert_eq!(parse_watch_interval(30).expect("ok"), 30);
+        assert_eq!(parse_watch_interval(0).expect("zero becomes 1"), 1);
+    }
+
+    #[test]
     fn confirm_write_refuses_without_yes_when_stdin_is_not_a_tty() {
         let cli = Cli::try_parse_from(["os-int", "review", "accept", "Case", "X-1"]).expect("cli");
         assert!(!cli.yes);
@@ -2841,5 +2856,29 @@ mod tests {
         let cli = Cli::try_parse_from(["os-int", "--json", "config"]).expect("config json");
         assert!(cli.json);
         assert!(matches!(cli.command, Some(Command::Config)));
+    }
+
+    #[test]
+    fn jobs_plain_marks_use_ascii_status_symbols() {
+        assert_eq!(JobStatus::Queued.symbol(true), "...");
+        assert_eq!(JobStatus::Running.symbol(true), "*");
+        assert_eq!(JobStatus::Succeeded.symbol(true), "ok");
+        for status in [
+            JobStatus::Queued,
+            JobStatus::Running,
+            JobStatus::Succeeded,
+            JobStatus::Failed,
+            JobStatus::Cancelled,
+        ] {
+            let mark = status.symbol(true);
+            assert!(
+                mark.bytes().all(|byte| byte.is_ascii()),
+                "{status:?} {mark}"
+            );
+            assert!(
+                !mark.contains('…') && !mark.contains('●') && !mark.contains('✓'),
+                "{mark}"
+            );
+        }
     }
 }

@@ -2,7 +2,7 @@
 RAIL
 1 Case  2 Entities  3 Evidence  >4 Graph  5 Review 1  6 Jobs
 >Graph
-1 hop(s) · 2 nodes · 1 edges · cap 200/400
+1 hop(s) | 2 nodes | 1 edges | cap 200/400
 KIND  DOM 1  IP 1
 Domain:1  IP:1 | Resolves to:1 | ANL:1  COL:1
 x clear   +/- hops   s Search Around   t time lens
@@ -14,11 +14,11 @@ x clear   +/- hops   s Search Around   t time lens
 
 
 
- Inspector · acme-login.com
-TABS  ·Props·  Sources  Notes  History
+ Inspector | acme-login.com
+TABS  [Props]  Sources  Notes  History
 DOM  acme-login.com  AC
-A 1 facts · 1 sources
+A 1 facts | 1 sources
 
 LINKS  (1)
- Graph · 1 hop(s) · 2 nodes · 1 edges. s Search Around, +/- hops, t time lens.
+ Graph | 1 hop(s) | 2 nodes | 1 edges. s Search Around, +/- hops, t time lens.
 / search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro

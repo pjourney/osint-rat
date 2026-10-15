@@ -270,6 +270,53 @@ fn plain_review_list_uses_ascii_glyphs() {
 }
 
 #[test]
+fn plain_case_and_graph_chrome_are_ascii() {
+    let (_dir, config, data) = sandbox();
+    import_demo(&config, &data);
+    let case = run(&config, &data, &["--plain", "case", "Example Corp"]);
+    assert!(case.status.success(), "{}", stderr(&case));
+    let case_text = stdout(&case);
+    assert!(!case_text.contains('·'), "{case_text}");
+    assert!(!case_text.contains('—'), "{case_text}");
+    let graph = run(
+        &config,
+        &data,
+        &["--plain", "search-around", "Example Corp", "example.com"],
+    );
+    assert!(graph.status.success(), "{}", stderr(&graph));
+    let graph_text = stdout(&graph);
+    assert!(!graph_text.contains('·'), "{graph_text}");
+    assert!(!graph_text.contains('—'), "{graph_text}");
+    assert!(graph_text.contains("hop(s)"), "{graph_text}");
+}
+
+#[test]
+fn watch_huge_interval_is_a_user_error() {
+    let (_dir, config, data) = sandbox();
+    seed_case(&config, &data);
+    let output = run(
+        &config,
+        &data,
+        &[
+            "watch",
+            "--playbook",
+            "domain-infra",
+            "--investigation",
+            "Case",
+            "--interval",
+            "18446744073709551615",
+        ],
+    );
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(!err.contains("panic"), "{err}");
+    assert!(
+        err.contains("too large") || err.contains("interval"),
+        "{err}"
+    );
+}
+
+#[test]
 fn parallel_cli_processes_share_a_data_dir() {
     let (_dir, config, data) = sandbox();
     import_demo(&config, &data);
@@ -416,4 +463,46 @@ fn list_json_empty_workspace_is_an_array() {
     assert!(output.status.success(), "{}", stderr(&output));
     let value: serde_json::Value = serde_json::from_str(&stdout(&output)).expect("json");
     assert_eq!(value, serde_json::json!([]));
+}
+
+fn seed_queued_job(config: &Path, data: &Path) {
+    let paths = AppPaths::new(config.to_path_buf(), data.to_path_buf());
+    paths.ensure_dirs().expect("dirs");
+    let store = Store::open(&paths.database()).expect("store");
+    let investigation = store.create_investigation("Case", "").expect("case");
+    let timestamp = os_int::model::now();
+    let mut job = os_int::model::JobRecord {
+        id: uuid::Uuid::new_v4(),
+        investigation_id: Some(investigation.id),
+        seq: 0,
+        kind: "collector:dns".into(),
+        label: "DNS".into(),
+        description: "queued".into(),
+        status: os_int::model::JobStatus::Queued,
+        program: None,
+        args: Vec::new(),
+        created_at: timestamp,
+        started_at: None,
+        finished_at: None,
+        progress: None,
+        log: String::new(),
+        stderr: String::new(),
+        result: None,
+        error: None,
+        page_id: None,
+    };
+    store.insert_job(&mut job).expect("job");
+}
+
+#[test]
+fn plain_jobs_list_does_not_leak_unicode_status_marks() {
+    let (_dir, config, data) = sandbox();
+    seed_queued_job(&config, &data);
+    let output = run(&config, &data, &["--plain", "jobs", "Case"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(!text.contains('…'), "{text}");
+    assert!(!text.contains('●'), "{text}");
+    assert!(!text.contains('✓'), "{text}");
+    assert!(text.contains("...") || text.contains("DNS"), "{text}");
 }

@@ -1326,7 +1326,7 @@ impl Animator {
     pub fn job_spinner_glyph(&self, glyphs: &Glyphs) -> &'static str {
         match self.mode {
             MotionMode::Off => "running",
-            MotionMode::Reduced => "…",
+            MotionMode::Reduced => glyphs.ellipsis(),
             MotionMode::Full => {
                 let index = self
                     .frame_kind(AnimKind::JobSpinner)
@@ -1524,12 +1524,14 @@ pub fn splash_lines(
         lines.push(Line::from(""));
     }
     if idx >= 8 {
+        let crumb = if theme.glyphs.ascii { ">" } else { "▸" };
+        let ai = theme.glyphs.ai;
         lines.push(Line::from(Span::styled(
-            format!("  ▸ {case}  {marking}"),
+            format!("  {crumb} {case}  {marking}"),
             theme.muted,
         )));
         lines.push(Line::from(Span::styled(
-            "  passive · ◆ proposes only",
+            format!("  passive{}{ai} proposes only", theme.glyphs.sep()),
             theme.accent,
         )));
     }
@@ -1647,7 +1649,7 @@ pub fn progress_bar(
     let total = total.max(1);
     let ratio = f64::from(current.min(total)) / f64::from(total);
     let percent = (ratio * 100.0).round() as u32;
-    if mode == MotionMode::Off {
+    if mode == MotionMode::Off || theme.glyphs.ascii {
         return Line::from(Span::styled(format!("{percent}%"), theme.muted));
     }
     let cells = 12usize;
@@ -2105,7 +2107,17 @@ mod tests {
         );
         assert!(matches!(animator.timer_need(), TimerNeed::Deadline(_)));
         assert_eq!(animator.job_spinner_glyph(&Glyphs::unicode()), "…");
+        assert_eq!(animator.job_spinner_glyph(&Glyphs::ascii()), "...");
         assert!(!animator.playing(AnimKind::JobSpinner));
+    }
+
+    #[test]
+    fn reduced_ascii_spinner_is_not_unicode_ellipsis() {
+        let mut animator = Animator::new(MotionMode::Reduced);
+        animator.sync_spinner("j", Rect::new(0, 0, 1, 1));
+        let mark = animator.job_spinner_glyph(&Glyphs::ascii());
+        assert!(mark.bytes().all(|byte| byte.is_ascii()), "{mark}");
+        assert!(!mark.contains('…'), "{mark}");
     }
 
     #[test]
@@ -2234,6 +2246,27 @@ mod tests {
         assert!(flash.contains('█'), "{flash}");
         assert!(muted.contains('█'), "{muted}");
         assert!(failed.contains('▒'), "{failed}");
+        let ascii_theme = Theme::build(
+            crate::tui::theme::ThemeName::Mono,
+            crate::tui::theme::DetectedDepth {
+                depth: ColorDepth::None,
+                reason: "test".into(),
+            },
+            true,
+        );
+        let ascii = render_lines(
+            vec![progress_bar(
+                54,
+                100,
+                &ascii_theme,
+                MotionMode::Reduced,
+                ProgressFill::Running,
+            )],
+            20,
+            1,
+        );
+        assert!(ascii.contains('%'), "{ascii}");
+        assert!(!ascii.contains('█') && !ascii.contains('░'), "{ascii}");
         let mut animator = Animator::new(MotionMode::Full);
         animator.complete_progress("prog:1", 8, 8);
         let visual = animator.progress_visual("prog:1").expect("flash");

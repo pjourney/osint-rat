@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::config::{AgentProfileConfig, AgentSettings, Config};
+use crate::config::{AgentProfileConfig, AgentSettings, Config, duration_from_secs};
 
 /// How the agent CLI reports output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -153,7 +153,7 @@ impl AgentProfile {
             };
         }
         if let Some(timeout_seconds) = overlay.timeout_seconds {
-            self.timeout = Duration::from_secs(timeout_seconds.max(1));
+            self.timeout = duration_from_secs(timeout_seconds.max(1));
         }
         self.env.extend(
             overlay
@@ -218,7 +218,7 @@ pub fn resolve_profile(config: &Config) -> AgentProfile {
     if let Some(overlay) = config.agents.get(&settings.active) {
         profile.overlay(overlay);
     }
-    profile.timeout = Duration::from_secs(settings.timeout_seconds.max(1));
+    profile.timeout = duration_from_secs(settings.timeout_seconds.max(1));
     profile
 }
 
@@ -257,7 +257,7 @@ fn inline_profile(settings: &AgentSettings) -> AgentProfile {
             _ => AgentWorkingDirectory::Investigation,
         };
     }
-    profile.timeout = Duration::from_secs(settings.timeout_seconds.max(1));
+    profile.timeout = duration_from_secs(settings.timeout_seconds.max(1));
     profile
 }
 
@@ -308,5 +308,13 @@ mod tests {
             actual,
             vec!["-p".to_string(), "hello world; rm -rf /".to_string()]
         );
+    }
+
+    #[test]
+    fn huge_agent_timeout_does_not_panic() {
+        let mut input = Config::default();
+        input.agent.timeout_seconds = u64::MAX;
+        let actual = resolve_profile(&input);
+        assert_eq!(actual.timeout, crate::config::duration_from_secs(u64::MAX));
     }
 }

@@ -11,14 +11,21 @@ use crate::app::{App, Overlay};
 use crate::doctor::CheckStatus;
 use crate::sanitize::sanitize_line;
 
-use super::keymap::help_text;
+use super::keymap::help_text_for;
 use super::theme::Theme;
 use super::widgets::{centered, ellipsize, empty_state, input_line, list_from, pane_block};
 
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     match &app.overlay {
         Overlay::None => {}
-        Overlay::Help => text_modal(frame, area, "Help", &help_text(), app.scroll, theme),
+        Overlay::Help => text_modal(
+            frame,
+            area,
+            "Help",
+            &help_text_for(theme.glyphs.ascii),
+            app.scroll,
+            theme,
+        ),
         Overlay::Doctor => doctor(frame, area, app, theme),
         Overlay::Text {
             title,
@@ -86,7 +93,7 @@ fn palette(
         .iter()
         .map(|command| format!("{:<22}  {}", command.title, command.hint))
         .collect();
-    let height = (items.len() as u16 + 4).clamp(8, 18);
+    let height = overlay_height(items.len(), 4, 8, 18);
     let popup = centered(area, 56, height);
     frame.render_widget(Clear, popup);
     let rows = ratatui::layout::Layout::vertical([
@@ -117,7 +124,7 @@ fn search(
         .iter()
         .map(|hit| format!("{:<8}  {}", hit.kind, hit.label))
         .collect();
-    let height = (items.len() as u16 + 4).clamp(8, 20);
+    let height = overlay_height(items.len(), 4, 8, 20);
     let popup = centered(area, 64, height);
     frame.render_widget(Clear, popup);
     let rows = ratatui::layout::Layout::vertical([
@@ -134,7 +141,7 @@ fn search(
             Paragraph::new(empty_state(
                 "No matches",
                 "Type to search pages, entities, findings, and sources.",
-                "Enter opens a hit · Esc closes",
+                &["Enter opens a hit", "Esc closes"].join(theme.glyphs.sep()),
                 theme,
             ))
             .block(pane_block("Results", false, theme)),
@@ -179,7 +186,7 @@ fn agent_prompt(
 }
 
 fn form_modal(frame: &mut Frame, area: Rect, form: &crate::app::FormState, theme: &Theme) {
-    let height = (form.fields.len() as u16 * 3 + 4).clamp(8, 20);
+    let height = overlay_height(form.fields.len().saturating_mul(3), 4, 8, 20);
     let popup = centered(area, 64, height);
     frame.render_widget(Clear, popup);
     let mut lines = Vec::new();
@@ -230,7 +237,10 @@ fn theme_cycle(frame: &mut Frame, area: Rect, original: &str, index: usize, them
     frame.render_widget(Clear, popup);
     let mut lines = vec![
         Line::from(Span::styled(
-            "Palette :theme — live preview. y saves, Esc reverts.",
+            format!(
+                "Palette :theme {} live preview. y saves, Esc reverts.",
+                theme.glyphs.dash()
+            ),
             theme.muted,
         )),
         Line::from(""),
@@ -258,6 +268,14 @@ fn theme_cycle(frame: &mut Frame, area: Rect, original: &str, index: usize, them
     );
 }
 
+/// Popup height from a list length. `as u16` wrapping made 65_533-item lists 1 row tall.
+fn overlay_height(items: usize, extra: u16, min: u16, max: u16) -> u16 {
+    u16::try_from(items)
+        .unwrap_or(u16::MAX)
+        .saturating_add(extra)
+        .clamp(min, max)
+}
+
 fn confirm(frame: &mut Frame, area: Rect, title: &str, message: &str, theme: &Theme) {
     let popup = centered(area, 56, 8);
     frame.render_widget(Clear, popup);
@@ -270,4 +288,20 @@ fn confirm(frame: &mut Frame, area: Rect, title: &str, message: &str, theme: &Th
         Paragraph::new(lines).block(pane_block(title, true, theme)),
         popup,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::overlay_height;
+
+    #[test]
+    fn overlay_height_does_not_wrap_on_huge_lists() {
+        assert_eq!(overlay_height(0, 4, 8, 18), 8);
+        assert_eq!(overlay_height(10, 4, 8, 18), 14);
+        assert_eq!(overlay_height(100, 4, 8, 18), 18);
+        let wrapping_cast = 65_533usize as u16;
+        assert_eq!(wrapping_cast.wrapping_add(4), 1);
+        assert_eq!(overlay_height(65_533, 4, 8, 20), 20);
+        assert_eq!(overlay_height(usize::MAX, 4, 8, 20), 20);
+    }
 }
