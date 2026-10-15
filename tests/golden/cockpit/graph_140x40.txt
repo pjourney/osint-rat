@@ -1,9 +1,9 @@
  os-int ▸ acme-phish ▸ Graph  unmarked                                                           ◆ 1 to review  ✓ jobs  agent ◇ Claude Code
- Rail         │▌Facets                                                                         │ Inspector · acme-login.com
+ Rail         │▌Graph                                                                          │ Inspector · acme-login.com
  1 Case        1 hop(s) · 2 nodes · 1 edges · cap 200/400                                       TABS  ·Props·  Sources  Notes  History
- 2 Entities    Domain:1  IP:1 │ Resolves to:1 │ ANL:1  COL:1                                    DOM  acme-login.com  ✎●
- 3 Evidence    x clear   +/- hops   s Search Around   t time lens                               ✎ 1 facts · 1 sources
-▌4 Graph       ▌Neighborhood
+ 2 Entities    KIND  DOM 1  IP 1                                                                DOM  acme-login.com  ✎●
+ 3 Evidence    Domain:1  IP:1 │ Resolves to:1 │ ANL:1  COL:1                                    ✎ 1 facts · 1 sources
+▌4 Graph       x clear   +/- hops   s Search Around   t time lens
  5 Review 1    ▌DOM acme-login.com ✎                                                            LINKS  (1)
  6 Jobs        └─ resolves_to ──▶ IP  203.0.113.7 ●                                               ─▶ resolves_to  IP  203.0.113.7
 
@@ -24,9 +24,9 @@
 
 
 
-               ▌Nodes
-               E-1  Domain      hop 0  acme-login.com
-               E-2  IP          hop 1  203.0.113.7
+
+
+
 
 
 

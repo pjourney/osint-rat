@@ -1,24 +1,24 @@
  os-int ▸ acme-phish ▸ Case  unmar…  ◆ 1 to review  ✓ jobs  agent ◇ Claude Code
  Rail         │▌TARGETS
-▌1 Case        P-1  acme-login.com  Domain
- 2 Entities    Target  acme-login.com
- 3 Evidence
- 4 Graph       Summary
- 5 Review 1      marking unmarked   role owner
- 6 Jobs          1 pages   1 sources   1 findings   2 entities   0 jobs   0
-               audit
+▌1 Case        ▌DOM acme-login.com        ✎ 1    0s ✓
+ 2 Entities
+ 3 Evidence    AT A GLANCE
+ 4 Graph          2 entities   ● 1  ◇ 0  ✎ 1  ◆ 0
+ 5 Review 1       1 findings   ● 0  ◇ 0  ✎ 0  ◆ 1
+ 6 Jobs
+               NEXT
+                 ◆ 1 agent proposals waiting  5 review
 
-               Entities on this page
-                 E-1  Domain      acme-login.com  ✎ ANL
-                 E-2  IP          203.0.113.7  ● COL
+
+
 
  Inspector · acme-login.com
-TABS  ·Props·  Sources  Notes  History
-acme-login.com
-Domain
-acme-login.com
-
-
+DOM  acme-login.com
+✎ 1 facts · 1 sources
+SOURCES
+  S1 ●  dns  0s
+NOTES  e edit
+  No notes yet. e edits in $EDITOR.
 
  Case — Enter opens. It never writes.    0 jobs
-/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro
+c collect  n new target  a ask agent  s search around  / search  Ctrl+K commands

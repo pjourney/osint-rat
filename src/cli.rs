@@ -50,6 +50,12 @@ pub struct Cli {
     /// ASCII glyphs, no colour, and motion off. Use with a screen reader or a dumb terminal.
     #[arg(long, global = true)]
     pub plain: bool,
+    /// Machine-readable JSON for list commands.
+    #[arg(long, global = true)]
+    pub json: bool,
+    /// Confirm a write without an interactive prompt. Required when stdin is not a TTY.
+    #[arg(long, global = true)]
+    pub yes: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -300,6 +306,28 @@ pub enum Command {
         #[command(subcommand)]
         command: ThemeCommand,
     },
+    /// Print the Case home dashboard (targets, glance, NEXT).
+    Case {
+        /// Investigation name, UUID, or unique UUID prefix.
+        investigation: String,
+    },
+    /// List or decide Review items (`X-n` refs). Accept always requires `--yes` or an interactive y.
+    Review {
+        #[command(subcommand)]
+        command: ReviewCommand,
+    },
+    /// List jobs for a case.
+    Jobs {
+        /// Investigation name, UUID, or unique UUID prefix.
+        investigation: String,
+    },
+    /// List findings and sources (Evidence board).
+    Evidence {
+        /// Investigation name, UUID, or unique UUID prefix.
+        investigation: String,
+    },
+    /// List tools. Active tools are refused, with no enable option.
+    Tools,
 }
 
 #[derive(Debug, Subcommand)]
@@ -368,6 +396,29 @@ pub enum TeamCommand {
     Remove {
         investigation: String,
         user_id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ReviewCommand {
+    /// Print pending Review items. Never writes.
+    List {
+        /// Investigation name, UUID, or unique UUID prefix.
+        investigation: String,
+    },
+    /// Accept a pending proposal (`X-n` or UUID). Requires `--yes` or an interactive y.
+    Accept {
+        /// Investigation name, UUID, or unique UUID prefix.
+        investigation: String,
+        /// Proposal short reference (`X-1`) or full UUID. Exact match only; `X-1` does not select `X-10`.
+        reference: String,
+    },
+    /// Reject a pending proposal (`X-n` or UUID). Requires `--yes` or an interactive y.
+    Reject {
+        /// Investigation name, UUID, or unique UUID prefix.
+        investigation: String,
+        /// Proposal short reference (`X-1`) or full UUID. Exact match only; `X-1` does not select `X-10`.
+        reference: String,
     },
 }
 
@@ -602,6 +653,11 @@ pub async fn run_with(cli: Cli) -> Result<()> {
         }) => serve_command(&cli, bind.as_deref(), token.as_deref(), allow_non_loopback).await,
         Some(Command::Bench { ref sizes }) => bench_command(&cli, sizes.as_deref()),
         Some(Command::Theme { ref command }) => theme_command(&cli, command),
+        Some(Command::Case { ref investigation }) => case_command(&cli, investigation),
+        Some(Command::Review { ref command }) => review_command(&cli, command),
+        Some(Command::Jobs { ref investigation }) => jobs_command(&cli, investigation),
+        Some(Command::Evidence { ref investigation }) => evidence_command(&cli, investigation),
+        Some(Command::Tools) => tools_command(&cli),
     }
 }
 
@@ -656,9 +712,38 @@ async fn launch_tui(cli: &Cli, open: Option<String>) -> Result<()> {
     crate::tui::run(&mut app).await
 }
 
+fn confirm_write(cli: &Cli, prompt: &str) -> Result<bool> {
+    if cli.yes {
+        return Ok(true);
+    }
+    if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        return Err(user_err(format!(
+            "{prompt} Refusing to write without --yes when stdin is not a TTY."
+        )));
+    }
+    eprint!("{prompt} [y/N] ");
+    let _ = std::io::Write::flush(&mut std::io::stderr());
+    let mut line = String::new();
+    std::io::stdin().read_line(&mut line)?;
+    let answer = line.trim();
+    Ok(answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes"))
+}
+
+fn cli_theme(cli: &Cli) -> crate::tui::Theme {
+    let config = load_config_only(cli).unwrap_or_default();
+    let mut env = crate::tui::TerminalEnv::from_process();
+    if cli.plain || !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        env.no_color = true;
+    }
+    crate::tui::Theme::resolve(&config, &env)
+}
+
 fn list(cli: &Cli) -> Result<()> {
     let runtime = Runtime::load(cli)?;
     let investigations = runtime.store.list_investigations()?;
+    if cli.json {
+        return print_json(&investigations);
+    }
     if investigations.is_empty() {
         println!("No investigations. Run `os-int new \"Example Corp\"` or launch `os-int`.");
         return Ok(());
@@ -852,6 +937,7 @@ async fn collect(
             target.kind()
         )));
     }
+    let theme = cli_theme(cli);
     println!(
         "Investigation {}  page {} ({})",
         investigation.name,
@@ -885,12 +971,12 @@ async fn collect(
                 } else {
                     output.batch.summary
                 };
-                println!("✓  {text}");
+                println!("{}  {text}", theme.glyphs.done);
                 for warning in output.warnings {
                     println!("         ! {warning}");
                 }
             }
-            Err(error) => println!("✗  {error}"),
+            Err(error) => println!("{}  {error}", theme.glyphs.failed),
         }
     }
     Ok(())
@@ -1473,21 +1559,360 @@ fn team_command(cli: &Cli, command: &TeamCommand) -> Result<()> {
     }
 }
 
+fn case_command(cli: &Cli, query: &str) -> Result<()> {
+    let runtime = Runtime::load(cli)?;
+    let investigation = runtime.store.require_investigation(query)?;
+    let mut app = runtime.app();
+    if cli.plain {
+        app.apply_plain_mode();
+    }
+    app.open_investigation(investigation.id)?;
+    let home = app.case_home();
+    if cli.json {
+        return print_json(&serde_json::json!({
+            "investigation": investigation.name,
+            "empty": home.is_empty,
+            "targets": home.targets.iter().map(|target| serde_json::json!({
+                "kind": target.kind_tag().trim(),
+                "value": target.value,
+                "sources": target.source_count,
+                "never_collected": target.never_collected,
+                "running": target.running,
+            })).collect::<Vec<_>>(),
+            "entities": home.entities,
+            "findings": home.findings,
+            "next": home.next.iter().map(|item| serde_json::json!({
+                "label": item.label,
+                "hint": item.hint,
+            })).collect::<Vec<_>>(),
+        }));
+    }
+    let theme = cli_theme(cli);
+    println!("CASE  {}", investigation.name);
+    println!("TARGETS");
+    if home.targets.is_empty() {
+        println!("  {}  No targets yet. n new target", theme.glyphs.external);
+    }
+    for target in &home.targets {
+        let glyph = target
+            .provenance
+            .map(|provenance| theme.glyphs.provenance(provenance).to_string())
+            .unwrap_or_else(|| "—".into());
+        println!(
+            "  {} {:<22} {glyph} {}  {}",
+            target.kind_tag(),
+            truncate(&target.value, 22),
+            target.source_count,
+            App::case_target_status_label(target)
+        );
+    }
+    println!("AT A GLANCE");
+    println!(
+        "  {} entities   {} {}  {} {}  {} {}  {} {}",
+        home.entities.total,
+        theme.glyphs.collected,
+        home.entities.collected,
+        theme.glyphs.external,
+        home.entities.external,
+        theme.glyphs.analyst,
+        home.entities.analyst,
+        theme.glyphs.ai,
+        home.entities.agent
+    );
+    println!(
+        "  {} findings   {} {}  {} {}  {} {}  {} {}",
+        home.findings.total,
+        theme.glyphs.collected,
+        home.findings.collected,
+        theme.glyphs.external,
+        home.findings.external,
+        theme.glyphs.analyst,
+        home.findings.analyst,
+        theme.glyphs.ai,
+        home.findings.agent
+    );
+    println!("NEXT");
+    if home.next.is_empty() {
+        println!("  Case is current.");
+    }
+    for item in &home.next {
+        println!("  {}  {}", item.label, item.hint);
+    }
+    Ok(())
+}
+
+fn review_command(cli: &Cli, command: &ReviewCommand) -> Result<()> {
+    match command {
+        ReviewCommand::List { investigation } => review_list(cli, investigation),
+        ReviewCommand::Accept {
+            investigation,
+            reference,
+        } => review_decide(cli, investigation, reference, true),
+        ReviewCommand::Reject {
+            investigation,
+            reference,
+        } => review_decide(cli, investigation, reference, false),
+    }
+}
+
+fn review_list(cli: &Cli, query: &str) -> Result<()> {
+    let runtime = Runtime::load(cli)?;
+    let investigation = runtime.store.require_investigation(query)?;
+    let mut app = runtime.app();
+    if cli.plain {
+        app.apply_plain_mode();
+    }
+    app.open_investigation(investigation.id)?;
+    app.open_review_lane();
+    let items = app.listed_review_items();
+    if cli.json {
+        return print_json(
+            &items
+                .iter()
+                .map(|item| {
+                    serde_json::json!({
+                        "title": item.title,
+                        "group": item.group,
+                        "writable": item.is_writable(),
+                        "ai": item.is_ai(),
+                        "missing_citation": item.has_missing_citation(),
+                    })
+                })
+                .collect::<Vec<_>>(),
+        );
+    }
+    let theme = cli_theme(cli);
+    if items.is_empty() {
+        println!("Review is empty. Agent, playbook, and merge proposals land here.");
+        return Ok(());
+    }
+    println!("REVIEW  AI proposes only · nothing is written until you accept");
+    for item in &items {
+        let mark = if item.is_writable() {
+            format!("{}?", theme.glyphs.ai)
+        } else {
+            theme.glyphs.ai.to_string()
+        };
+        println!("  {mark} {}  {}", item.group, item.title);
+    }
+    Ok(())
+}
+
+fn review_decide(cli: &Cli, query: &str, reference: &str, accept: bool) -> Result<()> {
+    let runtime = Runtime::load(cli)?;
+    let investigation = runtime.store.require_investigation(query)?;
+    let mut app = runtime.app();
+    if cli.plain {
+        app.apply_plain_mode();
+    }
+    app.open_investigation(investigation.id)?;
+    app.open_review_lane();
+    let items = app.listed_review_items();
+    let index = items
+        .iter()
+        .position(|item| item.matches_reference(reference));
+    let Some(index) = index else {
+        return Err(user_err(format!("no Review item {reference}")));
+    };
+    let item = &items[index];
+    review_write_guard(item, accept)?;
+    let prompt = review_confirm_prompt(item, accept);
+    if !confirm_write(cli, &prompt)? {
+        return Err(user_err("cancelled; nothing written"));
+    }
+    let written_as = item.written_as;
+    app.selected = index;
+    if accept {
+        app.review_armed = true;
+        app.dispatch(crate::app::Action::Accept)?;
+        println!("{}", review_accepted_copy(written_as, app.config.ui.ascii));
+    } else {
+        app.dispatch(crate::app::Action::Reject)?;
+        println!("Rejected {reference}.");
+    }
+    Ok(())
+}
+
+fn review_write_guard(item: &crate::app::review::ReviewItem, accept: bool) -> Result<()> {
+    if accept && !item.is_writable() {
+        return Err(user_err(
+            "that Review row is transcript only; nothing to accept",
+        ));
+    }
+    if accept && item.has_missing_citation() {
+        return Err(user_err(
+            "a citation points at a missing source; acceptance is blocked",
+        ));
+    }
+    Ok(())
+}
+
+fn review_confirm_prompt(item: &crate::app::review::ReviewItem, accept: bool) -> String {
+    if !accept {
+        return format!("Reject {:?}?", item.title);
+    }
+    match item.written_as {
+        Some(crate::model::Provenance::Agent) => format!(
+            "Accept AI item {:?}? It keeps agent provenance.",
+            item.title
+        ),
+        Some(crate::model::Provenance::Analyst) => {
+            format!("Accept {:?}? It keeps analyst provenance.", item.title)
+        }
+        Some(other) => format!(
+            "Accept {:?}? It keeps {} provenance.",
+            item.title,
+            other.as_str()
+        ),
+        None => format!("Accept {:?}?", item.title),
+    }
+}
+
+fn review_accepted_copy(written_as: Option<crate::model::Provenance>, ascii: bool) -> String {
+    let glyph = if ascii { "*" } else { "◆" };
+    match written_as {
+        Some(crate::model::Provenance::Agent) => {
+            format!("Accepted. AI items keep {glyph} agent provenance.")
+        }
+        Some(crate::model::Provenance::Analyst) => "Accepted. Analyst provenance kept.".into(),
+        Some(other) => format!("Accepted. {} provenance kept.", other.as_str()),
+        None => "Accepted.".into(),
+    }
+}
+
+fn jobs_command(cli: &Cli, query: &str) -> Result<()> {
+    let runtime = Runtime::load(cli)?;
+    let investigation = runtime.store.require_investigation(query)?;
+    let data = runtime.store.load_investigation(investigation.id)?;
+    if cli.json {
+        return print_json(&data.jobs);
+    }
+    let theme = cli_theme(cli);
+    if data.jobs.is_empty() {
+        println!("No jobs.");
+        return Ok(());
+    }
+    for job in &data.jobs {
+        let mark = match job.status {
+            crate::model::JobStatus::Succeeded => theme.glyphs.done,
+            crate::model::JobStatus::Failed => theme.glyphs.failed,
+            crate::model::JobStatus::Cancelled => theme.glyphs.refused,
+            _ => "…",
+        };
+        println!(
+            "{} {}  {}  {}",
+            mark,
+            job.short_ref(),
+            job.label,
+            job.status.as_str()
+        );
+    }
+    Ok(())
+}
+
+fn evidence_command(cli: &Cli, query: &str) -> Result<()> {
+    let runtime = Runtime::load(cli)?;
+    let investigation = runtime.store.require_investigation(query)?;
+    let data = runtime.store.load_investigation(investigation.id)?;
+    if cli.json {
+        return print_json(&serde_json::json!({
+            "findings": data.findings,
+            "sources": data.sources.iter().map(|source| serde_json::json!({
+                "ref": source.short_ref().to_string(),
+                "title": source.title,
+                "provenance": source.provenance.as_str(),
+            })).collect::<Vec<_>>(),
+        }));
+    }
+    let theme = cli_theme(cli);
+    println!("EVIDENCE");
+    for finding in &data.findings {
+        println!(
+            "  F  {}  {}  {}",
+            theme.glyphs.provenance(finding.provenance),
+            finding.short_ref(),
+            finding.title
+        );
+    }
+    for source in &data.sources {
+        println!(
+            "  S  {}  {}  {}",
+            theme.glyphs.provenance(source.provenance),
+            source.short_ref(),
+            source.title
+        );
+    }
+    if data.findings.is_empty() && data.sources.is_empty() {
+        println!("  No evidence yet.");
+    }
+    Ok(())
+}
+
+fn tools_command(cli: &Cli) -> Result<()> {
+    let runtime = Runtime::load(cli)?;
+    let app = runtime.app();
+    let theme = cli_theme(cli);
+    let rows: Vec<serde_json::Value> = app
+        .tools
+        .tools()
+        .iter()
+        .map(|entry| {
+            let refused = entry.definition.activity == crate::tools::Activity::Active;
+            serde_json::json!({
+                "name": entry.definition.name,
+                "activity": entry.definition.activity.as_str(),
+                "refused": refused,
+                "available": entry.is_available(),
+            })
+        })
+        .collect();
+    if cli.json {
+        return print_json(&rows);
+    }
+    for entry in app.tools.tools() {
+        let refused = entry.definition.activity == crate::tools::Activity::Active;
+        let mark = if refused {
+            theme.glyphs.refused
+        } else if entry.is_available() {
+            theme.glyphs.done
+        } else {
+            "·"
+        };
+        let status = if refused {
+            format!(
+                "active  refused: {}",
+                entry
+                    .problem
+                    .as_deref()
+                    .unwrap_or("os-int observes public information only")
+            )
+        } else if entry.is_available() {
+            "passive".into()
+        } else {
+            "missing".into()
+        };
+        println!("{mark}  {:<16}  {status}", entry.definition.name);
+    }
+    Ok(())
+}
+
 fn audit_command(cli: &Cli, query: &str, kind: Option<&str>) -> Result<()> {
     let runtime = Runtime::load(cli)?;
     let investigation = runtime.store.require_investigation(query)?;
     let filter = kind.map(AuditKind::parse).transpose().map_err(user_err)?;
     let entries = runtime.store.list_audit(investigation.id)?;
-    if entries.is_empty() {
+    let filtered: Vec<_> = entries
+        .into_iter()
+        .filter(|entry| filter.is_none_or(|kind| entry.kind == kind))
+        .collect();
+    if cli.json {
+        return print_json(&filtered);
+    }
+    if filtered.is_empty() {
         println!("No audit events.");
         return Ok(());
     }
-    for entry in entries {
-        if let Some(kind) = filter
-            && entry.kind != kind
-        {
-            continue;
-        }
+    for entry in filtered {
         println!(
             "{}  {}  {}@{}  {}",
             entry.short_ref(),
@@ -1582,7 +2007,117 @@ fn search_around_command(
         &links,
     )
     .map_err(user_err)?;
-    print_json(&view)
+    if cli.json {
+        return print_json(&view);
+    }
+    let theme = cli_theme(cli);
+    println!(
+        "GRAPH  {} hop(s) · {} nodes · {} edges",
+        view.hops_used,
+        view.nodes.len(),
+        view.edges.len()
+    );
+    if view.nodes.is_empty() {
+        println!("  No nodes.");
+        return Ok(());
+    }
+    let mut seen = std::collections::HashSet::new();
+    if let Some(root) = view.nodes.first() {
+        print_cli_tree_node(&view, &theme, root.object.id, None, "", &mut seen);
+    }
+    Ok(())
+}
+
+fn cli_entity_tag(kind: &str) -> &'static str {
+    crate::tui::Glyphs::entity_tag(&EntityKind::parse(kind))
+}
+
+fn print_cli_tree_node(
+    view: &crate::query::SearchAroundView,
+    theme: &crate::tui::Theme,
+    id: uuid::Uuid,
+    parent: Option<uuid::Uuid>,
+    prefix: &str,
+    seen: &mut std::collections::HashSet<uuid::Uuid>,
+) {
+    let Some(node) = view.nodes.iter().find(|node| node.object.id == id) else {
+        return;
+    };
+    let already = !seen.insert(id);
+    let glyph = theme.glyphs.provenance(
+        crate::model::Provenance::parse(&node.object.provenance)
+            .unwrap_or(crate::model::Provenance::Collected),
+    );
+    let seen_mark = if already { " (seen)" } else { "" };
+    if prefix.is_empty() {
+        println!(
+            "  {} {} {}{seen_mark}",
+            cli_entity_tag(&node.object.kind),
+            node.object.value,
+            glyph
+        );
+    }
+    if already {
+        return;
+    }
+    let mut children: Vec<_> = view
+        .edges
+        .iter()
+        .filter_map(|edge| {
+            let other = if edge.from_id == id {
+                edge.to_id
+            } else if edge.to_id == id {
+                edge.from_id
+            } else {
+                return None;
+            };
+            if Some(other) == parent {
+                return None;
+            }
+            Some((other, edge))
+        })
+        .collect();
+    children.sort_by(|left, right| left.1.kind.cmp(&right.1.kind));
+    let count = children.len();
+    for (index, (child, edge)) in children.into_iter().enumerate() {
+        let last = index + 1 == count;
+        let branch = if theme.glyphs.ascii {
+            if last { "`- " } else { "|- " }
+        } else if last {
+            "└─ "
+        } else {
+            "├─ "
+        };
+        let pad = if last {
+            "   "
+        } else if theme.glyphs.ascii {
+            "|  "
+        } else {
+            "│  "
+        };
+        let next = format!("{prefix}{pad}");
+        let child_node = view.nodes.iter().find(|node| node.object.id == child);
+        let child_seen = seen.contains(&child);
+        let label = child_node
+            .map(|node| node.object.value.as_str())
+            .unwrap_or("?");
+        let kind = child_node
+            .map(|node| cli_entity_tag(&node.object.kind))
+            .unwrap_or("UNK");
+        let glyph = child_node
+            .map(|node| {
+                theme.glyphs.provenance(
+                    crate::model::Provenance::parse(&node.object.provenance)
+                        .unwrap_or(crate::model::Provenance::Collected),
+                )
+            })
+            .unwrap_or("?");
+        let mark = if child_seen { " (seen)" } else { "" };
+        println!("{prefix}{branch}{} {kind} {label} {glyph}{mark}", edge.kind);
+        if !child_seen {
+            print_cli_tree_node(view, theme, child, Some(id), &next, seen);
+        }
+    }
 }
 
 fn resolve_command(cli: &Cli, command: &ResolveCommand) -> Result<()> {
@@ -1633,6 +2168,9 @@ fn resolve_command(cli: &Cli, command: &ResolveCommand) -> Result<()> {
             if ids.len() < 2 {
                 return Err(user_err("merge needs at least two distinct entities"));
             }
+            if !confirm_write(cli, "Merge these entities? This writes a resolution bag.")? {
+                return Err(user_err("cancelled; nothing written"));
+            }
             let canonical = ids[0];
             let actor = runtime.store.identity().user_id.clone();
             let resolution = runtime.store.resolve_entities(
@@ -1673,6 +2211,9 @@ fn resolve_command(cli: &Cli, command: &ResolveCommand) -> Result<()> {
                     .map(|resolution| resolution.id)
                     .ok_or_else(|| user_err(format!("no active resolution for {target}")))?
             };
+            if !confirm_write(cli, "Unresolve this bag? This writes.")? {
+                return Err(user_err("cancelled; nothing written"));
+            }
             let actor = runtime.store.identity().user_id.clone();
             runtime.store.unresolve_entities(resolution_id, &actor)?;
             println!("Unresolved {target}");
@@ -1910,6 +2451,18 @@ mod tests {
         }
         let plain = Cli::try_parse_from(["os-int", "--plain"]).expect("plain");
         assert!(plain.plain);
+        let review = Cli::try_parse_from(["os-int", "--yes", "review", "accept", "Case", "X-1"])
+            .expect("review accept");
+        assert!(review.yes);
+        match review.command {
+            Some(Command::Review {
+                command: ReviewCommand::Accept { reference, .. },
+            }) => assert_eq!(reference, "X-1"),
+            other => panic!("expected review accept {other:?}"),
+        }
+        let case = Cli::try_parse_from(["os-int", "--json", "case", "Case"]).expect("case");
+        assert!(case.json);
+        assert!(matches!(case.command, Some(Command::Case { .. })));
         let preview =
             Cli::try_parse_from(["os-int", "theme", "preview", "--all"]).expect("preview");
         match preview.command {
@@ -2070,5 +2623,69 @@ mod tests {
                 .is_none()
         );
         assert!(store.list_investigations().expect("list").is_empty());
+    }
+
+    #[test]
+    fn confirm_write_refuses_without_yes_when_stdin_is_not_a_tty() {
+        let cli = Cli::try_parse_from(["os-int", "review", "accept", "Case", "X-1"]).expect("cli");
+        assert!(!cli.yes);
+        let error = confirm_write(&cli, "Accept AI item?").expect_err("non-tty");
+        let text = error.to_string();
+        assert!(text.contains("--yes"), "{text}");
+        assert!(
+            text.contains("not a TTY") || text.contains("Refusing"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn cli_review_accept_is_blocked_when_a_citation_is_missing() {
+        let item = crate::app::review::ReviewItem {
+            kind: crate::app::review::ReviewKind::Agent,
+            proposal_id: Some(Uuid::new_v4()),
+            run_id: None,
+            merge: None,
+            short_ref: Some("X-1".into()),
+            title: "blocked".into(),
+            group: "X-1 Q-1 · agent".into(),
+            preview: Vec::new(),
+            citations: vec![crate::app::review::ReviewCitation {
+                reference: "S-99".into(),
+                present: false,
+                label: "missing".into(),
+            }],
+            rationale: String::new(),
+            written_as: Some(crate::model::Provenance::Agent),
+        };
+        let error = review_write_guard(&item, true).expect_err("blocked");
+        assert!(error.to_string().contains("missing source"), "{error}");
+        assert!(item.matches_reference("X-1"));
+        assert!(!item.matches_reference("X-10"));
+    }
+
+    #[test]
+    fn cli_accept_copy_matches_item_provenance() {
+        let ai = crate::app::review::ReviewItem {
+            kind: crate::app::review::ReviewKind::Agent,
+            proposal_id: Some(Uuid::new_v4()),
+            run_id: None,
+            merge: None,
+            short_ref: Some("X-1".into()),
+            title: "phish".into(),
+            group: "X-1".into(),
+            preview: Vec::new(),
+            citations: Vec::new(),
+            rationale: String::new(),
+            written_as: Some(crate::model::Provenance::Agent),
+        };
+        assert!(review_confirm_prompt(&ai, true).contains("agent provenance"));
+        assert!(review_accepted_copy(ai.written_as, true).contains('*'));
+        assert!(review_accepted_copy(ai.written_as, false).contains('◆'));
+        let analyst = crate::app::review::ReviewItem {
+            written_as: Some(crate::model::Provenance::Analyst),
+            ..ai
+        };
+        assert!(review_confirm_prompt(&analyst, true).contains("analyst provenance"));
+        assert!(review_accepted_copy(analyst.written_as, false).contains("Analyst"));
     }
 }

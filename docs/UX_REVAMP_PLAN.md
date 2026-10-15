@@ -3,7 +3,15 @@
 > **Thesis: os-int is a keyboard-first analyst cockpit where every fact shows its source and nothing gets written without a human's say-so.**
 > One layout. One palette. One keymap. Three panes: Rail, Board, and an Inspector that's always there. AI suggestions don't belong in the evidence. They go to a separate Review lane and stay there until you accept them, deliberately.
 
-Plan only. No code changes, PRs or commits. This replaces `UX_REVAMP_PLAN.md`. The problem inventory there (25 items, with file references) still applies, and the main points are summarised in §1.
+Status: **P1–P5 implemented.** This is the UX spec. Each phase PR updated it in place. The problem inventory (25 items, with file references) is summarised in §1.
+
+| Phase | Scope | Status |
+|---|---|---|
+| P1 | Roles, themes, command registry | Merged |
+| P2 | Cockpit layout + Review lane | Merged |
+| P3 | Evidence tables, provenance, states | Merged |
+| P4 | Motion & signature themes | Merged |
+| P5 | Graph tree, Case home, CLI parity, a11y | Implemented |
 
 ---
 
@@ -212,7 +220,7 @@ Gradients interpolate in **OKLab** between the four `heat` stops and are quantis
 3. the colour-blind ΔE table;
 4. the detected colour depth and why (`COLORTERM=truecolor`).
 
-`os-int theme preview --all` stacks all five themes. In the TUI, palette `:theme` cycles themes live, `y` saves to config, `Esc` reverts, and `Enter` previews. This command is also the snapshot fixture for UI tests.
+`os-int theme preview --all` stacks all five themes. In the TUI, palette `:theme` cycles themes live, `y` saves to config, and `Esc` reverts. `Enter` does not write. This command is also the snapshot fixture for UI tests.
 
 
 ### Glyphs (Unicode; no Nerd Fonts; `ui.ascii = true` gives the fallback)
@@ -509,7 +517,7 @@ Add `src/tui/motion.rs` (Animator, 60 ms on-demand tick, a region-gated redraw),
 
 **P5 · Graph tree, Case home, CLI parity, a11y sign-off (M, ~800 LOC)**
 Build the edge-labelled graph tree using M7 and edge heat, the Case dashboard with NEXT actions and M10 sweeps, CLI glyph/`--json` parity (the CLI respects the theme's 16-colour mapping and never animates when stdout isn't a TTY), and an 80×24 audit.
-*Done when:* the demo graph is readable at 80 cols; the hallway test (3 new users: create → collect → accept an AI finding → export, no help screen) passes; all snapshots pass in Mono + ASCII + `motion=off`; the screen-reader pass in plain mode hears no spinner churn.
+*Done when:* the demo graph is readable at 80 cols; the hallway test (3 new users: create → collect → accept an AI finding → export, no help screen) passes; all snapshots pass in Mono + ASCII + `motion=off`; the screen-reader pass in plain mode hears no spinner churn. Implemented in this phase. All five UX gates are now on main.
 
 
 ## 11. Reviewer gate (every PR)

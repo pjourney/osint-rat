@@ -516,7 +516,7 @@ pub const COMMANDS: &[Command] = &[
         "theme",
         "Theme",
         "",
-        "Cycle cockpit themes live. y saves, Esc reverts, Enter previews.",
+        "Cycle cockpit themes live. y saves, Esc reverts.",
         true,
         false,
         true,
@@ -805,11 +805,19 @@ pub fn hint_commands_for(view: View) -> Vec<&'static Command> {
 /// Context-bar commands for the focused pane.
 pub fn context_commands(view: View, pane: super::Pane) -> Vec<&'static Command> {
     let _ = pane;
-    let mut commands = hint_commands_for(view);
-    for id in context_ids(view) {
-        if let Some(command) = COMMANDS.iter().find(|command| command.id == *id)
-            && !commands.iter().any(|existing| existing.id == command.id)
-        {
+    let extras: Vec<&'static Command> = context_ids(view)
+        .iter()
+        .filter_map(|id| COMMANDS.iter().find(|command| command.id == *id))
+        .collect();
+    let hints = hint_commands_for(view);
+    let (lead, rest) = if view == View::Overview {
+        (extras, hints)
+    } else {
+        (hints, extras)
+    };
+    let mut commands = lead;
+    for command in rest {
+        if !commands.iter().any(|existing| existing.id == command.id) {
             commands.push(command);
         }
     }
@@ -818,12 +826,7 @@ pub fn context_commands(view: View, pane: super::Pane) -> Vec<&'static Command> 
 
 fn context_ids(view: View) -> &'static [&'static str] {
     match view {
-        View::Overview => &[
-            "run_collectors",
-            "new_investigation",
-            "ask_agent",
-            "search_around",
-        ],
+        View::Overview => &["run_collectors", "new_page", "ask_agent", "search_around"],
         View::Entities => &[
             "search_around",
             "search_around_graph",

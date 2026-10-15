@@ -25,6 +25,8 @@ pub struct GraphState {
     pub edge_cap: usize,
     /// Nodes added by the last Search Around / hop change. Shown with `+` until the next key.
     pub plus_ids: Vec<uuid::Uuid>,
+    /// Root of the edge-labelled tree. Enter / `g` recenters here.
+    pub focus_id: Option<uuid::Uuid>,
 }
 
 impl Default for GraphState {
@@ -41,6 +43,7 @@ impl Default for GraphState {
             node_cap: DEFAULT_NODE_CAP,
             edge_cap: DEFAULT_EDGE_CAP,
             plus_ids: Vec::new(),
+            focus_id: None,
         }
     }
 }
@@ -224,7 +227,7 @@ impl App {
     }
 
     pub(crate) fn move_graph_selection(&mut self, delta: i32) {
-        let count = self.visible_graph().nodes.len();
+        let count = self.graph_tree_ids().len();
         if count == 0 {
             self.graph.selected = 0;
             self.entity_id = None;
@@ -236,12 +239,85 @@ impl App {
     }
 
     pub(crate) fn open_selected_graph_node(&mut self) {
+        self.focus_selected_graph_node();
+    }
+
+    pub(crate) fn focus_selected_graph_node(&mut self) {
+        self.sync_graph_selection();
+        let Some(id) = self.entity_id else {
+            self.status = "No node selected.".into();
+            return;
+        };
+        self.graph.focus_id = Some(id);
+        if let Some(index) = self
+            .graph_tree_ids()
+            .iter()
+            .position(|candidate| *candidate == id)
+        {
+            self.graph.selected = index;
+        }
+        self.status = "Focused node. Enter focuses, g recenters, s Search Around.".into();
+        self.mark_dirty();
+    }
+
+    pub(crate) fn recenter_graph(&mut self) {
         self.sync_graph_selection();
         if self.entity_id.is_none() {
             self.status = "No node selected.".into();
             return;
         }
-        self.open_object_view();
+        self.graph.focus_id = self.entity_id;
+        if let Some(seed) = self.entity_id {
+            self.apply_graph_result(self.graph_query(vec![seed], self.graph.hops.max(1)), false);
+        }
+    }
+
+    /// Tree walk order from the focused node. Screen readers and j/k use this.
+    pub fn graph_tree_ids(&self) -> Vec<uuid::Uuid> {
+        let visible = self.visible_graph();
+        if visible.nodes.is_empty() {
+            return Vec::new();
+        }
+        let hop_of: std::collections::HashMap<uuid::Uuid, u32> = visible
+            .nodes
+            .iter()
+            .map(|node| (node.id, node.hop))
+            .collect();
+        let mut adjacency: std::collections::HashMap<uuid::Uuid, Vec<uuid::Uuid>> =
+            std::collections::HashMap::new();
+        for edge in &visible.edges {
+            adjacency.entry(edge.from_id).or_default().push(edge.to_id);
+            adjacency.entry(edge.to_id).or_default().push(edge.from_id);
+        }
+        for neighbours in adjacency.values_mut() {
+            neighbours.sort();
+            neighbours.dedup();
+        }
+        let root = self
+            .graph
+            .focus_id
+            .filter(|id| hop_of.contains_key(id))
+            .or_else(|| {
+                self.graph
+                    .result
+                    .seed_ids
+                    .iter()
+                    .copied()
+                    .find(|id| hop_of.contains_key(id))
+            })
+            .or_else(|| visible.nodes.first().map(|node| node.id));
+        let Some(root) = root else {
+            return Vec::new();
+        };
+        let mut order = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        walk_graph_tree(&mut order, &mut seen, &adjacency, &hop_of, root, None);
+        for node in &visible.nodes {
+            if seen.insert(node.id) {
+                order.push(node.id);
+            }
+        }
+        order
     }
 
     pub(crate) fn apply_graph_result(&mut self, query: SearchAroundQuery, merge: bool) {
@@ -319,7 +395,7 @@ impl App {
     }
 
     fn visible_graph_entity_id(&self, index: usize) -> Option<uuid::Uuid> {
-        self.visible_graph().nodes.get(index).map(|node| node.id)
+        self.graph_tree_ids().get(index).copied()
     }
 
     fn graph_query(&self, seed_ids: Vec<uuid::Uuid>, hops: u32) -> SearchAroundQuery {
@@ -336,6 +412,13 @@ impl App {
         }
         if replace_seeds {
             self.graph.seed_ids = result.seed_ids.clone();
+            self.graph.focus_id = self.graph.seed_ids.first().copied();
+        } else if self
+            .graph
+            .focus_id
+            .is_none_or(|id| !result.nodes.iter().any(|node| node.id == id))
+        {
+            self.graph.focus_id = result.seed_ids.first().copied();
         }
         let previous: std::collections::HashSet<uuid::Uuid> =
             self.graph.result.nodes.iter().map(|node| node.id).collect();
@@ -459,7 +542,7 @@ impl App {
     }
 
     fn clamp_graph_selection(&mut self) {
-        let count = self.visible_graph().nodes.len();
+        let count = self.graph_tree_ids().len();
         if count == 0 {
             self.graph.selected = 0;
             return;
@@ -471,6 +554,36 @@ impl App {
 
     fn sync_graph_selection(&mut self) {
         self.entity_id = self.visible_graph_entity_id(self.graph.selected);
+    }
+}
+
+fn walk_graph_tree(
+    order: &mut Vec<uuid::Uuid>,
+    seen: &mut std::collections::HashSet<uuid::Uuid>,
+    adjacency: &std::collections::HashMap<uuid::Uuid, Vec<uuid::Uuid>>,
+    hop_of: &std::collections::HashMap<uuid::Uuid, u32>,
+    id: uuid::Uuid,
+    parent: Option<uuid::Uuid>,
+) {
+    if !seen.insert(id) {
+        return;
+    }
+    order.push(id);
+    let hop = hop_of.get(&id).copied().unwrap_or(0);
+    let mut children: Vec<uuid::Uuid> = adjacency
+        .get(&id)
+        .into_iter()
+        .flatten()
+        .copied()
+        .filter(|other| Some(*other) != parent && hop_of.contains_key(other))
+        .collect();
+    children.sort_by_key(|child| (hop_of.get(child).copied().unwrap_or(hop + 1), *child));
+    children.dedup();
+    for child in children {
+        if seen.contains(&child) {
+            continue;
+        }
+        walk_graph_tree(order, seen, adjacency, hop_of, child, Some(id));
     }
 }
 

@@ -27,6 +27,8 @@ pub struct ReviewItem {
     pub proposal_id: Option<Uuid>,
     pub run_id: Option<Uuid>,
     pub merge: Option<PendingResolve>,
+    /// Proposal short-ref (`X-n`) when this row is a pending Action.
+    pub short_ref: Option<String>,
     pub title: String,
     pub group: String,
     pub preview: Vec<String>,
@@ -47,6 +49,19 @@ impl ReviewItem {
 
     pub fn is_writable(&self) -> bool {
         self.written_as.is_some() && (self.proposal_id.is_some() || self.merge.is_some())
+    }
+
+    /// Exact `X-n` short-ref or full UUID. Never substring-matches (`X-1` ≠ `X-10`).
+    pub fn matches_reference(&self, raw: &str) -> bool {
+        let needle = raw.trim();
+        if needle.is_empty() {
+            return false;
+        }
+        if self.short_ref.as_deref() == Some(needle) {
+            return true;
+        }
+        self.proposal_id
+            .is_some_and(|id| id.to_string().eq_ignore_ascii_case(needle))
     }
 }
 
@@ -77,10 +92,19 @@ impl App {
             .iter()
             .filter(|proposal| proposal.status == ProposalStatus::Pending)
         {
-            items.push(review_item_from_proposal(workspace, proposal));
+            items.push(review_item_from_proposal(
+                workspace,
+                proposal,
+                self.config.ui.ascii,
+            ));
         }
         for pending in &self.pending_merges {
-            items.push(review_item_from_merge(workspace, pending, "manual merge"));
+            items.push(review_item_from_merge(
+                workspace,
+                pending,
+                "manual merge",
+                self.config.ui.ascii,
+            ));
         }
         for suggestion in self.listed_suggestions() {
             let already = items.iter().any(|item| {
@@ -91,7 +115,11 @@ impl App {
             if already {
                 continue;
             }
-            items.push(review_item_from_suggestion(workspace, &suggestion));
+            items.push(review_item_from_suggestion(
+                workspace,
+                &suggestion,
+                self.config.ui.ascii,
+            ));
         }
         for run in &workspace.data.agent_runs {
             if items
@@ -100,7 +128,7 @@ impl App {
             {
                 continue;
             }
-            items.push(review_item_from_run(run));
+            items.push(review_item_from_run(run, self.config.ui.ascii));
         }
         items
     }
@@ -150,7 +178,7 @@ impl App {
             return;
         }
         self.review_armed = true;
-        self.status = confirm_status(&items);
+        self.status = confirm_status(&items, self.config.ui.ascii);
         self.motion.arm_confirm();
     }
 
@@ -191,35 +219,11 @@ impl App {
     }
 
     pub fn confirm_accept_text(&self) -> String {
-        confirm_status(&self.armed_review_items())
+        confirm_status(&self.armed_review_items(), self.config.ui.ascii)
     }
 
     pub fn confirm_bar_text(&self) -> String {
-        let items = self.armed_review_items();
-        let ai = items.iter().filter(|item| item.is_ai()).count();
-        let analyst = items
-            .iter()
-            .filter(|item| item.written_as == Some(Provenance::Analyst))
-            .count();
-        match (items.len(), ai, analyst) {
-            (1, 1, _) => {
-                " Accept 1 AI item? It keeps ◆ agent provenance.   y confirm   any other key cancels "
-                    .into()
-            }
-            (1, _, 1) => {
-                " Accept 1 analyst item? It keeps analyst provenance.   y confirm   any other key cancels "
-                    .into()
-            }
-            (count, ai, 0) if ai == count => format!(
-                " Accept {count} AI item(s)? They keep ◆ agent provenance.   y confirm   any other key cancels "
-            ),
-            (count, 0, analyst) if analyst == count => format!(
-                " Accept {count} analyst item(s)? They keep analyst provenance.   y confirm   any other key cancels "
-            ),
-            (count, ai, analyst) => format!(
-                " Accept {count} item(s): {ai} AI keep ◆, {analyst} analyst.   y confirm   any other key cancels "
-            ),
-        }
+        confirm_bar(&self.armed_review_items(), self.config.ui.ascii)
     }
 
     pub(crate) fn toggle_review_mark(&mut self) {
@@ -235,7 +239,11 @@ impl App {
     }
 }
 
-fn review_item_from_proposal(workspace: &Workspace, proposal: &Proposal) -> ReviewItem {
+fn review_item_from_proposal(
+    workspace: &Workspace,
+    proposal: &Proposal,
+    ascii: bool,
+) -> ReviewItem {
     let run = workspace.agent_run(proposal.agent_run_id);
     let playbook = run
         .map(|run| run.agent_name == crate::storage::PLAYBOOK_AGENT_NAME)
@@ -260,9 +268,10 @@ fn review_item_from_proposal(workspace: &Workspace, proposal: &Proposal) -> Revi
         proposal_id: Some(proposal.id),
         run_id: Some(proposal.agent_run_id),
         merge: None,
+        short_ref: Some(proposal.short_ref().to_string()),
         title: proposal.action.summary(),
         group,
-        preview: preview_lines(&proposal.action, kind),
+        preview: preview_lines(&proposal.action, kind, ascii),
         citations: citations_for(workspace, proposal.action.cited_sources()),
         rationale: rationale_for(&proposal.action),
         written_as: Some(written_provenance(kind, &proposal.action)),
@@ -273,6 +282,7 @@ fn review_item_from_merge(
     workspace: &Workspace,
     pending: &PendingResolve,
     rule: &str,
+    ascii: bool,
 ) -> ReviewItem {
     let labels = pending
         .entity_ids
@@ -287,11 +297,13 @@ fn review_item_from_merge(
         .entity(pending.canonical_id)
         .map(|entity| format!("{} {}", entity.short_ref(), entity.display_name()))
         .unwrap_or_else(|| pending.canonical_id.to_string());
+    let _ = ascii;
     ReviewItem {
         kind: ReviewKind::Merge,
         proposal_id: None,
         run_id: None,
         merge: Some(pending.clone()),
+        short_ref: None,
         title: format!("Merge {}", labels.join(" + ")),
         group: format!("≈ {rule}"),
         preview: vec![
@@ -309,6 +321,7 @@ fn review_item_from_merge(
 fn review_item_from_suggestion(
     workspace: &Workspace,
     suggestion: &ResolutionSuggestion,
+    ascii: bool,
 ) -> ReviewItem {
     let pending = PendingResolve {
         entity_ids: suggestion.entity_ids.clone(),
@@ -319,17 +332,19 @@ fn review_item_from_suggestion(
         workspace,
         &pending,
         &format!("{} score {}", suggestion.rule.as_str(), suggestion.score),
+        ascii,
     );
     item.title = format!("{}  score {}", item.title, suggestion.score);
     item
 }
 
-fn review_item_from_run(run: &crate::model::AgentRun) -> ReviewItem {
+fn review_item_from_run(run: &crate::model::AgentRun, _ascii: bool) -> ReviewItem {
     ReviewItem {
         kind: ReviewKind::History,
         proposal_id: None,
         run_id: Some(run.id),
         merge: None,
+        short_ref: None,
         title: run.question.clone(),
         group: format!("{} · {}", run.short_ref(), run.agent_name),
         preview: vec!["Transcript only. Nothing to accept.".into()],
@@ -347,7 +362,12 @@ fn written_provenance(kind: ReviewKind, action: &AgentAction) -> Provenance {
     }
 }
 
-fn confirm_status(items: &[ReviewItem]) -> String {
+fn ai_mark(ascii: bool) -> &'static str {
+    if ascii { "*" } else { "◆" }
+}
+
+fn confirm_status(items: &[ReviewItem], ascii: bool) -> String {
+    let mark = ai_mark(ascii);
     let ai = items.iter().filter(|item| item.is_ai()).count();
     let analyst = items
         .iter()
@@ -355,21 +375,49 @@ fn confirm_status(items: &[ReviewItem]) -> String {
         .count();
     match (items.len(), ai, analyst) {
         (1, 1, _) => {
-            "Armed — accept 1 AI item. It keeps ◆ agent provenance. y confirm. Any other key cancels."
-                .into()
+            format!(
+                "Armed — accept 1 AI item. It keeps {mark} agent provenance. y confirm. Any other key cancels."
+            )
         }
         (1, _, 1) => {
             "Armed — accept 1 analyst item. It keeps analyst provenance. y confirm. Any other key cancels."
                 .into()
         }
         (count, ai, 0) if ai == count => format!(
-            "Armed — accept {count} AI item(s). They keep ◆ agent provenance. y confirm. Any other key cancels."
+            "Armed — accept {count} AI item(s). They keep {mark} agent provenance. y confirm. Any other key cancels."
         ),
         (count, 0, analyst) if analyst == count => format!(
             "Armed — accept {count} analyst item(s). They keep analyst provenance. y confirm. Any other key cancels."
         ),
         (count, ai, analyst) => format!(
-            "Armed — accept {count} item(s): {ai} AI keep ◆, {analyst} analyst. y confirm. Any other key cancels."
+            "Armed — accept {count} item(s): {ai} AI keep {mark}, {analyst} analyst. y confirm. Any other key cancels."
+        ),
+    }
+}
+
+fn confirm_bar(items: &[ReviewItem], ascii: bool) -> String {
+    let mark = ai_mark(ascii);
+    let ai = items.iter().filter(|item| item.is_ai()).count();
+    let analyst = items
+        .iter()
+        .filter(|item| item.written_as == Some(Provenance::Analyst))
+        .count();
+    match (items.len(), ai, analyst) {
+        (1, 1, _) => format!(
+            " Accept 1 AI item? It keeps {mark} agent provenance.   y confirm   any other key cancels "
+        ),
+        (1, _, 1) => {
+            " Accept 1 analyst item? It keeps analyst provenance.   y confirm   any other key cancels "
+                .into()
+        }
+        (count, ai, 0) if ai == count => format!(
+            " Accept {count} AI item(s)? They keep {mark} agent provenance.   y confirm   any other key cancels "
+        ),
+        (count, 0, analyst) if analyst == count => format!(
+            " Accept {count} analyst item(s)? They keep analyst provenance.   y confirm   any other key cancels "
+        ),
+        (count, ai, analyst) => format!(
+            " Accept {count} item(s): {ai} AI keep {mark}, {analyst} analyst.   y confirm   any other key cancels "
         ),
     }
 }
@@ -379,7 +427,10 @@ pub fn resolve_source_citation(workspace: &Workspace, raw: &str) -> Option<Uuid>
     resolve_citation(workspace, raw)
 }
 
-fn preview_lines(action: &AgentAction, kind: ReviewKind) -> Vec<String> {
+fn preview_lines(action: &AgentAction, kind: ReviewKind, ascii: bool) -> Vec<String> {
+    let mark = ai_mark(ascii);
+    let arrow = if ascii { "->" } else { "─▶" };
+    let analyst = if ascii { "A" } else { "✎" };
     match action {
         AgentAction::AddFinding {
             title,
@@ -387,7 +438,7 @@ fn preview_lines(action: &AgentAction, kind: ReviewKind) -> Vec<String> {
             confidence,
             ..
         } => vec![
-            "+ Finding  ◆ AI".into(),
+            format!("+ Finding  {mark} AI"),
             format!("  {title}"),
             format!(
                 "  confidence  {}",
@@ -405,9 +456,9 @@ fn preview_lines(action: &AgentAction, kind: ReviewKind) -> Vec<String> {
         .collect(),
         AgentAction::AssertFindingTemplate { title, details } => {
             let (glyph, label) = if kind == ReviewKind::Playbook {
-                ("✎", "analyst (playbook template)")
+                (analyst, "analyst (playbook template)")
             } else {
-                ("◆", "agent (kept forever)")
+                (mark, "agent (kept forever)")
             };
             vec![
                 format!("+ Finding template  {glyph} {label}"),
@@ -416,7 +467,7 @@ fn preview_lines(action: &AgentAction, kind: ReviewKind) -> Vec<String> {
             ]
         }
         AgentAction::AddNote { body } => vec![
-            "+ Note  ◆ AI".into(),
+            format!("+ Note  {mark} AI"),
             format!("  {}", body.lines().next().unwrap_or_default()),
             "  provenance agent (kept forever)".into(),
         ],
@@ -433,8 +484,8 @@ fn preview_lines(action: &AgentAction, kind: ReviewKind) -> Vec<String> {
         AgentAction::LinkEntity {
             from, to, relation, ..
         } => vec![
-            "+ Link  ◆ AI".into(),
-            format!("  {from} ─▶ {relation}  {to}"),
+            format!("+ Link  {mark} AI"),
+            format!("  {from} {arrow} {relation}  {to}"),
             "  provenance agent (kept forever)".into(),
         ],
         AgentAction::RunCollector { collector, target } => {
@@ -448,12 +499,12 @@ fn preview_lines(action: &AgentAction, kind: ReviewKind) -> Vec<String> {
             format!("  {}", format.as_deref().unwrap_or("markdown")),
         ],
         AgentAction::ProposeResolve { entities, reason } => vec![
-            "+ Resolve  ◆ AI".into(),
+            format!("+ Resolve  {mark} AI"),
             format!("  {}", entities.join(", ")),
             format!("  {reason}"),
         ],
         AgentAction::ProposeUnresolve { entity, reason } => vec![
-            "+ Unresolve  ◆ AI".into(),
+            format!("+ Unresolve  {mark} AI"),
             format!("  {entity}"),
             format!("  {reason}"),
         ],
@@ -509,4 +560,40 @@ fn resolve_citation(workspace: &Workspace, raw: &str) -> Option<Uuid> {
         .iter()
         .find(|source| source.short_ref().to_string() == raw || source.title == raw)
         .map(|source| source.id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ReviewItem, ReviewKind};
+
+    fn item(short_ref: &str, id: uuid::Uuid) -> ReviewItem {
+        ReviewItem {
+            kind: ReviewKind::Agent,
+            proposal_id: Some(id),
+            run_id: None,
+            merge: None,
+            short_ref: Some(short_ref.into()),
+            title: "finding".into(),
+            group: format!("{short_ref} Q-1 · agent"),
+            preview: Vec::new(),
+            citations: Vec::new(),
+            rationale: String::new(),
+            written_as: Some(crate::model::Provenance::Agent),
+        }
+    }
+
+    #[test]
+    fn review_ref_x1_does_not_select_x10() {
+        let ten = item("X-10", uuid::Uuid::new_v4());
+        let one = item("X-1", uuid::Uuid::new_v4());
+        assert!(one.matches_reference("X-1"));
+        assert!(!one.matches_reference("X-10"));
+        assert!(ten.matches_reference("X-10"));
+        assert!(
+            !ten.matches_reference("X-1"),
+            "X-1 must not select X-10 via contains"
+        );
+        assert!(!ten.matches_reference("X"));
+        assert!(one.matches_reference(&one.proposal_id.unwrap().to_string()));
+    }
 }
