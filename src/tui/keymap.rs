@@ -55,7 +55,6 @@ fn map_review_key(key: KeyEvent, armed: bool) -> Option<Action> {
     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
     match key.code {
         KeyCode::Char('A') | KeyCode::Char('a') if shift => Some(Action::Arm),
-        KeyCode::Char('A') => Some(Action::Arm),
         KeyCode::Char('y' | 'Y') => None,
         _ => None,
     }
@@ -298,6 +297,18 @@ mod tests {
                 false
             )
             .is_none()
+        );
+        assert!(
+            map_key(
+                press(KeyCode::Char('A')),
+                &overlay,
+                View::Review,
+                false,
+                false,
+                false
+            )
+            .is_none_or(|action| !matches!(action, Action::Arm)),
+            "Caps Lock A without Shift must not arm"
         );
         let shift_a = KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT);
         assert!(matches!(

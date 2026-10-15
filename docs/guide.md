@@ -229,7 +229,7 @@ os-int open "Example Corp"
 
 `open` and most investigation arguments accept the name, the UUID, or a unique UUID prefix. `os-int list` prints name, id prefix, and counts of pages, sources, findings, and entities.
 
-Search (`/` or `Ctrl+F`) matches pages (title, target, notes), entities, findings, sources, artifacts, and agent runs. `Enter` jumps to the hit.
+`/` and `Ctrl+F` filter the current table on Entities, Evidence, Jobs, and Tools (`kind:ip src:ct prov:ai sort:-seen` plus free text). On other views they search the case: pages (title, target, notes), entities, findings, sources, artifacts, and agent runs. `Enter` jumps to a search hit or applies the table filter.
 
 ### Object View
 
@@ -755,11 +755,12 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `j` `k` or `↑` `↓` | normal, lists | Move the selection |
 | `PgUp` `PgDn` | normal | Move by 10 |
 | `Enter` | normal | Open or drill in. **Never writes.** |
-| `/` `Ctrl+F` | tables | Filter inline: `kind:ip src:ct prov:ai sort:-seen` plus free text |
+| `/` `Ctrl+F` | Entities, Evidence, Jobs, Tools | Filter the table: `kind:ip src:ct prov:ai sort:-seen` plus free text |
+| `/` `Ctrl+F` | other views | Search the case |
 | `Ctrl+K` `:` | normal | Command palette |
 | `a` | normal | Ask the agent. Results land in Review |
 | `n` | normal | New investigation, target, or finding |
-| `e` | normal | Edit notes in `$EDITOR` |
+| `e` | Inspector Notes / Case | Edit entity notes (Notes tab) or page notes in `$EDITOR` |
 | `c` | normal | Collect on the selected target (passive collectors only) |
 | `g` | normal | Open the selection in Graph (1 hop) |
 | `s` | normal | Search Around (default 2 hops; merges on Graph) |
@@ -774,7 +775,7 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `?` | normal, overlays | Help (generated from the command registry) |
 | `1` … `6` | normal | Case, Entities, Evidence, Graph, Review, Jobs |
 | Palette | normal | Ingest, playbook, tools, settings, audit, artifacts, nearby, unresolve, cancel job, doctor, open investigation |
-| `Shift+A` then `y` | Review | Arm, then accept. Any other key disarms. Enter never accepts. A missing citation blocks accept. |
+| `Shift+A` then `y` | Review | Arm, then accept. Shift is required (Caps Lock `A` does not arm). Any other key disarms. Enter never accepts. A missing citation blocks accept. |
 | `y` | confirm | Confirm a write, including a palette command that writes. Enter never writes. |
 | `Enter` | palette | Pick a command. Writes open a y-confirm and do not run until `y`. |
 | `Ctrl+S` | editing | Submit the form or the agent question. Enter never writes. |

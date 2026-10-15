@@ -206,4 +206,15 @@ mod tests {
         assert_eq!(truncate("hello", 0), "");
         assert_eq!(truncate("café", 0), "");
     }
+
+    #[test]
+    fn truncate_cjk_and_emoji_use_display_width() {
+        use unicode_width::UnicodeWidthStr;
+        let cjk = truncate("你好世界", 5);
+        assert!(UnicodeWidthStr::width(cjk.as_str()) <= 5, "{cjk}");
+        assert!(cjk.ends_with('…'), "{cjk}");
+        let emoji = truncate("ok👍ok", 5);
+        assert!(UnicodeWidthStr::width(emoji.as_str()) <= 5, "{emoji}");
+        assert!(emoji.contains('…') || UnicodeWidthStr::width(emoji.as_str()) <= 5);
+    }
 }

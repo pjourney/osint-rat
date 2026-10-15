@@ -44,7 +44,7 @@ Inside the workbench:
 | `t` | Time lens on Evidence or Graph: collection log + imported Events |
 | `5` | Review. AI, playbook, and merge proposals wait here |
 | `6` | Jobs, if a collector is still running or a previous one failed |
-| `/` | Search. Try `example.com` or a short id such as `E-1` |
+| `/` | Filter the current table, or search the case. Try `kind:ip` on Entities, or `example.com` on Case |
 
 Press `q` to leave the workbench. The case is already saved.
 

@@ -12,6 +12,8 @@ pub struct TableFilter {
     pub prov: Option<Provenance>,
     pub sort: Option<(SortKey, bool)>,
     pub text: String,
+    /// Empty or unknown `kind:` / `prov:` / `sort:` tokens match nothing.
+    pub unmatched: bool,
 }
 
 /// Column a table can sort by. `sort:seen` / `sort:-kind` in the filter grammar.
@@ -62,17 +64,41 @@ impl TableFilter {
                 continue;
             };
             match key.to_ascii_lowercase().as_str() {
-                "kind" | "k" => filter.kind = Some(value.to_ascii_lowercase()),
-                "src" | "source" => filter.src = Some(value.to_ascii_lowercase()),
-                "prov" | "provenance" => filter.prov = parse_prov(value),
+                "kind" | "k" => {
+                    let kind = value.to_ascii_lowercase();
+                    if kind.is_empty() || !kind_token_is_known(&kind) {
+                        filter.unmatched = true;
+                    }
+                    filter.kind = Some(kind);
+                }
+                "src" | "source" => {
+                    let src = value.to_ascii_lowercase();
+                    if src.is_empty() {
+                        filter.unmatched = true;
+                    }
+                    filter.src = Some(src);
+                }
+                "prov" | "provenance" => {
+                    if value.trim().is_empty() {
+                        filter.unmatched = true;
+                    } else if let Some(provenance) = parse_prov(value) {
+                        filter.prov = Some(provenance);
+                    } else {
+                        filter.unmatched = true;
+                    }
+                }
                 "sort" => {
                     let (name, descending) = if let Some(rest) = value.strip_prefix('-') {
                         (rest, true)
                     } else {
                         (value, false)
                     };
-                    if let Some(key) = SortKey::parse(name) {
+                    if name.is_empty() {
+                        filter.unmatched = true;
+                    } else if let Some(key) = SortKey::parse(name) {
                         filter.sort = Some((key, descending));
+                    } else {
+                        filter.unmatched = true;
                     }
                 }
                 _ => text.push(token),
@@ -88,9 +114,13 @@ impl TableFilter {
             && self.prov.is_none()
             && self.sort.is_none()
             && self.text.is_empty()
+            && !self.unmatched
     }
 
     pub fn matches_entity(&self, entity: &Entity, workspace: &Workspace) -> bool {
+        if self.unmatched {
+            return false;
+        }
         if let Some(kind) = &self.kind
             && !kind_matches_entity(&entity.kind, kind)
         {
@@ -120,6 +150,9 @@ impl TableFilter {
     }
 
     pub fn matches_finding(&self, finding: &Finding, workspace: &Workspace) -> bool {
+        if self.unmatched {
+            return false;
+        }
         if let Some(kind) = &self.kind
             && !kind_token_matches(kind, "finding")
             && !kind_token_matches(kind, "f")
@@ -149,6 +182,9 @@ impl TableFilter {
     }
 
     pub fn matches_source(&self, source: &Source) -> bool {
+        if self.unmatched {
+            return false;
+        }
         if let Some(kind) = &self.kind
             && !kind_token_matches(kind, "source")
             && !kind_token_matches(kind, "s")
@@ -179,6 +215,9 @@ impl TableFilter {
     }
 
     pub fn matches_text(&self, hay: &str) -> bool {
+        if self.unmatched {
+            return false;
+        }
         if !self.text.is_empty() && !hay.to_ascii_lowercase().contains(&self.text) {
             return false;
         }
@@ -217,7 +256,9 @@ pub fn cmp_entities(
     let ordering = match key {
         SortKey::Kind => left.kind.as_str().cmp(right.kind.as_str()),
         SortKey::Value | SortKey::Name => left.display_name().cmp(right.display_name()),
-        SortKey::Prov => left.provenance.cmp(&right.provenance),
+        SortKey::Prov => {
+            entity_provenances(left, workspace).cmp(&entity_provenances(right, workspace))
+        }
         SortKey::Src => left.source_ids.len().cmp(&right.source_ids.len()),
         SortKey::Seen => entity_seen_at(left, workspace).cmp(&entity_seen_at(right, workspace)),
         SortKey::Status => left.kind.as_str().cmp(right.kind.as_str()),
@@ -354,7 +395,81 @@ fn entity_kind_tag(kind: &EntityKind) -> &'static str {
     }
 }
 
+fn kind_token_is_known(token: &str) -> bool {
+    if token.is_empty() {
+        return false;
+    }
+    KNOWN_KIND_TOKENS
+        .iter()
+        .any(|known| known.starts_with(token))
+}
+
+const KNOWN_KIND_TOKENS: &[&str] = &[
+    "dom",
+    "domain",
+    "hostname",
+    "host",
+    "nameserver",
+    "ip",
+    "ip_address",
+    "ipv4",
+    "ipv6",
+    "url",
+    "eml",
+    "email",
+    "usr",
+    "username",
+    "handle",
+    "rep",
+    "repository",
+    "repo",
+    "asn",
+    "as",
+    "fil",
+    "file",
+    "org",
+    "organization",
+    "company",
+    "per",
+    "person",
+    "loc",
+    "location",
+    "place",
+    "tel",
+    "phone",
+    "telephone",
+    "crt",
+    "certificate",
+    "cert",
+    "unk",
+    "unknown",
+    "finding",
+    "f",
+    "source",
+    "s",
+    "dns",
+    "rdap",
+    "whois",
+    "http",
+    "tls",
+    "ct",
+    "ip_intel",
+    "command",
+    "tool",
+    "web",
+    "page",
+    "document",
+    "manual",
+    "note",
+    "stix",
+    "misp",
+    "git",
+];
+
 fn kind_token_matches(token: &str, candidate: &str) -> bool {
+    if token.is_empty() {
+        return false;
+    }
     let token = token.trim().trim_end_matches(' ');
     let candidate = candidate.trim().to_ascii_lowercase();
     token.eq_ignore_ascii_case(&candidate) || candidate.starts_with(token)
@@ -422,5 +537,34 @@ mod tests {
         assert!(kind_token_matches("dom", "domain"));
         assert!(kind_token_matches("ip", "ip"));
         assert!(!kind_token_matches("url", "domain"));
+        assert!(!kind_token_matches("", "domain"));
+    }
+
+    #[test]
+    fn empty_or_unknown_kind_prov_sort_are_unmatched() {
+        for raw in [
+            "kind:",
+            "kind:xyzzy",
+            "prov:",
+            "prov:nope",
+            "sort:",
+            "sort:bogus",
+        ] {
+            let filter = TableFilter::parse(raw);
+            assert!(filter.unmatched, "{raw}");
+            assert!(!filter.is_empty(), "{raw}");
+            assert!(!filter.matches_text("anything"), "{raw} must match nothing");
+        }
+        assert!(!TableFilter::parse("kind:ip").unmatched);
+        assert!(!TableFilter::parse("prov:ai").unmatched);
+        assert!(!TableFilter::parse("sort:-seen").unmatched);
+        assert!(!TableFilter::parse("kind:d").unmatched);
+    }
+
+    #[test]
+    fn sort_prov_key_is_the_displayed_union_column() {
+        assert_eq!(SortKey::parse("prov"), Some(SortKey::Prov));
+        assert_eq!(SortKey::parse("provenance"), Some(SortKey::Prov));
+        assert_eq!(SortKey::Prov.header(), "PROV");
     }
 }

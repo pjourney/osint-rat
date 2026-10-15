@@ -1,0 +1,24 @@
+ os-int ▸ acme-phish ▸ Entities  u…  ◆ 1 to review  ✓ jobs  agent ◇ Claude Code
+ Rail         │▌ENTITIES
+ 1 Case        /kind:xyzzy  2 → 0
+▌2 Entities
+ 3 Evidence                ◇  No matching rows
+ 4 Graph                   Nothing matches this filter.
+ 5 Review 1                x clear filter
+ 6 Jobs
+
+
+
+
+
+
+ Inspector · Nothing selected
+TABS  Props  ·Sources·  Notes  History
+Nothing selected.
+
+
+
+
+
+ Entities. t toggles the time lens. Space marks. m proposes a merge.    0 jobs
+/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro

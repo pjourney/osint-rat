@@ -16,6 +16,7 @@ pub mod resolution;
 pub mod review;
 pub mod timeline;
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -365,13 +366,25 @@ pub struct App {
     pub streaming: HashMap<Uuid, String>,
     pub last_error: Option<String>,
     pub pending_editor: Option<EditorSession>,
+    /// Last board row id used to remap selection across filter/sort edits.
+    board_anchor_id: Option<Uuid>,
+    board_list_cache: RefCell<Option<BoardListCache>>,
 }
 
-/// External `$EDITOR` session for long-form page notes.
+struct BoardListCache {
+    key: String,
+    entities: Option<Vec<Uuid>>,
+    evidence: Option<Vec<EvidenceRow>>,
+    jobs: Option<Vec<Uuid>>,
+    tools: Option<Vec<usize>>,
+}
+
+/// External `$EDITOR` session for long-form page or entity notes.
 #[derive(Clone, Debug)]
 pub struct EditorSession {
     pub path: PathBuf,
-    pub page_id: Uuid,
+    pub page_id: Option<Uuid>,
+    pub entity_id: Option<Uuid>,
 }
 
 impl App {
@@ -424,6 +437,8 @@ impl App {
             streaming: HashMap::new(),
             last_error: None,
             pending_editor: None,
+            board_anchor_id: None,
+            board_list_cache: RefCell::new(None),
         };
         let _ = app.store.mark_interrupted_jobs();
         app
@@ -869,6 +884,9 @@ impl App {
             (Pane::Detail, 1) => Pane::Nav,
             _ => self.pane,
         };
+        if self.pane == Pane::Detail && matches!(self.view, View::Entities | View::Evidence) {
+            self.inspector_tab = InspectorTab::Sources;
+        }
     }
 
     fn canonicalize_view(view: View) -> View {
@@ -905,16 +923,7 @@ impl App {
     fn view_uses_table_filter(view: View) -> bool {
         matches!(
             view,
-            View::Entities
-                | View::Evidence
-                | View::Jobs
-                | View::Tools
-                | View::Audit
-                | View::Artifacts
-                | View::Findings
-                | View::Sources
-                | View::Notes
-                | View::Pages
+            View::Entities | View::Evidence | View::Jobs | View::Tools
         )
     }
 
@@ -948,8 +957,7 @@ impl App {
             self.status = "Error dismissed.".into();
         } else if had_filter {
             self.status = "Filter cleared.".into();
-            self.selected = 0;
-            self.sync_board_selection();
+            self.restore_board_selection();
         }
     }
 
@@ -976,7 +984,12 @@ impl App {
     }
 
     fn select_tool_row(&mut self) {
-        let Some(entry) = self.tools.tools().get(self.selected) else {
+        let Some(entry) = self
+            .listed_tool_indices()
+            .get(self.selected)
+            .and_then(|index| self.tools.tools().get(*index))
+            .cloned()
+        else {
             return;
         };
         let name = entry.definition.name.clone();
@@ -1030,6 +1043,13 @@ impl App {
             self.timeline.nearby = false;
             self.timeline.nearby_seed_id = None;
         }
+        self.board_filter.clear();
+        self.board_anchor_id = None;
+        self.inspector_tab = if matches!(view, View::Entities | View::Evidence) {
+            InspectorTab::Sources
+        } else {
+            InspectorTab::Props
+        };
         if view == View::Graph {
             self.open_graph();
             self.pane = Pane::Main;
@@ -1148,10 +1168,15 @@ impl App {
                         (self.selected as i32 + delta).rem_euclid(count as i32) as usize;
                     self.sync_board_selection();
                 } else {
-                    let count = self.board_len().max(1);
-                    self.selected =
-                        (self.selected as i32 + delta).rem_euclid(count as i32) as usize;
-                    self.sync_board_selection();
+                    let count = self.board_len();
+                    if count == 0 {
+                        self.selected = 0;
+                        self.sync_board_selection();
+                    } else {
+                        self.selected =
+                            (self.selected as i32 + delta).rem_euclid(count as i32) as usize;
+                        self.sync_board_selection();
+                    }
                 }
             }
         }
@@ -1169,7 +1194,7 @@ impl App {
             View::Evidence if self.time_lens => self.timeline_list_len(),
             View::Evidence => self.listed_evidence().len(),
             View::Jobs => self.listed_job_ids().len(),
-            View::Tools => self.tools.tools().len(),
+            View::Tools => self.listed_tool_indices().len(),
             View::Findings => self
                 .workspace
                 .as_ref()
@@ -1206,26 +1231,45 @@ impl App {
             }
             View::Entities if self.time_lens => self.sync_timeline_selection(),
             View::Entities => {
-                if let Some(entity) = self.listed_entities().get(self.selected) {
-                    self.entity_id = Some(entity.id);
+                let selected_id = self
+                    .listed_entities()
+                    .get(self.selected)
+                    .map(|entity| entity.id);
+                if let Some(id) = selected_id {
+                    self.entity_id = Some(id);
+                    self.board_anchor_id = Some(id);
+                } else {
+                    self.entity_id = None;
+                    self.finding_id = None;
+                    self.source_id = None;
                 }
             }
             View::Evidence if self.time_lens => self.sync_timeline_selection(),
-            View::Evidence => match self.listed_evidence().get(self.selected) {
-                Some(EvidenceRow::Finding(id)) => {
-                    self.finding_id = Some(*id);
-                    if let Some(page_id) =
-                        workspace.finding(*id).and_then(|finding| finding.page_id)
-                    {
-                        self.page_id = Some(page_id);
+            View::Evidence => {
+                let row = self.listed_evidence().get(self.selected).copied();
+                match row {
+                    Some(EvidenceRow::Finding(id)) => {
+                        self.finding_id = Some(id);
+                        self.source_id = None;
+                        self.board_anchor_id = Some(id);
+                        if let Some(page_id) =
+                            workspace.finding(id).and_then(|finding| finding.page_id)
+                        {
+                            self.page_id = Some(page_id);
+                        }
+                    }
+                    Some(EvidenceRow::Source(id)) => {
+                        self.source_id = Some(id);
+                        self.finding_id = None;
+                        self.board_anchor_id = Some(id);
+                    }
+                    None => {
+                        self.entity_id = None;
+                        self.finding_id = None;
+                        self.source_id = None;
                     }
                 }
-                Some(EvidenceRow::Source(id)) => {
-                    self.source_id = Some(*id);
-                    self.finding_id = None;
-                }
-                None => {}
-            },
+            }
             View::Review => {
                 if let Some(run_id) = self.selected_review_item().and_then(|item| item.run_id) {
                     self.agent_run_id = Some(run_id);
@@ -1277,8 +1321,7 @@ impl App {
             Overlay::TableFilter { query } => {
                 self.board_filter = query.value.clone();
                 self.overlay = Overlay::None;
-                self.selected = 0;
-                self.sync_board_selection();
+                self.restore_board_selection();
             }
             Overlay::None if self.view == View::Welcome => match self.selected {
                 0 => self.open_new()?,
@@ -1573,6 +1616,15 @@ impl App {
     }
 
     fn open_edit(&mut self) -> Result<()> {
+        if self.inspector_tab == InspectorTab::Notes
+            && self.workspace.is_some()
+            && let Some(entity) = self
+                .selected_entity_id()
+                .and_then(|id| self.workspace.as_ref()?.entity(id))
+                .cloned()
+        {
+            return self.open_entity_notes_editor(&entity);
+        }
         if self.view == View::Settings {
             let form = FormState::new(
                 FormKind::SettingsAgent,
@@ -1631,7 +1683,28 @@ impl App {
         std::fs::write(&path, &page.notes).wrap_err("could not write notes for editing")?;
         self.pending_editor = Some(EditorSession {
             path,
-            page_id: page.id,
+            page_id: Some(page.id),
+            entity_id: None,
+        });
+        self.status = "Opening editor…".into();
+        Ok(())
+    }
+
+    fn open_entity_notes_editor(&mut self, entity: &crate::model::Entity) -> Result<()> {
+        let files = self.files().ok_or_else(|| eyre!("no investigation"))?;
+        files.ensure().ok();
+        let relative = format!("notes/entity-{}.md", entity.id.simple());
+        let path = files
+            .resolve(&relative)
+            .ok_or_else(|| eyre!("unsafe notes path"))?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).wrap_err("could not create notes directory")?;
+        }
+        std::fs::write(&path, &entity.notes).wrap_err("could not write notes for editing")?;
+        self.pending_editor = Some(EditorSession {
+            path,
+            page_id: None,
+            entity_id: Some(entity.id),
         });
         self.status = "Opening editor…".into();
         Ok(())
@@ -1644,8 +1717,23 @@ impl App {
     pub fn apply_editor_session(&mut self, session: EditorSession) -> Result<()> {
         let notes = std::fs::read_to_string(&session.path).unwrap_or_default();
         let _ = std::fs::remove_file(&session.path);
-        self.store.update_page_notes(session.page_id, &notes)?;
-        if let Some(page) = self.store.load_page(session.page_id)? {
+        if let Some(entity_id) = session.entity_id {
+            let label = self
+                .workspace
+                .as_ref()
+                .and_then(|workspace| workspace.entity(entity_id))
+                .map(|entity| entity.label.clone())
+                .unwrap_or_default();
+            self.store.update_entity(entity_id, &label, &notes)?;
+            self.reload()?;
+            self.status = "Entity notes updated.".into();
+            return Ok(());
+        }
+        let Some(page_id) = session.page_id else {
+            return Ok(());
+        };
+        self.store.update_page_notes(page_id, &notes)?;
+        if let Some(page) = self.store.load_page(page_id)? {
             self.apply_workspace_delta(WorkspaceDelta {
                 pages: vec![page],
                 ..WorkspaceDelta::default()
@@ -2153,9 +2241,45 @@ impl App {
     fn sync_table_filter(&mut self) {
         if let Overlay::TableFilter { query } = &self.overlay {
             self.board_filter = query.value.clone();
-            self.selected = 0;
-            self.sync_board_selection();
+            self.restore_board_selection();
         }
+    }
+
+    fn restore_board_selection(&mut self) {
+        match self.view {
+            View::Entities if !self.time_lens => {
+                let keep = self.board_anchor_id.or(self.entity_id);
+                let ids: Vec<_> = self
+                    .listed_entities()
+                    .iter()
+                    .map(|entity| entity.id)
+                    .collect();
+                self.selected = keep
+                    .and_then(|id| ids.iter().position(|candidate| *candidate == id))
+                    .unwrap_or(0);
+            }
+            View::Evidence if !self.time_lens => {
+                let keep = self.board_anchor_id.or(self.finding_id).or(self.source_id);
+                let rows = self.listed_evidence();
+                self.selected = keep
+                    .and_then(|id| {
+                        rows.iter().position(|row| match row {
+                            EvidenceRow::Finding(row_id) | EvidenceRow::Source(row_id) => {
+                                *row_id == id
+                            }
+                        })
+                    })
+                    .unwrap_or(0);
+            }
+            View::Jobs | View::Tools => {
+                let len = self.board_len();
+                if len == 0 || self.selected >= len {
+                    self.selected = 0;
+                }
+            }
+            _ => {}
+        }
+        self.sync_board_selection();
     }
 
     fn run_default_collectors(&mut self) -> Result<()> {
@@ -3159,6 +3283,9 @@ impl App {
 
     /// Findings then sources. The Evidence board is this list unless the time lens is on.
     pub fn listed_evidence(&self) -> Vec<EvidenceRow> {
+        if let Some(rows) = self.cached_board_rows(|cache| cache.evidence.clone()) {
+            return rows;
+        }
         let Some(workspace) = self.workspace.as_ref() else {
             return Vec::new();
         };
@@ -3182,6 +3309,7 @@ impl App {
         if let Some(sort) = self.effective_sort() {
             rows.sort_by(|left, right| filter::cmp_evidence(*left, *right, workspace, sort));
         }
+        self.store_board_rows(|cache| cache.evidence = Some(rows.clone()));
         rows
     }
 
@@ -3194,6 +3322,9 @@ impl App {
 
     /// Jobs in the order the Jobs pane lists them: persisted rows, then live jobs not reloaded yet.
     pub fn listed_job_ids(&self) -> Vec<Uuid> {
+        if let Some(ids) = self.cached_board_rows(|cache| cache.jobs.clone()) {
+            return ids;
+        }
         let mut ids = Vec::new();
         if let Some(workspace) = self.workspace.as_ref() {
             ids.extend(workspace.data.jobs.iter().map(|job| job.id));
@@ -3209,7 +3340,107 @@ impl App {
                 .then_with(|| left.id.cmp(&right.id))
         });
         ids.extend(live.iter().map(|job| job.id));
+        let filter = self.parsed_board_filter();
+        ids.retain(|id| {
+            let label = self
+                .job_records
+                .get(id)
+                .map(|job| job.label.as_str())
+                .or_else(|| {
+                    self.workspace
+                        .as_ref()
+                        .and_then(|workspace| workspace.job(*id).map(|job| job.label.as_str()))
+                })
+                .unwrap_or("");
+            filter.matches_text(label)
+        });
+        self.store_board_rows(|cache| cache.jobs = Some(ids.clone()));
         ids
+    }
+
+    pub fn unfiltered_job_count(&self) -> usize {
+        let mut ids = Vec::new();
+        if let Some(workspace) = self.workspace.as_ref() {
+            ids.extend(workspace.data.jobs.iter().map(|job| job.id));
+        }
+        let extra: Vec<_> = self
+            .job_records
+            .keys()
+            .copied()
+            .filter(|id| !ids.contains(id))
+            .collect();
+        ids.extend(extra);
+        ids.len()
+    }
+
+    pub fn listed_tool_indices(&self) -> Vec<usize> {
+        if let Some(indices) = self.cached_board_rows(|cache| cache.tools.clone()) {
+            return indices;
+        }
+        let filter = self.parsed_board_filter();
+        let indices: Vec<usize> = self
+            .tools
+            .tools()
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| {
+                let hay = format!(
+                    "{} {} {}",
+                    entry.definition.name,
+                    entry.definition.activity.as_str(),
+                    entry.problem.as_deref().unwrap_or("")
+                );
+                filter.matches_text(&hay)
+            })
+            .map(|(index, _)| index)
+            .collect();
+        self.store_board_rows(|cache| cache.tools = Some(indices.clone()));
+        indices
+    }
+
+    fn board_cache_key(&self) -> String {
+        let workspace = self.workspace.as_ref();
+        format!(
+            "{:?}|{}|{}|{}|{}|{}|{}|{}|{:?}",
+            self.view,
+            self.active_board_filter(),
+            self.timeline.nearby,
+            self.time_lens,
+            workspace.map(|ws| ws.data.entities.len()).unwrap_or(0),
+            workspace.map(|ws| ws.data.findings.len()).unwrap_or(0),
+            workspace.map(|ws| ws.data.sources.len()).unwrap_or(0),
+            workspace.map(|ws| ws.data.jobs.len()).unwrap_or(0) + self.job_records.len(),
+            self.effective_sort()
+        )
+    }
+
+    fn cached_board_rows<T>(&self, pick: impl Fn(&BoardListCache) -> Option<T>) -> Option<T> {
+        let key = self.board_cache_key();
+        let cache = self.board_list_cache.borrow();
+        let cache = cache.as_ref()?;
+        if cache.key != key {
+            return None;
+        }
+        pick(cache)
+    }
+
+    fn store_board_rows(&self, write: impl FnOnce(&mut BoardListCache)) {
+        let key = self.board_cache_key();
+        let mut cache = self.board_list_cache.borrow_mut();
+        match cache.as_mut() {
+            Some(existing) if existing.key == key => write(existing),
+            _ => {
+                let mut fresh = BoardListCache {
+                    key,
+                    entities: None,
+                    evidence: None,
+                    jobs: None,
+                    tools: None,
+                };
+                write(&mut fresh);
+                *cache = Some(fresh);
+            }
+        }
     }
 
     pub fn cancel_selected_job(&mut self) {

@@ -801,12 +801,13 @@ mod tests {
     }
 
     #[test]
-    fn e_on_entities_opens_the_page_editor() {
+    fn e_on_entities_notes_tab_edits_entity_notes() {
         let (_directory, mut app) = snapshot_app();
         app.dispatch(Action::OpenEntities).expect("entities");
         app.inspector_tab = crate::app::InspectorTab::Notes;
         app.dispatch(Action::Edit).expect("e");
-        assert!(app.take_pending_editor().is_some());
+        let session = app.take_pending_editor().expect("editor");
+        assert!(session.entity_id.is_some(), "{session:?}");
     }
 
     #[test]
@@ -971,5 +972,129 @@ mod tests {
         let screen = render_snapshot(&app, 80, 24);
         assert!(screen.contains("No entities yet"), "{screen}");
         assert!(!screen.contains("(no entities"), "{screen}");
+    }
+
+    #[test]
+    fn selection_stays_on_the_same_id_while_filtering_and_on_apply() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        let keep = app.listed_entities()[0].id;
+        app.entity_id = Some(keep);
+        app.selected = 0;
+        app.dispatch(Action::Search).expect("filter");
+        for ch in "sort:-kind".chars() {
+            app.dispatch(Action::InsertChar(ch)).expect("type");
+        }
+        assert_eq!(app.entity_id, Some(keep));
+        assert_eq!(app.listed_entities()[app.selected].id, keep);
+        app.dispatch(Action::Select).expect("apply");
+        assert_eq!(app.overlay, crate::app::Overlay::None);
+        assert_eq!(app.entity_id, Some(keep));
+        assert_eq!(app.listed_entities()[app.selected].id, keep);
+
+        app.dispatch(Action::OpenEvidence).expect("evidence");
+        let keep_row = app.listed_evidence()[0];
+        app.dispatch(Action::Search).expect("filter");
+        for ch in "sort:-value".chars() {
+            app.dispatch(Action::InsertChar(ch)).expect("type");
+        }
+        assert_eq!(app.listed_evidence()[app.selected], keep_row);
+        app.dispatch(Action::Select).expect("apply");
+        assert_eq!(app.listed_evidence()[app.selected], keep_row);
+    }
+
+    #[test]
+    fn empty_filter_clears_selection_and_jk_do_nothing() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.dispatch(Action::Search).expect("filter");
+        for ch in "kind:xyzzy".chars() {
+            app.dispatch(Action::InsertChar(ch)).expect("type");
+        }
+        assert!(app.listed_entities().is_empty());
+        assert!(app.entity_id.is_none());
+        app.dispatch(Action::Move(1)).expect("j");
+        assert_eq!(app.selected, 0);
+        assert!(app.entity_id.is_none());
+        app.pane = crate::app::Pane::Detail;
+        let screen = render_snapshot(&app, 140, 40);
+        assert!(screen.contains("Nothing selected"), "{screen}");
+    }
+
+    #[test]
+    fn tab_from_the_board_opens_inspector_sources() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.inspector_tab = crate::app::InspectorTab::Props;
+        app.pane = crate::app::Pane::Main;
+        app.dispatch(Action::NextPane).expect("tab");
+        assert_eq!(app.pane, crate::app::Pane::Detail);
+        assert_eq!(app.inspector_tab, crate::app::InspectorTab::Sources);
+        let screen = render_snapshot(&app, 140, 40);
+        assert!(screen.contains("SOURCES"), "{screen}");
+        assert!(screen.contains("S1") || screen.contains("S-1"), "{screen}");
+    }
+
+    #[test]
+    fn props_and_sources_share_footnote_numbers() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = crate::app::Pane::Detail;
+        app.inspector_tab = crate::app::InspectorTab::Sources;
+        let sources = render_snapshot(&app, 140, 40);
+        assert!(sources.contains("S1"), "{sources}");
+        app.inspector_tab = crate::app::InspectorTab::Props;
+        let props = render_snapshot(&app, 140, 40);
+        let workspace = app.workspace.as_ref().expect("workspace");
+        let entity = workspace
+            .entity(app.selected_entity_id().expect("entity"))
+            .expect("row");
+        if !entity.fields.is_empty() {
+            assert!(props.contains("S1"), "{props}");
+        }
+        assert!(
+            !props.contains("S12") && sources.contains("S1"),
+            "footnotes must use the chain index\n{props}\n{sources}"
+        );
+    }
+
+    #[test]
+    fn switching_view_clears_the_board_filter() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.board_filter = "kind:ip".into();
+        app.dispatch(Action::OpenJobs).expect("jobs");
+        assert!(app.board_filter.is_empty());
+    }
+
+    #[test]
+    fn extra_table_goldens_filter_empty_error_and_ascii() {
+        let (_directory, mut app) = snapshot_app();
+        let mut wrote = Vec::new();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = crate::app::Pane::Main;
+        app.config.ui.theme = "mono".into();
+        wrote.extend(assert_screen_snapshot("entities_mono", &app, 80, 24));
+        app.config.ui.theme = "auto".into();
+        app.config.ui.ascii = true;
+        wrote.extend(assert_screen_snapshot("entities_ascii", &app, 80, 24));
+        app.config.ui.ascii = false;
+        app.board_filter = "kind:ip".into();
+        wrote.extend(assert_screen_snapshot("entities_filter", &app, 80, 24));
+        app.board_filter = "kind:xyzzy".into();
+        wrote.extend(assert_screen_snapshot(
+            "entities_filter_empty",
+            &app,
+            80,
+            24,
+        ));
+        app.board_filter.clear();
+        app.last_error = Some("unknown tool missing-tool".into());
+        wrote.extend(assert_screen_snapshot("entities_error", &app, 80, 24));
+        assert!(
+            wrote.is_empty(),
+            "wrote snapshots; re-run to confirm: {}",
+            wrote.join(", ")
+        );
     }
 }

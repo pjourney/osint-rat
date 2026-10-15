@@ -401,11 +401,12 @@ fn evidence(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
             }
         }
     }
-    let empty = empty_state(
+    let empty = table_empty(
+        app,
+        theme,
         "No evidence yet",
         "Collect on a target to populate this case.",
         "c collect · n new target",
-        theme,
     );
     draw_table_board(
         frame,
@@ -511,6 +512,25 @@ fn render_board_list(
         return;
     }
     frame.render_widget(list_from(items, selected, theme), rows[1]);
+}
+
+fn table_empty(
+    app: &App,
+    theme: &Theme,
+    title: &str,
+    body: &str,
+    actions: &str,
+) -> Vec<Line<'static>> {
+    if !app.active_board_filter().is_empty() {
+        empty_state(
+            "No matching rows",
+            "Nothing matches this filter.",
+            "x clear filter",
+            theme,
+        )
+    } else {
+        empty_state(title, body, actions, theme)
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1077,11 +1097,12 @@ fn entities(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
             TableCell::text(seen),
         ]);
     }
-    let empty = empty_state(
+    let empty = table_empty(
+        app,
+        theme,
         "No entities yet",
         "Collect on a target to populate this case.",
         "c collect · n new target",
-        theme,
     );
     draw_table_board(
         frame,
@@ -1373,15 +1394,17 @@ fn jobs(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) 
             TableCell::text(format!("{elapsed}s")),
         ]);
     }
-    let empty = empty_state(
+    let empty = table_empty(
+        app,
+        theme,
         "No jobs yet",
         "Collect on a target to start a job.",
         "c collect",
-        theme,
     );
     let count = rows.len();
+    let total = app.unfiltered_job_count();
     draw_table_board(
-        frame, area, "JOBS", &columns, &rows, app, focused, theme, count, count, empty,
+        frame, area, "JOBS", &columns, &rows, app, focused, theme, count, total, empty,
     );
 }
 
@@ -1450,7 +1473,10 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool)
         },
     ];
     let mut rows = Vec::new();
-    for entry in app.tools.tools() {
+    for index in app.listed_tool_indices() {
+        let Some(entry) = app.tools.tools().get(index) else {
+            continue;
+        };
         let refused = entry.definition.activity == Activity::Active
             || entry
                 .problem
@@ -1490,15 +1516,26 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool)
             TableCell::styled(status, if refused { theme.err } else { theme.fg }),
         ]);
     }
-    let empty = empty_state(
+    let empty = table_empty(
+        app,
+        theme,
         "No tools configured",
         "Passive built-ins appear here. Active tools are refused.",
         "Ctrl+K doctor",
-        theme,
     );
     let count = rows.len();
     draw_table_board(
-        frame, area, "TOOLS", &columns, &rows, app, focused, theme, count, count, empty,
+        frame,
+        area,
+        "TOOLS",
+        &columns,
+        &rows,
+        app,
+        focused,
+        theme,
+        count,
+        app.tools.tools().len(),
+        empty,
     );
 }
 
@@ -1607,17 +1644,18 @@ fn inspector_heading(
             Some(EvidenceRow::Finding(id)) => workspace
                 .finding(*id)
                 .map(|finding| finding.title.clone())
-                .unwrap_or_else(|| "Evidence".into()),
+                .unwrap_or_else(|| "Nothing selected".into()),
             Some(EvidenceRow::Source(id)) => workspace
                 .source(*id)
                 .map(|source| source.title.clone())
-                .unwrap_or_else(|| "Evidence".into()),
-            None => "Evidence".into(),
+                .unwrap_or_else(|| "Nothing selected".into()),
+            None => "Nothing selected".into(),
         }
-    } else if let Some(entity) = app
-        .entity_id
-        .and_then(|id| workspace.entity(workspace.canonical_id(id)))
-    {
+    } else if app.view == View::Entities {
+        inspector_entity(app, workspace)
+            .map(|entity| entity.display_name().to_string())
+            .unwrap_or_else(|| "Nothing selected".into())
+    } else if let Some(entity) = inspector_entity(app, workspace) {
         entity.display_name().to_string()
     } else if let Some(page) = app.page_id.and_then(|id| workspace.page(id)) {
         page.title.clone()
@@ -1646,6 +1684,14 @@ fn tab_bar(app: &App, theme: &Theme) -> Vec<Line<'static>> {
 }
 
 fn inspector_tab_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'static>> {
+    let board_empty = match app.view {
+        View::Entities if !app.time_lens => app.listed_entities().is_empty(),
+        View::Evidence if !app.time_lens => app.listed_evidence().is_empty(),
+        _ => false,
+    };
+    if board_empty {
+        return vec![Line::from(Span::styled("Nothing selected.", theme.muted))];
+    }
     match app.inspector_tab {
         InspectorTab::Props => {
             let mut lines = detail_lines(app, workspace, theme);
@@ -1672,7 +1718,7 @@ fn inspector_sources(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Lin
     }
     for (index, id) in ids.iter().enumerate() {
         if let Some(source) = workspace.source(*id) {
-            let when = source.retrieved_at.format("%Y-%m-%d %H:%M UTC");
+            let when = relative_time(source.retrieved_at);
             let collector = source.collector.as_deref().unwrap_or(source.kind.as_str());
             lines.push(Line::from(vec![
                 Span::styled(format!("  S{} ", index + 1), theme.muted),
@@ -1752,8 +1798,13 @@ fn entity_inspector_props(
             let source_ref = entity
                 .source_ids
                 .first()
-                .and_then(|id| workspace.source(*id))
-                .map(|source| format!(" S{}", source.seq))
+                .and_then(|id| {
+                    entity
+                        .source_ids
+                        .iter()
+                        .position(|candidate| candidate == id)
+                        .map(|index| format!(" S{}", index + 1))
+                })
                 .unwrap_or_default();
             lines.push(Line::from(vec![
                 Span::raw(format!("  {key:<12}  {}  ", truncate(value, 18))),
@@ -1799,7 +1850,10 @@ fn entity_inspector_props(
 }
 
 fn inspector_notes(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::from(Span::styled("NOTES  e edit", theme.header))];
+    let mut lines = vec![Line::from(Span::styled(
+        "NOTES  e edit entity notes",
+        theme.header,
+    ))];
     if let Some(entity) = inspector_entity(app, workspace)
         && !entity.notes.trim().is_empty()
     {

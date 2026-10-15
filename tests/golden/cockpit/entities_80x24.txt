@@ -13,12 +13,12 @@
 
 
  Inspector · acme-login.com
-TABS  ·Props·  Sources  Notes  History
-DOM  acme-login.com  ✎●
-✎ 1 facts · 1 sources
+TABS  Props  ·Sources·  Notes  History
+SOURCES
+  S1 ●  dns  0s
+     DNS records for acme-login.com
 
-LINKS  (1)
-  ─▶ resolves_to  IP  203.0.113.7
+
 
  Entities. t toggles the time lens. Space marks. m proposes a merge.    0 jobs
 / search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro

@@ -7,7 +7,7 @@ use crate::model::{
     search_around,
 };
 
-use super::{App, Overlay, Pane, View};
+use super::{App, InspectorTab, Overlay, Pane, View};
 
 /// In-memory Graph screen: last Search Around result, facet filters, and selection.
 #[derive(Clone, Debug)]
@@ -66,6 +66,7 @@ impl App {
 
     pub(crate) fn open_graph(&mut self) {
         self.merge_marks.clear();
+        self.inspector_tab = InspectorTab::Props;
         if self.workspace.is_none() {
             self.status = "Create or open an investigation first.".into();
             return;
@@ -200,6 +201,7 @@ impl App {
             seeds.push(id);
         }
         if seeds.is_empty() {
+            self.board_filter.clear();
             self.view = View::Graph;
             self.pane = Pane::Main;
             self.select_nav_for_graph();
@@ -209,6 +211,8 @@ impl App {
         self.graph.seed_ids = seeds;
         self.graph.result = result;
         self.graph.hops = self.graph.result.hops_used;
+        self.board_filter.clear();
+        self.inspector_tab = InspectorTab::Props;
         self.view = View::Graph;
         self.pane = Pane::Main;
         self.select_nav_for_graph();
@@ -325,6 +329,7 @@ impl App {
     fn commit_graph_result(&mut self, result: SearchAroundResult, replace_seeds: bool) {
         if self.view != View::Graph {
             self.graph.return_view = Some(self.view);
+            self.inspector_tab = InspectorTab::Props;
         }
         if replace_seeds {
             self.graph.seed_ids = result.seed_ids.clone();
@@ -364,6 +369,7 @@ impl App {
         self.view = View::Graph;
         self.pane = Pane::Main;
         self.overlay = Overlay::None;
+        self.inspector_tab = InspectorTab::Props;
         self.select_nav_for_graph();
         self.status = "No entities to graph. Collect on a page first.".into();
         let _ = self.save_session();

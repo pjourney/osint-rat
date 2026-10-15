@@ -13,11 +13,11 @@
 
 
  Inspector · acme-login.com is phishing infra
-TABS  ·Props·  Sources  Notes  History
-F-1  acme-login.com is phishing infra
-◆ AI  medium  []
+TABS  Props  ·Sources·  Notes  History
+SOURCES
+  No sources on this object.
 
-SAN mimics acme.com
+
 
 
  Evidence. t toggles the time lens. Enter never writes.    0 jobs

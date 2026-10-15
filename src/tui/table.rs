@@ -240,23 +240,37 @@ fn fit_cell(
     }
     let mut spans = Vec::new();
     let mut used = 0usize;
+    let total: usize = cell
+        .spans
+        .iter()
+        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+        .sum();
+    let ellipsis = total > width;
+    let budget = if ellipsis {
+        width.saturating_sub(1)
+    } else {
+        width
+    };
     for span in &cell.spans {
         let piece = span.content.as_ref();
         let piece_width = UnicodeWidthStr::width(piece);
-        if used + piece_width > width {
-            let remain = width.saturating_sub(used);
-            if remain == 0 {
-                break;
+        if used + piece_width > budget {
+            let remain = budget.saturating_sub(used);
+            if remain > 0 {
+                spans.push(Span::styled(
+                    take_width(piece, remain),
+                    span.style.patch(style),
+                ));
+                used += remain;
             }
-            spans.push(Span::styled(
-                truncate(piece, remain),
-                span.style.patch(style),
-            ));
-            used = width;
             break;
         }
         spans.push(Span::styled(piece.to_string(), span.style.patch(style)));
         used += piece_width;
+    }
+    if ellipsis {
+        spans.push(Span::styled("…".to_string(), style));
+        used = used.saturating_add(1);
     }
     if used < width {
         let pad = " ".repeat(width - used);
@@ -266,6 +280,23 @@ fn fit_cell(
         }
     }
     spans
+}
+
+fn take_width(text: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    let mut output = String::new();
+    let mut width = 0usize;
+    for ch in text.chars() {
+        let ch_width = UnicodeWidthStr::width(ch.encode_utf8(&mut [0; 4]));
+        if width + ch_width > max_width {
+            break;
+        }
+        output.push(ch);
+        width += ch_width;
+    }
+    output
 }
 
 fn pad_align(text: &str, width: usize, align: Align) -> String {
@@ -336,5 +367,25 @@ mod tests {
             UnicodeWidthStr::width(pad_align("café", 6, Align::Left).as_str()),
             6
         );
+    }
+
+    #[test]
+    fn multi_span_cells_ellipsis_when_truncated() {
+        let cell = TableCell::spans(vec![
+            ratatui::text::Span::raw("●"),
+            ratatui::text::Span::raw("◇"),
+            ratatui::text::Span::raw("✎"),
+            ratatui::text::Span::raw("◆"),
+        ]);
+        let spans = fit_cell(
+            &cell,
+            2,
+            Align::Left,
+            ratatui::style::Style::default(),
+            false,
+        );
+        let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
+        assert!(text.contains('…'), "{text}");
+        assert!(UnicodeWidthStr::width(text.trim_end()) <= 2, "{text}");
     }
 }

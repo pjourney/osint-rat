@@ -155,7 +155,7 @@ pub const COMMANDS: &[Command] = &[
         "search",
         "Search",
         "/",
-        "Filter the current table (`kind:ip src:ct prov:ai sort:-seen`), or search the case.",
+        "Filter the current table (`kind:ip src:ct prov:ai sort:-seen`). Search the case on other views.",
         false,
         true,
         false,
@@ -381,7 +381,7 @@ pub const COMMANDS: &[Command] = &[
         "add_note",
         "Add Note",
         "e",
-        "Edit notes in $EDITOR, or open Settings from that screen.",
+        "Edit entity notes from the Inspector Notes tab, or page notes, in $EDITOR. Settings from that screen.",
         true,
         false,
         true,
@@ -750,8 +750,8 @@ pub const COMMANDS: &[Command] = &[
     cmd_views(
         "arm_review",
         "Select for accept",
-        "A",
-        "Arm the highlighted Review item. y confirms.",
+        "Shift+A",
+        "Arm the highlighted Review item. Requires Shift. y confirms.",
         false,
         false,
         false,
@@ -846,7 +846,7 @@ pub fn help_text() -> String {
     lines.push(String::new());
     lines.push("  Ctrl+C       Quit from anywhere".into());
     lines.push("  Ctrl+K       Command palette (also :)".into());
-    lines.push("  Ctrl+F       Search (same as /)".into());
+    lines.push("  Ctrl+F       Filter the current table, or search the case (same as /)".into());
     lines.push(String::new());
     lines.push("  1 Case  2 Entities  3 Evidence  4 Graph  5 Review  6 Jobs".into());
     lines.push("  Tools, settings, audit, artifacts, ingest, playbooks: palette.".into());
@@ -1012,6 +1012,10 @@ mod tests {
         assert!(
             help.contains("Clear the filter, error panel, or time lens"),
             "help must list x as clear filters\n{help}"
+        );
+        assert!(
+            help.contains("Filter the current table") && help.contains("Ctrl+F"),
+            "help must distinguish table filter from case search\n{help}"
         );
         let unresolve = COMMANDS
             .iter()

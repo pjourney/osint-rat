@@ -1,11 +1,11 @@
  os-int ▸ acme-phish ▸ Entities  unmarked                                                        ◆ 1 to review  ✓ jobs  agent ◇ Claude Code
  Rail         │▌ENTITIES                                                                       │ Inspector · acme-login.com
- 1 Case        KIND  VALUE                                                     PROV  SRC   SEEN TABS  ·Props·  Sources  Notes  History
-▌2 Entities     DOM  acme-login.com                                            ✎●      1     0s DOM  acme-login.com  ✎●
- 3 Evidence     IP   203.0.113.7                                               ●       1     0s ✎ 1 facts · 1 sources
- 4 Graph
- 5 Review 1                                                                                     LINKS  (1)
- 6 Jobs                                                                                           ─▶ resolves_to  IP  203.0.113.7
+ 1 Case        KIND  VALUE                                                     PROV  SRC   SEEN TABS  Props  ·Sources·  Notes  History
+▌2 Entities     DOM  acme-login.com                                            ✎●      1     0s SOURCES
+ 3 Evidence     IP   203.0.113.7                                               ●       1     0s   S1 ●  dns  0s
+ 4 Graph                                                                                             DNS records for acme-login.com
+ 5 Review 1
+ 6 Jobs
 
 
 
