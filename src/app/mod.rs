@@ -559,7 +559,10 @@ impl App {
     fn apply_theme_preview(&mut self, index: usize) {
         let name = Self::THEME_CYCLE[index % Self::THEME_CYCLE.len()];
         self.config.ui.theme = name.into();
-        self.status = format!("Theme {name} — y saves, Esc reverts.");
+        self.status = format!(
+            "Theme {name} {} y saves, Esc reverts.",
+            crate::tui::chrome_dash(self.config.ui.ascii)
+        );
         self.mark_dirty();
     }
 
@@ -589,12 +592,12 @@ impl App {
 
     pub fn current_role_label(&self) -> String {
         let Some(workspace) = self.workspace.as_ref() else {
-            return "—".into();
+            return crate::tui::chrome_dash(self.config.ui.ascii).into();
         };
         self.store
             .role_for(workspace.id())
             .map(|role| role.as_str().to_string())
-            .unwrap_or_else(|_| "—".into())
+            .unwrap_or_else(|_| crate::tui::chrome_dash(self.config.ui.ascii).into())
     }
 
     pub fn nav_items(&self) -> Vec<(&'static str, View)> {
@@ -1209,7 +1212,10 @@ impl App {
             ));
             self.motion.push_toast(
                 crate::tui::motion::ToastKind::Refused,
-                format!("active tool refused: {name} — {reason}"),
+                format!(
+                    "active tool refused: {name} {} {reason}",
+                    crate::tui::chrome_dash(self.config.ui.ascii)
+                ),
             );
             return;
         }
@@ -1296,7 +1302,11 @@ impl App {
             }
             View::Jobs => "Jobs. Enter opens the selected job. Cancel is in the palette.".into(),
             View::Tools => "Tools. Enter opens a y-confirm. Active tools stay refused.".into(),
-            other => format!("{} — Enter opens. It never writes.", other.title()),
+            other => format!(
+                "{} {} Enter opens. It never writes.",
+                other.title(),
+                crate::tui::chrome_dash(self.config.ui.ascii)
+            ),
         }
     }
 
@@ -1907,7 +1917,7 @@ impl App {
             page_id: Some(page.id),
             entity_id: None,
         });
-        self.status = "Opening editor…".into();
+        self.status = self.opening_editor_status();
         Ok(())
     }
 
@@ -1927,8 +1937,15 @@ impl App {
             page_id: None,
             entity_id: Some(entity.id),
         });
-        self.status = "Opening editor…".into();
+        self.status = self.opening_editor_status();
         Ok(())
+    }
+
+    fn opening_editor_status(&self) -> String {
+        format!(
+            "Opening editor{}",
+            crate::tui::Glyphs::from_ascii_flag(self.config.ui.ascii).ellipsis()
+        )
     }
 
     pub fn take_pending_editor(&mut self) -> Option<EditorSession> {
@@ -2117,7 +2134,11 @@ impl App {
                 }
                 self.apply_workspace_delta(delta)?;
                 self.view = View::Overview;
-                self.status = format!("Created {} — press c to collect", page.title);
+                self.status = format!(
+                    "Created {} {} press c to collect",
+                    page.title,
+                    crate::tui::chrome_dash(self.config.ui.ascii)
+                );
             }
             FormKind::NewFinding => {
                 let workspace = self
@@ -2220,7 +2241,13 @@ impl App {
                 self.config.agent.active = values[0].clone();
                 self.config.agent.program =
                     values.get(1).filter(|value| !value.is_empty()).cloned();
-                if let Ok(timeout) = values.get(2).map(String::as_str).unwrap_or("").parse() {
+                if let Ok(timeout) = values
+                    .get(2)
+                    .map(String::as_str)
+                    .unwrap_or("")
+                    .parse::<u64>()
+                {
+                    crate::config::require_timeout_seconds(timeout, "agent.timeout_seconds")?;
                     self.config.agent.timeout_seconds = timeout;
                 }
                 if let Some(theme) = values.get(3).filter(|value| !value.is_empty()) {
@@ -2507,7 +2534,10 @@ impl App {
     fn run_default_collectors(&mut self) -> Result<()> {
         let target = self.current_target().ok_or_else(|| {
             eyre!(
-                "this page has no collectable target — create a Domain, IP, URL, or Repository page"
+                format!(
+                    "this page has no collectable target {} create a Domain, IP, URL, or Repository page",
+                    crate::tui::chrome_dash(self.config.ui.ascii)
+                )
             )
         })?;
         let collectors = self.collectors.defaults_for(target.kind(), &self.tools);
@@ -2693,8 +2723,9 @@ impl App {
         });
         self.view = View::Review;
         self.status = format!(
-            "Asking {}… Results land in Review.",
-            self.agent.profile.name
+            "Asking {}{} Results land in Review.",
+            self.agent.profile.name,
+            crate::tui::Glyphs::from_ascii_flag(self.config.ui.ascii).ellipsis()
         );
         let _ = run_id;
         Ok(())
@@ -2849,26 +2880,41 @@ impl App {
         match outcome {
             JobOutcome::Succeeded(output) => match *output {
                 JobOutput::Collection(collected) => {
-                    self.apply_collection(job_id, collected)?;
-                    patched_in_place = true;
-                    result_text = self
-                        .job_records
-                        .get(&job_id)
-                        .and_then(|job| job.result.clone());
+                    match self.apply_collection(job_id, collected) {
+                        Ok(()) => {
+                            patched_in_place = self.job_targets_open_investigation(job_id);
+                            result_text = self
+                                .job_records
+                                .get(&job_id)
+                                .and_then(|job| job.result.clone());
+                        }
+                        Err(error) => {
+                            status = JobStatus::Failed;
+                            error_text = Some(error.to_string());
+                        }
+                    }
                 }
                 JobOutput::Agent(outcome) => {
-                    self.apply_agent(job_id, outcome)?;
+                    if let Err(error) = self.apply_agent(job_id, outcome) {
+                        status = JobStatus::Failed;
+                        error_text = Some(error.to_string());
+                    }
                 }
                 JobOutput::Report(report) => {
                     result_text = Some(format!("Wrote {}", report.relative_path));
                 }
-                JobOutput::Playbook(output) => {
-                    self.apply_playbook_output(*output)?;
-                    result_text = self
-                        .job_records
-                        .get(&job_id)
-                        .and_then(|job| job.result.clone());
-                }
+                JobOutput::Playbook(output) => match self.apply_playbook_output(job_id, *output) {
+                    Ok(()) => {
+                        result_text = self
+                            .job_records
+                            .get(&job_id)
+                            .and_then(|job| job.result.clone());
+                    }
+                    Err(error) => {
+                        status = JobStatus::Failed;
+                        error_text = Some(error.to_string());
+                    }
+                },
             },
             JobOutcome::Failed(error) => {
                 status = JobStatus::Failed;
@@ -2915,14 +2961,23 @@ impl App {
             } else {
                 crate::tui::motion::ToastKind::Err
             };
-            self.motion.push_toast(kind, format!("{label} — {error}"));
+            self.motion.push_toast(
+                kind,
+                format!(
+                    "{label} {} {error}",
+                    crate::tui::chrome_dash(self.config.ui.ascii)
+                ),
+            );
         } else if status == JobStatus::Succeeded {
             let job = self.job_records.get(&job_id);
             let label = job.map(|job| job.label.as_str()).unwrap_or("job");
             let detail = job.and_then(|job| job.result.as_deref()).unwrap_or("done");
             self.motion.push_toast(
                 crate::tui::motion::ToastKind::Ok,
-                format!("{label} done · {detail}"),
+                format!(
+                    "{label} done{}{detail}",
+                    crate::tui::chrome_sep(self.config.ui.ascii)
+                ),
             );
         }
         if patched_in_place {
@@ -2938,16 +2993,44 @@ impl App {
         Ok(())
     }
 
+    fn job_apply_scope(&self, job_id: Uuid) -> Result<(Uuid, Option<Uuid>)> {
+        let job = self
+            .job_records
+            .get(&job_id)
+            .ok_or_else(|| eyre!("unknown job; nothing was written"))?;
+        let investigation_id = job
+            .investigation_id
+            .ok_or_else(|| eyre!("job has no investigation; nothing was written"))?;
+        Ok((investigation_id, job.page_id))
+    }
+
+    fn job_targets_open_investigation(&self, job_id: Uuid) -> bool {
+        let Some(job_investigation) = self
+            .job_records
+            .get(&job_id)
+            .and_then(|job| job.investigation_id)
+        else {
+            return false;
+        };
+        self.workspace
+            .as_ref()
+            .is_some_and(|workspace| workspace.id() == job_investigation)
+    }
+
+    fn job_belongs_to_open_investigation(&self, job_id: Uuid) -> bool {
+        let Some(open_id) = self.workspace.as_ref().map(Workspace::id) else {
+            return false;
+        };
+        if let Some(job) = self.job_records.get(&job_id) {
+            return job.investigation_id == Some(open_id);
+        }
+        self.workspace
+            .as_ref()
+            .is_some_and(|workspace| workspace.job(job_id).is_some())
+    }
+
     fn apply_collection(&mut self, job_id: Uuid, output: CollectionOutput) -> Result<()> {
-        let Some(workspace) = &self.workspace else {
-            return Ok(());
-        };
-        let page_id = if self.job_records.contains_key(&job_id) {
-            self.job_records.get(&job_id).and_then(|job| job.page_id)
-        } else {
-            self.page_id
-        };
-        let investigation_id = workspace.id();
+        let (investigation_id, page_id) = self.job_apply_scope(job_id)?;
         let summary = self.store.apply_batch(
             ApplyContext {
                 investigation_id,
@@ -2963,17 +3046,16 @@ impl App {
                 output.batch.summary.clone()
             });
         }
-        let delta = self.store.load_apply_delta(investigation_id, &summary)?;
-        self.apply_workspace_delta(delta)?;
+        if self.job_targets_open_investigation(job_id) {
+            let delta = self.store.load_apply_delta(investigation_id, &summary)?;
+            self.apply_workspace_delta(delta)?;
+        }
         self.status = output.batch.summary;
         Ok(())
     }
 
     fn apply_agent(&mut self, job_id: Uuid, outcome: crate::agent::AgentOutcome) -> Result<()> {
-        let Some(workspace) = &self.workspace else {
-            return Ok(());
-        };
-        let investigation_id = workspace.id();
+        let (investigation_id, _) = self.job_apply_scope(job_id)?;
         let Some(mut run) = self
             .store
             .load_investigation(investigation_id)?
@@ -2981,8 +3063,7 @@ impl App {
             .into_iter()
             .find(|run| run.job_id == Some(job_id))
         else {
-            self.status = "Agent result did not match an open run.".into();
-            return Ok(());
+            bail!("agent result did not match a run in this investigation");
         };
         let run_id = run.id;
         let run_page_id = run.page_id;
@@ -3017,7 +3098,9 @@ impl App {
                 }
             }
             self.store.update_agent_run(&run)?;
-            self.agent_run_id = Some(run_id);
+            if self.job_targets_open_investigation(job_id) {
+                self.agent_run_id = Some(run_id);
+            }
         }
         let actions: Vec<(AgentAction, ProposalStatus, Option<String>)> = outcome
             .actions
@@ -3027,7 +3110,9 @@ impl App {
         if !actions.is_empty() {
             self.store
                 .insert_proposals(investigation_id, run_id, actions)?;
-            self.open_review_lane();
+            if self.job_targets_open_investigation(job_id) {
+                self.open_review_lane();
+            }
         }
         if let Some(stream) = self.streaming.get_mut(&job_id) {
             *stream = outcome.response;
@@ -3107,7 +3192,10 @@ impl App {
             let glyph = if self.config.ui.ascii { "*" } else { "◆" };
             self.motion.push_toast(
                 crate::tui::motion::ToastKind::Ok,
-                format!("written · {glyph} AI"),
+                format!(
+                    "written{}{glyph} AI",
+                    crate::tui::chrome_sep(self.config.ui.ascii)
+                ),
             );
             self.status = if accepted_ai {
                 format!("Accepted. AI items keep {glyph} agent provenance.")
@@ -3323,11 +3411,7 @@ impl App {
                 self.entity_id = listed_entity_id;
             }
             View::Graph => {
-                self.entity_id = self
-                    .visible_graph()
-                    .nodes
-                    .get(self.graph.selected)
-                    .map(|node| node.id);
+                self.entity_id = self.visible_graph_entity_id(self.graph.selected);
                 if self.entity_id.is_none() {
                     self.status = "No node selected.".into();
                     return;
@@ -3553,7 +3637,7 @@ impl App {
         }
         let parts: Vec<String> = active
             .iter()
-            .map(|job| format!("{} {}", job.label, job.status.symbol()))
+            .map(|job| format!("{} {}", job.label, job.status.symbol(self.config.ui.ascii)))
             .collect();
         format!("{} jobs | {}", active.len(), parts.join(" | "))
     }
@@ -3606,10 +3690,13 @@ impl App {
         if let Some(workspace) = self.workspace.as_ref() {
             ids.extend(workspace.data.jobs.iter().map(|job| job.id));
         }
+        let open_id = self.workspace.as_ref().map(Workspace::id);
         let mut live: Vec<&JobRecord> = self
             .job_records
             .values()
-            .filter(|job| !ids.contains(&job.id))
+            .filter(|job| {
+                open_id.is_some() && job.investigation_id == open_id && !ids.contains(&job.id)
+            })
             .collect();
         live.sort_by(|left, right| {
             left.created_at
@@ -3647,11 +3734,14 @@ impl App {
         if let Some(workspace) = self.workspace.as_ref() {
             ids.extend(workspace.data.jobs.iter().map(|job| job.id));
         }
+        let open_id = self.workspace.as_ref().map(Workspace::id);
         let extra: Vec<_> = self
             .job_records
-            .keys()
-            .copied()
-            .filter(|id| !ids.contains(id))
+            .values()
+            .filter(|job| {
+                open_id.is_some() && job.investigation_id == open_id && !ids.contains(&job.id)
+            })
+            .map(|job| job.id)
             .collect();
         ids.extend(extra);
         ids.len()
@@ -3752,14 +3842,7 @@ impl App {
     fn revalidate_listed_jobs(&self, ids: Vec<Uuid>) -> Vec<Uuid> {
         let mut seen = HashSet::new();
         ids.into_iter()
-            .filter(|id| {
-                let exists = self.job_records.contains_key(id)
-                    || self
-                        .workspace
-                        .as_ref()
-                        .is_some_and(|workspace| workspace.job(*id).is_some());
-                exists && seen.insert(*id)
-            })
+            .filter(|id| self.job_belongs_to_open_investigation(*id) && seen.insert(*id))
             .collect()
     }
 
@@ -4160,11 +4243,12 @@ impl App {
         Ok(())
     }
 
-    fn apply_playbook_output(&mut self, output: crate::model::PlaybookOutput) -> Result<()> {
-        let Some(investigation_id) = self.workspace.as_ref().map(Workspace::id) else {
-            return Ok(());
-        };
-        let page_id = self.page_id;
+    fn apply_playbook_output(
+        &mut self,
+        job_id: Uuid,
+        output: crate::model::PlaybookOutput,
+    ) -> Result<()> {
+        let (investigation_id, page_id) = self.job_apply_scope(job_id)?;
         if output.dry_run {
             self.overlay = Overlay::Text {
                 title: "Playbook dry-run".into(),
@@ -4184,7 +4268,7 @@ impl App {
             ApplyContext {
                 investigation_id,
                 page_id,
-                job_id: None,
+                job_id: Some(job_id),
             },
             output.clone(),
             crate::playbook::ExecuteOptions {
@@ -4195,11 +4279,7 @@ impl App {
             },
         )
         .map_err(|error| eyre!(error.to_string()))?;
-        if let Some(job) = self
-            .job_records
-            .values_mut()
-            .find(|job| job.kind == format!("playbook:{}", playbook.id) && job.status.is_active())
-        {
+        if let Some(job) = self.job_records.get_mut(&job_id) {
             job.result = Some(format!("{} pending proposal(s)", committed.proposals.len()));
         }
         self.status = format!(
@@ -4207,21 +4287,8 @@ impl App {
             playbook.id,
             committed.proposals.len()
         );
-        if !committed.proposals.is_empty()
-            && let Some(run_id) = self
-                .store
-                .load_investigation(investigation_id)
-                .ok()
-                .and_then(|data| {
-                    data.agent_runs
-                        .iter()
-                        .rev()
-                        .find(|run| run.agent_name == crate::storage::PLAYBOOK_AGENT_NAME)
-                        .map(|run| run.id)
-                })
-        {
+        if !committed.proposals.is_empty() && self.job_targets_open_investigation(job_id) {
             self.open_review_lane();
-            let _ = run_id;
         }
         Ok(())
     }
@@ -4249,7 +4316,8 @@ impl App {
             .map_err(|error| eyre!(error))?
             .unwrap_or_default();
         if let Some(kind) = values.get(2).filter(|value| !value.is_empty()) {
-            mapping.default_kind = Some(crate::model::EntityKind::parse(kind));
+            mapping.default_kind =
+                Some(crate::query::parse_entity_kind_filter(kind).map_err(|error| eyre!(error))?);
         }
         let origin = std::path::Path::new(path)
             .file_name()
@@ -4681,6 +4749,226 @@ mod tests {
     }
 
     #[test]
+    fn collection_applies_to_the_job_investigation_not_the_open_one() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Alpha");
+        create_page(&mut app, "alpha.example", "domain", "alpha.example");
+        let alpha_id = app.workspace.as_ref().expect("workspace").id();
+        let alpha_page = app.workspace.as_ref().expect("workspace").data.pages[0].id;
+        let mut job = sample_job("DNS", JobStatus::Running, Some(alpha_page));
+        job.investigation_id = Some(alpha_id);
+        app.store.insert_job(&mut job).expect("store job");
+        app.job_records.insert(job.id, job.clone());
+        create_named_investigation(&mut app, "Beta");
+        let beta_id = app.workspace.as_ref().expect("workspace").id();
+        assert_ne!(alpha_id, beta_id);
+        let mut batch = crate::model::EvidenceBatch::new();
+        batch.entity(
+            crate::model::EntityKind::Domain,
+            "queued-on-alpha.example",
+            None,
+        );
+        app.apply_collection(job.id, CollectionOutput::new(batch))
+            .expect("applies");
+        let alpha = app.store.load_investigation(alpha_id).expect("alpha");
+        let beta = app.store.load_investigation(beta_id).expect("beta");
+        assert!(
+            alpha
+                .entities
+                .iter()
+                .any(|entity| entity.value == "queued-on-alpha.example"),
+            "collector output must land in the job's investigation"
+        );
+        assert!(
+            !beta
+                .entities
+                .iter()
+                .any(|entity| entity.value == "queued-on-alpha.example"),
+            "open investigation must not receive another case's job"
+        );
+    }
+
+    #[test]
+    fn finish_job_fails_when_the_job_has_no_investigation() {
+        let (_directory, mut app) = test_app();
+        app.workspace = None;
+        let mut job = sample_job("DNS", JobStatus::Running, None);
+        job.investigation_id = None;
+        app.store.insert_job(&mut job).expect("store job");
+        app.job_records.insert(job.id, job.clone());
+        let mut batch = crate::model::EvidenceBatch::new();
+        batch.entity(crate::model::EntityKind::Domain, "lost.example", None);
+        let _ = app.handle_job(JobEvent::Finished {
+            job_id: job.id,
+            outcome: JobOutcome::Succeeded(Box::new(JobOutput::Collection(CollectionOutput::new(
+                batch,
+            )))),
+        });
+        assert_eq!(
+            app.job_records.get(&job.id).map(|row| row.status),
+            Some(JobStatus::Failed)
+        );
+        assert!(
+            app.job_records
+                .get(&job.id)
+                .and_then(|row| row.error.as_ref())
+                .is_some_and(|text| text.contains("no investigation"))
+        );
+    }
+
+    #[test]
+    fn collection_applies_when_no_investigation_is_open() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Alpha");
+        let alpha_id = app.workspace.as_ref().expect("workspace").id();
+        let mut job = sample_job("DNS", JobStatus::Running, None);
+        job.investigation_id = Some(alpha_id);
+        app.store.insert_job(&mut job).expect("store job");
+        app.job_records.insert(job.id, job.clone());
+        app.workspace = None;
+        let mut batch = crate::model::EvidenceBatch::new();
+        batch.entity(
+            crate::model::EntityKind::Domain,
+            "queued-while-closed.example",
+            None,
+        );
+        let _ = app.handle_job(JobEvent::Finished {
+            job_id: job.id,
+            outcome: JobOutcome::Succeeded(Box::new(JobOutput::Collection(CollectionOutput::new(
+                batch,
+            )))),
+        });
+        assert_eq!(
+            app.job_records.get(&job.id).map(|row| row.status),
+            Some(JobStatus::Succeeded)
+        );
+        let alpha = app.store.load_investigation(alpha_id).expect("alpha");
+        assert!(
+            alpha
+                .entities
+                .iter()
+                .any(|entity| entity.value == "queued-while-closed.example"),
+            "a finishing job must still write to its investigation after new_investigation"
+        );
+        assert!(app.workspace.is_none(), "must not reopen the case");
+    }
+
+    #[test]
+    fn playbook_applies_to_the_job_page_and_investigation() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Alpha");
+        create_page(&mut app, "first", "domain", "first.example");
+        create_page(&mut app, "second", "domain", "second.example");
+        let alpha_id = app.workspace.as_ref().expect("workspace").id();
+        let pages = app
+            .workspace
+            .as_ref()
+            .expect("workspace")
+            .data
+            .pages
+            .clone();
+        let queued_page = pages[0].id;
+        app.page_id = Some(pages[1].id);
+        let mut job = sample_job("Playbook", JobStatus::Running, Some(queued_page));
+        job.investigation_id = Some(alpha_id);
+        job.kind = "playbook:domain-infra".into();
+        app.store.insert_job(&mut job).expect("store job");
+        app.job_records.insert(job.id, job.clone());
+        create_named_investigation(&mut app, "Beta");
+        let beta_id = app.workspace.as_ref().expect("workspace").id();
+        let playbook = crate::playbook::bundled("domain-infra").expect("playbook");
+        let mut batch = crate::model::EvidenceBatch::new();
+        batch.entity(crate::model::EntityKind::Domain, "playbook.example", None);
+        let output = crate::model::PlaybookOutput {
+            playbook_id: playbook.id.clone(),
+            playbook_name: playbook.name.clone(),
+            seed_kind: playbook.seed.kind.as_str().into(),
+            seed_value: "playbook.example".into(),
+            dry_run: false,
+            automation: false,
+            batches: vec![batch],
+            proposals: Vec::new(),
+            plan: crate::model::PlaybookPlan {
+                playbook_id: playbook.id.clone(),
+                playbook_name: playbook.name.clone(),
+                seed_kind: playbook.seed.kind.as_str().into(),
+                seed_value: "playbook.example".into(),
+                automation: false,
+                actions: Vec::new(),
+                warnings: Vec::new(),
+            },
+            search_summary: None,
+            warnings: Vec::new(),
+            digest: "d".into(),
+            previous_digest: None,
+            playbook,
+        };
+        app.apply_playbook_output(job.id, output).expect("apply");
+        let alpha = app.store.load_investigation(alpha_id).expect("alpha");
+        let beta = app.store.load_investigation(beta_id).expect("beta");
+        let entity = alpha
+            .entities
+            .iter()
+            .find(|entity| entity.value == "playbook.example")
+            .expect("entity");
+        assert!(
+            alpha
+                .page_entities
+                .iter()
+                .any(|link| link.entity_id == entity.id && link.page_id == queued_page),
+            "playbook must attach to the job page, not the current page"
+        );
+        assert!(
+            !beta
+                .entities
+                .iter()
+                .any(|entity| entity.value == "playbook.example")
+        );
+    }
+
+    #[test]
+    fn jobs_lane_hides_jobs_from_other_investigations() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Alpha");
+        let alpha_id = app.workspace.as_ref().expect("workspace").id();
+        let mut alpha_job = sample_job("Alpha DNS", JobStatus::Running, None);
+        alpha_job.investigation_id = Some(alpha_id);
+        app.store.insert_job(&mut alpha_job).expect("alpha job");
+        app.job_records.insert(alpha_job.id, alpha_job.clone());
+        create_named_investigation(&mut app, "Beta");
+        let beta_id = app.workspace.as_ref().expect("workspace").id();
+        let mut beta_job = sample_job("Beta DNS", JobStatus::Running, None);
+        beta_job.investigation_id = Some(beta_id);
+        app.store.insert_job(&mut beta_job).expect("beta job");
+        app.job_records.insert(beta_job.id, beta_job.clone());
+        app.view = View::Jobs;
+        let listed = app.listed_job_ids();
+        assert!(listed.contains(&beta_job.id), "{listed:?}");
+        assert!(
+            !listed.contains(&alpha_job.id),
+            "Jobs lane must not list another case: {listed:?}"
+        );
+        assert_eq!(app.unfiltered_job_count(), listed.len());
+    }
+
+    #[test]
+    fn ingest_form_rejects_unknown_default_kind() {
+        let (directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Ingest");
+        let path = directory.path().join("hosts.csv");
+        std::fs::write(&path, "host.example.com\n").expect("csv");
+        let error = app
+            .apply_ingest(&[
+                "csv".into(),
+                path.display().to_string(),
+                "domian".into(),
+                String::new(),
+            ])
+            .expect_err("typo");
+        assert!(error.to_string().contains("unknown entity kind"), "{error}");
+    }
+
+    #[test]
     fn agent_result_updates_the_run_that_owns_the_job() {
         let (_directory, mut app) = test_app();
         create_named_investigation(&mut app, "Example Corp");
@@ -4701,6 +4989,11 @@ mod tests {
         );
         app.store.insert_agent_run(&mut finished).expect("run");
         app.store.insert_agent_run(&mut selected).expect("run");
+        let mut finished_record = sample_job("Agent", JobStatus::Running, None);
+        finished_record.id = finished_job;
+        finished_record.investigation_id = Some(investigation_id);
+        app.store.insert_job(&mut finished_record).expect("job");
+        app.job_records.insert(finished_record.id, finished_record);
         app.agent_run_id = Some(selected.id);
         app.apply_agent(
             finished_job,
@@ -4735,6 +5028,68 @@ mod tests {
         assert!(selected_run.response.is_empty());
         assert_eq!(selected_run.status, JobStatus::Running);
         assert_eq!(app.agent_run_id, Some(finished.id));
+    }
+
+    #[test]
+    fn agent_apply_uses_the_job_investigation_and_fails_when_the_run_is_missing() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Alpha");
+        let alpha_id = app.workspace.as_ref().expect("workspace").id();
+        let job_id = Uuid::new_v4();
+        let mut run = sample_run(alpha_id, job_id, Uuid::new_v4(), "What is public?");
+        app.store.insert_agent_run(&mut run).expect("run");
+        let mut record = sample_job("Agent", JobStatus::Running, None);
+        record.id = job_id;
+        record.investigation_id = Some(alpha_id);
+        app.store.insert_job(&mut record).expect("job");
+        app.job_records.insert(record.id, record);
+        create_named_investigation(&mut app, "Beta");
+        app.apply_agent(
+            job_id,
+            crate::agent::AgentOutcome {
+                response: "wrote on alpha".into(),
+                actions: Vec::new(),
+                model: None,
+                cost_usd: None,
+                error: None,
+                context_path: String::new(),
+                program: "claude".into(),
+                args: Vec::new(),
+            },
+        )
+        .expect("applies to alpha");
+        let alpha = app.store.load_investigation(alpha_id).expect("alpha");
+        assert_eq!(
+            alpha
+                .agent_runs
+                .iter()
+                .find(|candidate| candidate.id == run.id)
+                .expect("run")
+                .response,
+            "wrote on alpha"
+        );
+        let missing = Uuid::new_v4();
+        let mut orphan = sample_job("Agent", JobStatus::Running, None);
+        orphan.id = missing;
+        orphan.investigation_id = Some(alpha_id);
+        app.store.insert_job(&mut orphan).expect("orphan");
+        app.job_records.insert(orphan.id, orphan);
+        let error = app
+            .apply_agent(
+                missing,
+                crate::agent::AgentOutcome {
+                    response: "gone".into(),
+                    actions: Vec::new(),
+                    model: None,
+                    cost_usd: None,
+                    error: None,
+                    context_path: String::new(),
+                    program: "claude".into(),
+                    args: Vec::new(),
+                },
+            )
+            .expect_err("missing run");
+        assert!(error.to_string().contains("did not match a run"), "{error}");
     }
 
     #[test]
@@ -5353,6 +5708,51 @@ mod tests {
         );
         app.dispatch(Action::Back).expect("back");
         assert_eq!(app.view, View::Entities);
+    }
+
+    #[test]
+    fn open_object_view_from_graph_uses_tree_walk_not_node_vector() {
+        let (_directory, mut app) = test_app();
+        seed_infra(&mut app);
+        app.dispatch(Action::OpenGraph).expect("graph");
+        let ip_id = app
+            .workspace
+            .as_ref()
+            .expect("workspace")
+            .data
+            .entities
+            .iter()
+            .find(|entity| {
+                entity.kind == crate::model::EntityKind::Ip && entity.value == "192.0.2.10"
+            })
+            .map(|entity| entity.id)
+            .expect("ip");
+        let node_ids: Vec<_> = app
+            .visible_graph()
+            .nodes
+            .iter()
+            .map(|node| node.id)
+            .collect();
+        assert!(
+            !node_ids.is_empty(),
+            "graph should have nodes after OpenGraph"
+        );
+        app.graph.focus_id = Some(ip_id);
+        let tree = app.graph_tree_ids();
+        assert_eq!(tree.first().copied(), Some(ip_id));
+        assert_ne!(
+            tree.first().copied(),
+            node_ids.first().copied(),
+            "tree walk order must differ from the node vector so this regression is real"
+        );
+        app.graph.selected = 0;
+        app.dispatch(Action::OpenObjectView).expect("v");
+        assert_eq!(app.view, View::Object);
+        assert_eq!(app.entity_id, Some(ip_id));
+        assert_eq!(
+            app.current_object_view().expect("object").title,
+            "192.0.2.10"
+        );
     }
 
     #[test]
@@ -6945,6 +7345,63 @@ mod tests {
             app.listed_job_ids().is_empty(),
             "failed jobs must drop out of a running filter"
         );
+    }
+
+    #[test]
+    fn finish_job_persists_failed_when_apply_errors() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Apply Fail");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let mut job = sample_job("Playbook", JobStatus::Running, None);
+        job.investigation_id = Some(investigation_id);
+        job.kind = "playbook:domain-infra".into();
+        app.store.insert_job(&mut job).expect("store job");
+        app.job_records.insert(job.id, job.clone());
+        let playbook = crate::playbook::bundled("domain-infra").expect("playbook");
+        let output = crate::model::PlaybookOutput {
+            playbook_id: playbook.id.clone(),
+            playbook_name: playbook.name.clone(),
+            seed_kind: playbook.seed.kind.as_str().into(),
+            seed_value: String::new(),
+            dry_run: false,
+            automation: false,
+            batches: Vec::new(),
+            proposals: Vec::new(),
+            plan: crate::model::PlaybookPlan {
+                playbook_id: playbook.id.clone(),
+                playbook_name: playbook.name.clone(),
+                seed_kind: playbook.seed.kind.as_str().into(),
+                seed_value: String::new(),
+                automation: false,
+                actions: Vec::new(),
+                warnings: Vec::new(),
+            },
+            search_summary: None,
+            warnings: Vec::new(),
+            digest: String::new(),
+            previous_digest: None,
+            playbook,
+        };
+        let _ = app.handle_job(JobEvent::Finished {
+            job_id: job.id,
+            outcome: JobOutcome::Succeeded(Box::new(JobOutput::Playbook(Box::new(output)))),
+        });
+        assert_eq!(
+            app.job_records.get(&job.id).map(|row| row.status),
+            Some(JobStatus::Failed),
+            "apply errors must not leave the job Running"
+        );
+        let stored = app
+            .store
+            .load_investigation(investigation_id)
+            .expect("load");
+        let row = stored
+            .jobs
+            .iter()
+            .find(|candidate| candidate.id == job.id)
+            .expect("stored job");
+        assert_eq!(row.status, JobStatus::Failed);
+        assert!(row.error.as_ref().is_some_and(|text| !text.is_empty()));
     }
 
     #[test]

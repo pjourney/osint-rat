@@ -141,7 +141,11 @@ fn created_time(metadata: &fs::Metadata) -> Option<SystemTime> {
         if seconds <= 0 {
             return None;
         }
-        SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(seconds as u64))
+        let secs = u64::try_from(seconds).ok()?;
+        if secs > crate::config::MAX_DURATION_SECONDS {
+            return None;
+        }
+        SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(secs))
     })
 }
 
@@ -153,7 +157,12 @@ fn created_time(metadata: &fs::Metadata) -> Option<SystemTime> {
 fn timestamp(value: Option<SystemTime>) -> Option<DateTime<Utc>> {
     let time = value?;
     let duration = time.duration_since(SystemTime::UNIX_EPOCH).ok()?;
-    DateTime::from_timestamp(duration.as_secs() as i64, duration.subsec_nanos())
+    timestamp_from_unix(duration.as_secs(), duration.subsec_nanos())
+}
+
+fn timestamp_from_unix(secs: u64, nanos: u32) -> Option<DateTime<Utc>> {
+    let secs = i64::try_from(secs).ok()?;
+    DateTime::from_timestamp(secs, nanos)
 }
 
 fn mime_from_extension(path: &Path) -> Option<String> {
@@ -341,5 +350,21 @@ mod tests {
         assert_eq!(actual.timeline.len(), 2);
         assert!(actual.sources[0].content.contains("image/jpeg"));
         assert!(actual.summary.contains("2.0 KB"));
+    }
+
+    #[test]
+    fn huge_unix_seconds_do_not_overflow_datetime() {
+        assert_eq!(timestamp_from_unix(u64::MAX, 0), None);
+        assert_eq!(timestamp_from_unix(i64::MAX as u64 + 1, 0), None);
+        assert_eq!(timestamp_from_unix(0, 0), DateTime::from_timestamp(0, 0));
+        assert_eq!(
+            timestamp_from_unix(1_700_000_000, 0),
+            DateTime::from_timestamp(1_700_000_000, 0)
+        );
+        let typical = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        assert_eq!(
+            timestamp(Some(typical)),
+            DateTime::from_timestamp(1_700_000_000, 0)
+        );
     }
 }

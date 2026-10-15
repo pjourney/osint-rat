@@ -14,11 +14,11 @@ NEXT
 
 
 
- Inspector · acme-login.com
+ Inspector | acme-login.com
 DOM  acme-login.com
-A 1 facts · 1 sources
+A 1 facts | 1 sources
 SOURCES
   S1 C  dns  0s
 NOTES  e edit
- Case — Enter opens. It never writes.    0 jobs
+ Case - Enter opens. It never writes.    0 jobs
 c collect  n new target  a ask agent  s search around  / search  Ctrl+K commands

@@ -321,9 +321,9 @@ pub fn serialize_context(context: &AgentContext, nonce: &str) -> String {
         section(&mut out, "Recent jobs");
         for job in &context.jobs {
             out.push_str(&format!(
-                "- JOB {} {} {} — {}\n",
+                "- JOB {} {} {} - {}\n",
                 job.short_ref(),
-                job.status.symbol(),
+                job.status.as_str(),
                 job.label,
                 sanitize_text(&job.description)
             ));

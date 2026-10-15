@@ -17,7 +17,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::config::{ApiConfig, DEFAULT_API_BIND};
-use crate::model::{AgentAction, EntityKind, ObjectView, Proposal, Workspace};
+use crate::model::{AgentAction, ObjectView, Proposal, Workspace};
 use crate::query::{
     SearchAroundView, list_objects, object_view_for_ref, propose_actions,
     resolution_suggestion_views, search_around_view,
@@ -198,7 +198,12 @@ async fn list_investigation_objects(
         .load_investigation(investigation.id)
         .map_err(ApiError::internal)?;
     let workspace = Workspace::new(data);
-    let kind = query.kind.as_deref().map(EntityKind::parse);
+    let kind = query
+        .kind
+        .as_deref()
+        .map(crate::query::parse_entity_kind_filter)
+        .transpose()
+        .map_err(ApiError::bad_request)?;
     let objects = list_objects(&workspace, kind.as_ref());
     Ok(Json(serde_json::json!({ "objects": objects })))
 }
@@ -244,7 +249,12 @@ async fn search_around_handler(
     let kinds = query
         .kind
         .as_deref()
-        .map(|value| vec![EntityKind::parse(value)])
+        .map(|value| {
+            crate::query::parse_entity_kind_filter(value)
+                .map(|kind| vec![kind])
+                .map_err(ApiError::bad_request)
+        })
+        .transpose()?
         .unwrap_or_default();
     let links = query
         .link
@@ -391,6 +401,13 @@ impl ApiError {
     fn internal(error: color_eyre::eyre::Report) -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: error.to_string(),
+        }
+    }
+
+    fn bad_request(error: color_eyre::eyre::Report) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
             message: error.to_string(),
         }
     }
@@ -739,5 +756,43 @@ mod tests {
         let body: serde_json::Value =
             serde_json::from_slice(&propose.bytes().await.expect("bytes")).expect("json");
         assert_eq!(body["status"], "pending");
+    }
+
+    #[tokio::test]
+    async fn unknown_kind_filter_is_bad_request() {
+        let store = seeded_store();
+        let investigation = store
+            .list_investigations()
+            .expect("list")
+            .into_iter()
+            .next()
+            .expect("one");
+        let id = investigation.investigation.id;
+        let base = spawn_api(store, "secret-token").await;
+        let client = reqwest::Client::new();
+        let objects = client
+            .get(format!("{base}/v1/investigations/{id}/objects?kind=domian"))
+            .header("Authorization", "Bearer secret-token")
+            .send()
+            .await
+            .expect("objects");
+        assert_eq!(objects.status(), reqwest::StatusCode::BAD_REQUEST);
+        let body: serde_json::Value =
+            serde_json::from_slice(&objects.bytes().await.expect("bytes")).expect("json");
+        assert!(
+            body["error"]
+                .as_str()
+                .is_some_and(|text| text.contains("unknown entity kind")),
+            "{body}"
+        );
+        let around = client
+            .get(format!(
+                "{base}/v1/investigations/{id}/search-around?seed=E-1&kind=domian"
+            ))
+            .header("Authorization", "Bearer secret-token")
+            .send()
+            .await
+            .expect("search-around");
+        assert_eq!(around.status(), reqwest::StatusCode::BAD_REQUEST);
     }
 }

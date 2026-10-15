@@ -11,7 +11,7 @@ use url::Url;
 
 use super::net::{FetchOptions, fetch};
 use super::{CollectResult, CollectionOutput, Collector, CollectorContext};
-use crate::config::ApiConnectorConfig;
+use crate::config::{ApiConnectorConfig, duration_from_secs};
 use crate::exec::redact::redact_value;
 use crate::files::sha256_hex;
 use crate::model::{
@@ -71,7 +71,7 @@ impl ApiConnector {
             } else {
                 config.rate_limit_per_minute
             },
-            timeout: Duration::from_secs(config.timeout_seconds.max(1)),
+            timeout: duration_from_secs(config.timeout_seconds.max(1)),
         })
     }
 }

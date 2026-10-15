@@ -10,7 +10,7 @@ mod table;
 mod theme;
 pub(crate) mod widgets;
 
-pub use glyphs::Glyphs;
+pub use glyphs::{Glyphs, chrome_arrow, chrome_dash, chrome_sep};
 pub use motion::{Animator, MotionMode, TICK, TICK_MS, TimerNeed};
 pub use preview::render_preview;
 pub use table::relative_time_from;
@@ -930,6 +930,14 @@ mod tests {
         app.dispatch(Action::Edit).expect("e");
         let session = app.take_pending_editor().expect("editor");
         assert!(session.entity_id.is_some(), "{session:?}");
+        app.config.ui.ascii = true;
+        app.dispatch(Action::Edit).expect("e again");
+        assert!(
+            !app.status.contains('…'),
+            "plain status leaked unicode ellipsis: {}",
+            app.status
+        );
+        assert!(app.status.contains("Opening editor..."), "{}", app.status);
     }
 
     #[test]
@@ -1727,6 +1735,64 @@ mod tests {
             "plain-mode facet strip must not use a box-drawing bar\n{graph}"
         );
         assert!(graph.contains(" | ") || graph.contains("|"), "{graph}");
+        assert!(
+            !case.contains('·') && !case.contains('—'),
+            "plain Case chrome leaked middle-dot or em dash\n{case}"
+        );
+        assert!(
+            !graph.contains('·') && !graph.contains('—'),
+            "plain Graph chrome leaked middle-dot or em dash\n{graph}"
+        );
+        assert!(
+            case.contains("Inspector |") || case.contains("facts |"),
+            "{case}"
+        );
+    }
+
+    #[test]
+    fn plain_chrome_covers_inspector_tabs_tools_jobs_and_confirm() {
+        let (_directory, mut app) = snapshot_app();
+        app.apply_plain_mode();
+        app.dispatch(Action::OpenOverview).expect("case");
+        app.pane = crate::app::Pane::Detail;
+        let inspector = render_snapshot(&app, 80, 24);
+        assert!(
+            !inspector.contains('·') && !inspector.contains('—') && !inspector.contains('…'),
+            "Inspector chrome leaked unicode\n{inspector}"
+        );
+        app.dispatch(Action::OpenTools).expect("tools");
+        app.pane = crate::app::Pane::Main;
+        let tools = render_snapshot(&app, 80, 24);
+        assert!(
+            !tools.contains('·'),
+            "tools missing mark leaked middle-dot\n{tools}"
+        );
+        app.open_review_lane();
+        app.dispatch(Action::Arm).expect("arm");
+        let confirm = app.confirm_bar_text();
+        assert!(!confirm.contains('—'), "{confirm}");
+        assert!(!confirm.contains('·'), "{confirm}");
+        let armed = app.confirm_accept_text();
+        assert!(!armed.contains('—'), "{armed}");
+        assert!(armed.contains("Armed -"), "{armed}");
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.pane = crate::app::Pane::Main;
+        app.dispatch(Action::Search).expect("filter");
+        for ch in "kind:ip".chars() {
+            app.dispatch(Action::InsertChar(ch)).expect("type");
+        }
+        let filtered = render_snapshot(&app, 80, 24);
+        assert!(
+            !filtered.contains('→'),
+            "filter count leaked unicode arrow\n{filtered}"
+        );
+        assert!(
+            filtered.contains("->") || filtered.contains("kind:ip"),
+            "{filtered}"
+        );
+        app.dispatch(Action::Help).expect("help");
+        let help = render_snapshot(&app, 80, 24);
+        assert!(!help.contains('▶') && !help.contains('◀'), "{help}");
     }
 
     #[test]
@@ -1845,6 +1911,8 @@ mod tests {
         assert!(!plain.contains('◇'), "{plain}");
         assert!(!plain.contains('│'), "{plain}");
         assert!(!plain.contains('…'), "{plain}");
+        assert!(!plain.contains('·'), "{plain}");
+        assert!(!plain.contains('—'), "{plain}");
     }
 
     #[test]

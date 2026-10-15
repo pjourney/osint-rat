@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::template::validate_template;
 use super::which::find_on_path;
-use crate::config::{ToolDefinitionConfig, ToolsConfig};
+use crate::config::{ToolDefinitionConfig, ToolsConfig, duration_from_secs};
 use crate::model::TargetKind;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -321,7 +321,7 @@ pub fn custom_tool(config: &ToolDefinitionConfig) -> (ToolDefinition, Option<Str
         args: config.args.clone(),
         accepts,
         description: config.description.clone(),
-        timeout: Duration::from_secs(config.timeout_seconds.max(1)),
+        timeout: duration_from_secs(config.timeout_seconds.max(1)),
         parser: OutputParser::parse(&config.parser),
         activity: Activity::parse(&config.activity),
         builtin: false,

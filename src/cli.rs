@@ -269,7 +269,7 @@ pub enum Command {
     SearchAround {
         /// Investigation name, UUID, or unique UUID prefix.
         investigation: String,
-        /// Seed entity short reference (`E-1`) or UUID.
+        /// Seed entity short reference (`E-1`), UUID, or exact value (`example.com`).
         seed: String,
         /// Hop depth (default 2).
         #[arg(long)]
@@ -1036,7 +1036,8 @@ fn ingest_file(
         .map_err(user_err)?
         .unwrap_or_default();
     if let Some(kind) = kind {
-        mapping.default_kind = Some(crate::model::EntityKind::parse(kind));
+        mapping.default_kind =
+            Some(crate::query::parse_entity_kind_filter(kind).map_err(user_err)?);
     }
     let origin = path
         .file_name()
@@ -1080,7 +1081,7 @@ fn ingest_file(
         &report.batch,
     )?;
     println!(
-        "Ingested {} into {} — {}",
+        "Ingested {} into {} - {}",
         path.display(),
         investigation.name,
         if report.batch.summary.is_empty() {
@@ -1218,6 +1219,7 @@ async fn watch_command(
     once: bool,
     interval: Option<u64>,
 ) -> Result<()> {
+    let interval = interval.map(parse_watch_interval).transpose()?;
     let mut runtime = Runtime::load(cli)?;
     let guard = CtrlCGuard::spawn();
     let cancel = guard.token.clone();
@@ -1255,7 +1257,7 @@ async fn watch_command(
                 eprintln!("watch cancelled");
                 return Ok(());
             }
-            _ = tokio::time::sleep(std::time::Duration::from_secs(seconds.max(1))) => {}
+            _ = tokio::time::sleep(crate::config::duration_from_secs(seconds.max(1))) => {}
         }
     }
 }
@@ -1386,7 +1388,7 @@ async fn run_playbook_on(
     runtime.store.update_job(&record)?;
     let output = result.map_err(user_err)?;
     println!(
-        "Playbook {} on {} {} — {}",
+        "Playbook {} on {} {} - {}",
         playbook.id,
         seed.kind(),
         seed.value(),
@@ -1542,6 +1544,9 @@ fn marking_command(cli: &Cli, command: &MarkingCommand) -> Result<()> {
                 let data = runtime.store.load_investigation(investigation.id)?;
                 let workspace = Workspace::new(data);
                 let entity_id = resolve_entity_query(&workspace, query)?;
+                workspace
+                    .entity(entity_id)
+                    .ok_or_else(|| user_err(format!("unknown entity {query}")))?;
                 runtime.store.set_entity_marking(entity_id, parsed)?;
                 println!("Set object marking to {}", parsed.label());
             } else {
@@ -1665,13 +1670,13 @@ fn case_command(cli: &Cli, query: &str) -> Result<()> {
         let glyph = target
             .provenance
             .map(|provenance| theme.glyphs.provenance(provenance).to_string())
-            .unwrap_or_else(|| "—".into());
+            .unwrap_or_else(|| theme.glyphs.dash().to_string());
         println!(
             "  {} {:<22} {glyph} {}  {}",
             target.kind_tag(),
             truncate(&target.value, 22, cli.plain),
             target.source_count,
-            App::case_target_status_label(target)
+            App::case_target_status_label(target, theme.glyphs.ascii)
         );
     }
     println!("AT A GLANCE");
@@ -1727,6 +1732,9 @@ fn review_list(cli: &Cli, query: &str) -> Result<()> {
                     serde_json::json!({
                         "title": item.title,
                         "group": item.group,
+                        "kind": item.kind.as_str(),
+                        "short_ref": item.short_ref,
+                        "proposal_id": item.proposal_id.map(|id| id.to_string()),
                         "writable": item.is_writable(),
                         "ai": item.is_ai(),
                         "missing_citation": item.has_missing_citation(),
@@ -1848,18 +1856,7 @@ fn jobs_command(cli: &Cli, query: &str) -> Result<()> {
         return Ok(());
     }
     for job in &data.jobs {
-        let mark = match job.status {
-            crate::model::JobStatus::Succeeded => theme.glyphs.done,
-            crate::model::JobStatus::Failed => theme.glyphs.failed,
-            crate::model::JobStatus::Cancelled => theme.glyphs.refused,
-            _ => {
-                if theme.glyphs.ascii {
-                    "..."
-                } else {
-                    "…"
-                }
-            }
-        };
+        let mark = job.status.symbol(theme.glyphs.ascii);
         println!(
             "{} {}  {}  {}",
             mark,
@@ -1937,7 +1934,7 @@ fn tools_command(cli: &Cli) -> Result<()> {
         } else if entry.is_available() {
             theme.glyphs.done
         } else {
-            "·"
+            theme.glyphs.missing()
         };
         let status = if refused {
             format!(
@@ -2037,7 +2034,10 @@ fn objects_command(cli: &Cli, query: &str, kind: Option<&str>) -> Result<()> {
     let investigation = runtime.store.require_investigation(query)?;
     let data = runtime.store.load_investigation(investigation.id)?;
     let workspace = Workspace::new(data);
-    let parsed = kind.map(EntityKind::parse);
+    let parsed = kind
+        .map(crate::query::parse_entity_kind_filter)
+        .transpose()
+        .map_err(user_err)?;
     let objects = crate::query::list_objects(&workspace, parsed.as_ref());
     print_json(&objects)
 }
@@ -2055,7 +2055,12 @@ fn search_around_command(
     let data = runtime.store.load_investigation(investigation.id)?;
     let workspace = Workspace::new(data);
     let kinds = kind
-        .map(|value| vec![EntityKind::parse(value)])
+        .map(|value| {
+            crate::query::parse_entity_kind_filter(value)
+                .map(|kind| vec![kind])
+                .map_err(user_err)
+        })
+        .transpose()?
         .unwrap_or_default();
     let links = link
         .map(|value| vec![value.to_string()])
@@ -2073,9 +2078,11 @@ fn search_around_command(
     }
     let theme = cli_theme(cli);
     println!(
-        "GRAPH  {} hop(s) · {} nodes · {} edges",
+        "GRAPH  {} hop(s){}{} nodes{}{} edges",
         view.hops_used,
+        theme.glyphs.sep(),
         view.nodes.len(),
+        theme.glyphs.sep(),
         view.edges.len()
     );
     if view.nodes.is_empty() {
@@ -2379,7 +2386,10 @@ fn run_bench_size(store: &mut Store, entity_count: usize) -> Result<serde_json::
 
 fn resolve_entity_query(workspace: &Workspace, query: &str) -> Result<uuid::Uuid> {
     if let Ok(uuid) = uuid::Uuid::parse_str(query) {
-        return Ok(uuid);
+        if workspace.entity(uuid).is_some() {
+            return Ok(uuid);
+        }
+        return Err(user_err(format!("unknown entity {query}")));
     }
     if let Ok(reference) = query.parse::<crate::model::ShortRef>()
         && let Some(id) = workspace.resolve_ref(reference)
@@ -2455,6 +2465,16 @@ fn show_config(cli: &Cli) -> Result<()> {
     println!("database  {}", runtime.paths.database().display());
     println!("logs      {}", runtime.paths.log_dir().display());
     Ok(())
+}
+
+fn parse_watch_interval(seconds: u64) -> Result<u64> {
+    if seconds > crate::config::MAX_WATCH_INTERVAL_SECONDS {
+        return Err(user_err(format!(
+            "watch interval {seconds} seconds is too large; maximum is {} seconds",
+            crate::config::MAX_WATCH_INTERVAL_SECONDS
+        )));
+    }
+    Ok(seconds.max(1))
 }
 
 fn parse_cooccur_window(hours: u64) -> Result<chrono::Duration> {
@@ -2723,6 +2743,19 @@ mod tests {
     }
 
     #[test]
+    fn huge_watch_interval_is_a_user_error() {
+        let error = parse_watch_interval(u64::MAX).expect_err("too large");
+        let text = error.to_string();
+        assert!(
+            text.contains("too large") || text.contains("interval"),
+            "{text}"
+        );
+        assert!(!text.contains("panic"), "{text}");
+        assert_eq!(parse_watch_interval(30).expect("ok"), 30);
+        assert_eq!(parse_watch_interval(0).expect("zero becomes 1"), 1);
+    }
+
+    #[test]
     fn confirm_write_refuses_without_yes_when_stdin_is_not_a_tty() {
         let cli = Cli::try_parse_from(["os-int", "review", "accept", "Case", "X-1"]).expect("cli");
         assert!(!cli.yes);
@@ -2841,5 +2874,29 @@ mod tests {
         let cli = Cli::try_parse_from(["os-int", "--json", "config"]).expect("config json");
         assert!(cli.json);
         assert!(matches!(cli.command, Some(Command::Config)));
+    }
+
+    #[test]
+    fn jobs_plain_marks_use_ascii_status_symbols() {
+        assert_eq!(JobStatus::Queued.symbol(true), "...");
+        assert_eq!(JobStatus::Running.symbol(true), "*");
+        assert_eq!(JobStatus::Succeeded.symbol(true), "ok");
+        for status in [
+            JobStatus::Queued,
+            JobStatus::Running,
+            JobStatus::Succeeded,
+            JobStatus::Failed,
+            JobStatus::Cancelled,
+        ] {
+            let mark = status.symbol(true);
+            assert!(
+                mark.bytes().all(|byte| byte.is_ascii()),
+                "{status:?} {mark}"
+            );
+            assert!(
+                !mark.contains('…') && !mark.contains('●') && !mark.contains('✓'),
+                "{mark}"
+            );
+        }
     }
 }

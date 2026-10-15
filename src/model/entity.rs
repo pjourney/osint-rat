@@ -121,4 +121,14 @@ mod tests {
             "Alice Smith"
         );
     }
+
+    #[test]
+    fn parse_known_rejects_typos_instead_of_other() {
+        assert_eq!(EntityKind::parse_known("domain"), Some(EntityKind::Domain));
+        assert_eq!(EntityKind::parse_known("IP"), Some(EntityKind::Ip));
+        assert_eq!(EntityKind::parse_known("host"), Some(EntityKind::Hostname));
+        assert!(EntityKind::parse_known("domian").is_none());
+        assert!(EntityKind::parse_known("not-a-kind").is_none());
+        assert!(matches!(EntityKind::parse("domian"), EntityKind::Other(_)));
+    }
 }

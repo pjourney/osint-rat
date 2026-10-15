@@ -161,7 +161,7 @@ impl App {
             }
         }
         self.refresh_graph_selection();
-        self.status = graph_filter_status(&self.graph.filters);
+        self.status = graph_filter_status(&self.graph.filters, self.config.ui.ascii);
     }
 
     pub(crate) fn clear_graph_filters(&mut self) {
@@ -394,7 +394,7 @@ impl App {
             .or_else(|| workspace.data.entities.first().map(|entity| entity.id))
     }
 
-    fn visible_graph_entity_id(&self, index: usize) -> Option<uuid::Uuid> {
+    pub(crate) fn visible_graph_entity_id(&self, index: usize) -> Option<uuid::Uuid> {
         self.graph_tree_ids().get(index).copied()
     }
 
@@ -447,13 +447,14 @@ impl App {
         self.select_nav_for_graph();
         self.revalidate_graph_filters();
         self.refresh_graph_selection();
+        let sep = crate::tui::chrome_sep(self.config.ui.ascii);
         let truncated = if self.graph.result.truncated {
-            " · capped"
+            format!("{sep}capped")
         } else {
-            ""
+            String::new()
         };
         self.status = format!(
-            "Graph · {} hop(s) · {} nodes · {} edges{truncated}. s Search Around, +/- hops, t time lens.",
+            "Graph{sep}{} hop(s){sep}{} nodes{sep}{} edges{truncated}. s Search Around, +/- hops, t time lens.",
             self.graph.hops,
             self.graph.result.nodes.len(),
             self.graph.result.edges.len()
@@ -595,7 +596,7 @@ fn toggle_string_filter(slot: &mut Option<String>, key: &str) {
     }
 }
 
-fn graph_filter_status(filters: &GraphFilters) -> String {
+fn graph_filter_status(filters: &GraphFilters, ascii: bool) -> String {
     if filters.is_empty() {
         return "Graph facet cleared.".into();
     }
@@ -609,5 +610,8 @@ fn graph_filter_status(filters: &GraphFilters) -> String {
     if let Some(provenance) = filters.provenance {
         parts.push(format!("provenance={}", provenance.as_str()));
     }
-    format!("Graph filter: {}", parts.join(" · "))
+    format!(
+        "Graph filter: {}",
+        parts.join(crate::tui::chrome_sep(ascii))
+    )
 }

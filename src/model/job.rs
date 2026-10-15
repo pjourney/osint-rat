@@ -51,14 +51,24 @@ impl JobStatus {
         matches!(self, JobStatus::Queued | JobStatus::Running)
     }
 
-    /// A one-character status symbol for compact displays.
-    pub fn symbol(self) -> &'static str {
-        match self {
-            JobStatus::Queued => "…",
-            JobStatus::Running => "●",
-            JobStatus::Succeeded => "✓",
-            JobStatus::Failed => "✗",
-            JobStatus::Cancelled => "⊘",
+    /// Compact status mark. ASCII mode uses letters/dots instead of `…/●/✓`.
+    pub fn symbol(self, ascii: bool) -> &'static str {
+        if ascii {
+            match self {
+                JobStatus::Queued => "...",
+                JobStatus::Running => "*",
+                JobStatus::Succeeded => "ok",
+                JobStatus::Failed => "x",
+                JobStatus::Cancelled => "no",
+            }
+        } else {
+            match self {
+                JobStatus::Queued => "…",
+                JobStatus::Running => "●",
+                JobStatus::Succeeded => "✓",
+                JobStatus::Failed => "✗",
+                JobStatus::Cancelled => "⊘",
+            }
         }
     }
 }
@@ -110,5 +120,35 @@ impl JobRecord {
         };
         let end = self.finished_at.unwrap_or(now);
         (end - started).num_seconds().max(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ascii_symbols_are_plain_us_ascii() {
+        for status in [
+            JobStatus::Queued,
+            JobStatus::Running,
+            JobStatus::Succeeded,
+            JobStatus::Failed,
+            JobStatus::Cancelled,
+        ] {
+            let mark = status.symbol(true);
+            assert!(
+                mark.bytes().all(|byte| byte.is_ascii()),
+                "{status:?} ascii mark {mark:?}"
+            );
+            assert!(
+                !mark.contains('…') && !mark.contains('●') && !mark.contains('✓'),
+                "{status:?} leaked unicode {mark:?}"
+            );
+        }
+        assert_eq!(JobStatus::Queued.symbol(false), "…");
+        assert_eq!(JobStatus::Succeeded.symbol(false), "✓");
+        assert_eq!(JobStatus::Queued.symbol(true), "...");
+        assert_eq!(JobStatus::Succeeded.symbol(true), "ok");
     }
 }

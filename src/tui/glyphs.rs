@@ -36,6 +36,21 @@ pub struct Glyphs {
     pub ascii: bool,
 }
 
+/// Middle-dot chrome separator (` · `) or ASCII (` | `).
+pub fn chrome_sep(ascii: bool) -> &'static str {
+    if ascii { " | " } else { " · " }
+}
+
+/// Em dash (`—`) or ASCII hyphen (`-`).
+pub fn chrome_dash(ascii: bool) -> &'static str {
+    if ascii { "-" } else { "—" }
+}
+
+/// Right arrow (`→`) or ASCII (`->`).
+pub fn chrome_arrow(ascii: bool) -> &'static str {
+    if ascii { "->" } else { "→" }
+}
+
 const UNICODE_SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const ASCII_SPINNER: &[&str] = &["..."];
 
@@ -82,6 +97,31 @@ impl Glyphs {
         } else {
             Self::unicode()
         }
+    }
+
+    /// Pane/status separator: ` · ` or ` | `.
+    pub fn sep(self) -> &'static str {
+        chrome_sep(self.ascii)
+    }
+
+    /// Em dash or ASCII hyphen for empty cells and “Armed — …” copy.
+    pub fn dash(self) -> &'static str {
+        chrome_dash(self.ascii)
+    }
+
+    /// Right arrow for filter counts and timeline ranges.
+    pub fn arrow(self) -> &'static str {
+        chrome_arrow(self.ascii)
+    }
+
+    /// Missing-tool mark: middle-dot or hyphen.
+    pub fn missing(self) -> &'static str {
+        if self.ascii { "-" } else { "·" }
+    }
+
+    /// Ellipsis used by reduced-motion spinners.
+    pub fn ellipsis(self) -> &'static str {
+        if self.ascii { "..." } else { "…" }
     }
 
     pub fn provenance(self, provenance: Provenance) -> &'static str {
@@ -134,12 +174,27 @@ mod tests {
             glyphs.edge_out,
             glyphs.edge_in,
             glyphs.spinner[0],
+            glyphs.sep(),
+            glyphs.dash(),
+            glyphs.arrow(),
+            glyphs.missing(),
+            glyphs.ellipsis(),
         ] {
             assert!(
                 sample.bytes().all(|byte| byte.is_ascii()),
                 "{sample:?} must be ASCII"
             );
+            assert!(
+                !sample.contains('·') && !sample.contains('—') && !sample.contains('…'),
+                "{sample:?} leaked unicode chrome"
+            );
         }
+        assert_eq!(chrome_sep(true), " | ");
+        assert_eq!(chrome_dash(true), "-");
+        assert_eq!(chrome_arrow(true), "->");
+        assert_eq!(chrome_sep(false), " · ");
+        assert_eq!(chrome_dash(false), "—");
+        assert_eq!(chrome_arrow(false), "→");
     }
 
     #[test]

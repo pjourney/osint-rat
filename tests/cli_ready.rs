@@ -258,6 +258,104 @@ fn config_json_returns_paths() {
 }
 
 #[test]
+fn review_list_json_includes_ids_needed_to_accept() {
+    let (_dir, config, data) = sandbox();
+    seed_pending_review(&config, &data);
+    let output = run(&config, &data, &["--json", "review", "list", "Case"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let items: serde_json::Value = serde_json::from_str(&stdout(&output)).expect("json");
+    let item = items.as_array().expect("array")[0]
+        .as_object()
+        .expect("row");
+    assert_eq!(item["short_ref"], "X-1", "{items}");
+    assert_eq!(item["kind"], "agent", "{items}");
+    let proposal_id = item["proposal_id"].as_str().expect("proposal_id");
+    assert!(
+        proposal_id.len() >= 32 && proposal_id.contains('-'),
+        "proposal_id={proposal_id}"
+    );
+}
+
+#[test]
+fn marking_set_entity_uuid_stays_in_named_investigation() {
+    let (_dir, config, data) = sandbox();
+    let paths = AppPaths::new(config.clone(), data.clone());
+    paths.ensure_dirs().expect("dirs");
+    let mut store = Store::open(&paths.database()).expect("store");
+    let alpha = store.create_investigation("Alpha", "").expect("alpha");
+    let _beta = store.create_investigation("Beta", "").expect("beta");
+    let entity_id = store
+        .add_entity(
+            alpha.id,
+            os_int::model::EntityKind::Domain,
+            "example.com",
+            os_int::model::Provenance::Analyst,
+            None,
+        )
+        .expect("entity");
+    drop(store);
+    let output = run(
+        &config,
+        &data,
+        &[
+            "marking",
+            "set",
+            "Beta",
+            "red",
+            "--entity",
+            &entity_id.to_string(),
+        ],
+    );
+    assert!(!output.status.success(), "{}", stdout(&output));
+    let err = stderr(&output);
+    assert!(err.contains("unknown entity"), "{err}");
+    let store = Store::open(&paths.database()).expect("reopen");
+    let loaded = store.load_investigation(alpha.id).expect("load");
+    let entity = loaded
+        .entities
+        .iter()
+        .find(|entity| entity.id == entity_id)
+        .expect("entity");
+    assert_eq!(entity.marking(), os_int::model::Marking::Unmarked);
+}
+
+#[test]
+fn objects_kind_typo_is_a_user_error() {
+    let (_dir, config, data) = sandbox();
+    seed_case(&config, &data);
+    let output = run(&config, &data, &["objects", "Case", "--kind", "domian"]);
+    assert!(!output.status.success(), "{}", stdout(&output));
+    let err = stderr(&output);
+    assert!(err.contains("unknown entity kind"), "{err}");
+    assert!(!err.contains("Location"), "{err}");
+}
+
+#[test]
+fn ingest_kind_typo_is_a_user_error() {
+    let (dir, config, data) = sandbox();
+    seed_case(&config, &data);
+    let csv = dir.path().join("hosts.csv");
+    std::fs::write(&csv, "host.example.com\n").expect("csv");
+    let output = run(
+        &config,
+        &data,
+        &[
+            "ingest",
+            csv.to_str().expect("utf-8"),
+            "--format",
+            "csv",
+            "--kind",
+            "domian",
+            "--investigation",
+            "Case",
+        ],
+    );
+    assert!(!output.status.success(), "{}", stdout(&output));
+    let err = stderr(&output);
+    assert!(err.contains("unknown entity kind"), "{err}");
+}
+
+#[test]
 fn plain_review_list_uses_ascii_glyphs() {
     let (_dir, config, data) = sandbox();
     seed_pending_review(&config, &data);
@@ -267,6 +365,53 @@ fn plain_review_list_uses_ascii_glyphs() {
     assert!(!text.contains('◇'), "{text}");
     assert!(!text.contains('·'), "{text}");
     assert!(!text.contains('▶'), "{text}");
+}
+
+#[test]
+fn plain_case_and_graph_chrome_are_ascii() {
+    let (_dir, config, data) = sandbox();
+    import_demo(&config, &data);
+    let case = run(&config, &data, &["--plain", "case", "Example Corp"]);
+    assert!(case.status.success(), "{}", stderr(&case));
+    let case_text = stdout(&case);
+    assert!(!case_text.contains('·'), "{case_text}");
+    assert!(!case_text.contains('—'), "{case_text}");
+    let graph = run(
+        &config,
+        &data,
+        &["--plain", "search-around", "Example Corp", "example.com"],
+    );
+    assert!(graph.status.success(), "{}", stderr(&graph));
+    let graph_text = stdout(&graph);
+    assert!(!graph_text.contains('·'), "{graph_text}");
+    assert!(!graph_text.contains('—'), "{graph_text}");
+    assert!(graph_text.contains("hop(s)"), "{graph_text}");
+}
+
+#[test]
+fn watch_huge_interval_is_a_user_error() {
+    let (_dir, config, data) = sandbox();
+    seed_case(&config, &data);
+    let output = run(
+        &config,
+        &data,
+        &[
+            "watch",
+            "--playbook",
+            "domain-infra",
+            "--investigation",
+            "Case",
+            "--interval",
+            "18446744073709551615",
+        ],
+    );
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(!err.contains("panic"), "{err}");
+    assert!(
+        err.contains("too large") || err.contains("interval"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -416,4 +561,46 @@ fn list_json_empty_workspace_is_an_array() {
     assert!(output.status.success(), "{}", stderr(&output));
     let value: serde_json::Value = serde_json::from_str(&stdout(&output)).expect("json");
     assert_eq!(value, serde_json::json!([]));
+}
+
+fn seed_queued_job(config: &Path, data: &Path) {
+    let paths = AppPaths::new(config.to_path_buf(), data.to_path_buf());
+    paths.ensure_dirs().expect("dirs");
+    let store = Store::open(&paths.database()).expect("store");
+    let investigation = store.create_investigation("Case", "").expect("case");
+    let timestamp = os_int::model::now();
+    let mut job = os_int::model::JobRecord {
+        id: uuid::Uuid::new_v4(),
+        investigation_id: Some(investigation.id),
+        seq: 0,
+        kind: "collector:dns".into(),
+        label: "DNS".into(),
+        description: "queued".into(),
+        status: os_int::model::JobStatus::Queued,
+        program: None,
+        args: Vec::new(),
+        created_at: timestamp,
+        started_at: None,
+        finished_at: None,
+        progress: None,
+        log: String::new(),
+        stderr: String::new(),
+        result: None,
+        error: None,
+        page_id: None,
+    };
+    store.insert_job(&mut job).expect("job");
+}
+
+#[test]
+fn plain_jobs_list_does_not_leak_unicode_status_marks() {
+    let (_dir, config, data) = sandbox();
+    seed_queued_job(&config, &data);
+    let output = run(&config, &data, &["--plain", "jobs", "Case"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(!text.contains('…'), "{text}");
+    assert!(!text.contains('●'), "{text}");
+    assert!(!text.contains('✓'), "{text}");
+    assert!(text.contains("...") || text.contains("DNS"), "{text}");
 }

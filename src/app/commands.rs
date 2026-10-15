@@ -842,7 +842,7 @@ fn context_ids(view: View) -> &'static [&'static str] {
 }
 
 /// Help overlay body. Generated from [`COMMANDS`] so it cannot drift from the keymap.
-pub fn help_text() -> String {
+pub fn help_text(ascii: bool) -> String {
     let mut lines = vec![
         "os-int keyboard shortcuts".into(),
         String::new(),
@@ -853,7 +853,11 @@ pub fn help_text() -> String {
         if command.hint.is_empty() {
             continue;
         }
-        lines.push(format!("  {:<12} {}", command.hint, command.summary));
+        lines.push(format!(
+            "  {:<12} {}",
+            command.hint,
+            ascii_summary(command.summary, ascii)
+        ));
     }
     lines.push(String::new());
     lines.push("  Ctrl+C       Quit from anywhere".into());
@@ -868,12 +872,29 @@ pub fn help_text() -> String {
     lines.push("y confirms a write prompt. Ctrl+S submits a form or agent prompt.".into());
     lines.push("Palette writes open a y-confirm. Enter on the palette does not run them.".into());
     lines.push(String::new());
-    lines.push("Provenance glyphs: ● collected  ◇ original material".into());
-    lines.push("                   ✎ you wrote  ◆ agent inference (kept after accept)".into());
-    lines.push("ASCII (`ui.ascii`): C  X  A  *".into());
+    let glyphs = crate::tui::Glyphs::from_ascii_flag(ascii);
+    lines.push(format!(
+        "Provenance glyphs: {} collected  {} original material",
+        glyphs.collected, glyphs.external
+    ));
+    lines.push(format!(
+        "                   {} you wrote  {} agent inference (kept after accept)",
+        glyphs.analyst, glyphs.ai
+    ));
+    if !ascii {
+        lines.push("ASCII (`ui.ascii`): C  X  A  *".into());
+    }
     lines.push(String::new());
     lines.push("os-int observes public information. Active tools are refused.".into());
     lines.join("\n")
+}
+
+fn ascii_summary(summary: &str, ascii: bool) -> String {
+    if ascii {
+        summary.replace('▶', ">").replace('◀', "<")
+    } else {
+        summary.to_string()
+    }
 }
 
 /// Parses a registry hint into the key it documents.
@@ -1013,11 +1034,22 @@ mod tests {
 
     #[test]
     fn generated_help_lists_registry_keys() {
-        let help = help_text();
+        let help = help_text(false);
         assert!(help.contains("Command palette"));
         assert!(help.contains("Enter never writes") || help.contains("never writes"));
         assert!(help.contains("Palette writes open a y-confirm"), "{help}");
         assert!(help.contains('●') || help.contains("collected"));
+        let ascii_help = help_text(true);
+        assert!(ascii_help.contains("C collected"), "{ascii_help}");
+        assert!(!ascii_help.contains('●'), "{ascii_help}");
+        assert!(!ascii_help.contains('◇'), "{ascii_help}");
+        assert!(!ascii_help.contains('◆'), "{ascii_help}");
+        assert!(!ascii_help.contains('▶'), "{ascii_help}");
+        assert!(!ascii_help.contains('◀'), "{ascii_help}");
+        assert!(
+            ascii_help.contains("Rail > Board > Inspector"),
+            "{ascii_help}"
+        );
         assert!(
             help.contains("Reject the highlighted Review item"),
             "help must list x as reject\n{help}"

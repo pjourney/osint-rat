@@ -92,14 +92,14 @@ fn render_one(requested: ThemeName, detected: DetectedDepth, ascii: bool) -> Str
         let hex = spec
             .rgb
             .map(|rgb| rgb.format_hex())
-            .unwrap_or_else(|| "—".into());
+            .unwrap_or_else(|| theme.glyphs.dash().to_string());
         let index = if theme.name == ThemeName::Mono {
-            "—".into()
+            theme.glyphs.dash().to_string()
         } else {
             spec.index256.to_string()
         };
-        let vs_bg = contrast_cell(spec.rgb, bg);
-        let vs_panel = contrast_cell(spec.rgb, panel);
+        let vs_bg = contrast_cell(spec.rgb, bg, theme.glyphs.ascii);
+        let vs_panel = contrast_cell(spec.rgb, panel, theme.glyphs.ascii);
         lines.push(format!(
             "{:<8} {:<8} {:>4} {:<10} {:>7} {:>9}",
             role.as_str(),
@@ -169,10 +169,14 @@ fn render_one(requested: ThemeName, detected: DetectedDepth, ascii: bool) -> Str
     lines.join("\n")
 }
 
-fn contrast_cell(fg: Option<super::theme::Rgb>, bg: Option<super::theme::Rgb>) -> String {
+fn contrast_cell(
+    fg: Option<super::theme::Rgb>,
+    bg: Option<super::theme::Rgb>,
+    ascii: bool,
+) -> String {
     match (fg, bg) {
         (Some(fg), Some(bg)) => format!("{:.1}", contrast_ratio(fg, bg)),
-        _ => "—".into(),
+        _ => super::glyphs::chrome_dash(ascii).into(),
     }
 }
 
@@ -271,7 +275,10 @@ fn draw_sample(frame: &mut ratatui::Frame, theme: &Theme) {
             Line::from(Span::styled("DOM acme-login.com", theme.fg)),
             Line::from(vec![
                 Span::styled(glyphs.collected, theme.col),
-                Span::styled(" 14 facts · 6 sources", theme.muted),
+                Span::styled(
+                    format!(" 14 facts{}6 sources", theme.glyphs.sep()),
+                    theme.muted,
+                ),
             ]),
             Line::from(Span::styled("Will write", theme.warn)),
             Line::from(vec![
