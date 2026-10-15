@@ -48,7 +48,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub debug: bool,
     /// ASCII glyphs, no colour, and motion off. Use with a screen reader or a dumb terminal.
-    #[arg(long, global = true, env = "OS_INT_PLAIN")]
+    ///
+    /// `OS_INT_PLAIN` is presence-based like `NO_COLOR`: `1`, empty, `yes`, and `on` enable it.
+    /// `false`, `0`, `no`, `off`, and `n` disable it.
+    #[arg(long, global = true)]
     pub plain: bool,
     /// Machine-readable JSON for list commands.
     #[arg(long, global = true)]
@@ -526,7 +529,10 @@ pub async fn run() -> Result<()> {
 }
 
 /// Entry used by tests that parse argv themselves.
-pub async fn run_with(cli: Cli) -> Result<()> {
+pub async fn run_with(mut cli: Cli) -> Result<()> {
+    if crate::tui::env_os_int_plain() {
+        cli.plain = true;
+    }
     match cli.command {
         None => launch_tui(&cli, None).await,
         Some(Command::Open { ref name }) => {
@@ -759,7 +765,7 @@ fn list(cli: &Cli) -> Result<()> {
         let id = summary.investigation.id.simple().to_string();
         println!(
             "{:<28} {:<8} {:<16} {:>5} {:>7} {:>8} {:>8}",
-            truncate(&summary.investigation.name, 28),
+            truncate(&summary.investigation.name, 28, cli.plain),
             &id[..8.min(id.len())],
             summary.investigation.marking.label(),
             summary.page_count,
@@ -832,7 +838,7 @@ fn cooccur(cli: &Cli, query: &str, window_hours: Option<u64>) -> Result<()> {
     let runtime = Runtime::load(cli)?;
     let investigation = runtime.store.require_investigation(query)?;
     let data = runtime.store.load_investigation(investigation.id)?;
-    let window = window_hours.map(|hours| chrono::Duration::hours(hours as i64));
+    let window = window_hours.map(parse_cooccur_window).transpose()?;
     let pairs = crate::model::co_occur(
         &data,
         &crate::model::CoOccurrenceQuery {
@@ -1663,7 +1669,7 @@ fn case_command(cli: &Cli, query: &str) -> Result<()> {
         println!(
             "  {} {:<22} {glyph} {}  {}",
             target.kind_tag(),
-            truncate(&target.value, 22),
+            truncate(&target.value, 22, cli.plain),
             target.source_count,
             App::case_target_status_label(target)
         );
@@ -1734,7 +1740,8 @@ fn review_list(cli: &Cli, query: &str) -> Result<()> {
         println!("Review is empty. Agent, playbook, and merge proposals land here.");
         return Ok(());
     }
-    println!("REVIEW  AI proposes only · nothing is written until you accept");
+    let sep = if theme.glyphs.ascii { "-" } else { "·" };
+    println!("REVIEW  AI proposes only {sep} nothing is written until you accept");
     for item in &items {
         let mark = if item.is_writable() {
             format!("{}?", theme.glyphs.ai)
@@ -1845,7 +1852,13 @@ fn jobs_command(cli: &Cli, query: &str) -> Result<()> {
             crate::model::JobStatus::Succeeded => theme.glyphs.done,
             crate::model::JobStatus::Failed => theme.glyphs.failed,
             crate::model::JobStatus::Cancelled => theme.glyphs.refused,
-            _ => "…",
+            _ => {
+                if theme.glyphs.ascii {
+                    "..."
+                } else {
+                    "…"
+                }
+            }
         };
         println!(
             "{} {}  {}  {}",
@@ -2429,11 +2442,34 @@ fn format_glance_buckets(
 
 fn show_config(cli: &Cli) -> Result<()> {
     let runtime = Runtime::load(cli)?;
+    if cli.json {
+        return print_json(&serde_json::json!({
+            "config": runtime.paths.config_file.display().to_string(),
+            "data": runtime.paths.data_dir.display().to_string(),
+            "database": runtime.paths.database().display().to_string(),
+            "logs": runtime.paths.log_dir().display().to_string(),
+        }));
+    }
     println!("config    {}", runtime.paths.config_file.display());
     println!("data      {}", runtime.paths.data_dir.display());
     println!("database  {}", runtime.paths.database().display());
     println!("logs      {}", runtime.paths.log_dir().display());
     Ok(())
+}
+
+fn parse_cooccur_window(hours: u64) -> Result<chrono::Duration> {
+    if hours > crate::model::MAX_WINDOW_HOURS {
+        return Err(user_err(format!(
+            "co-occurrence window {hours} hours is too large; maximum is {} hours",
+            crate::model::MAX_WINDOW_HOURS
+        )));
+    }
+    chrono::Duration::try_hours(hours as i64).ok_or_else(|| {
+        user_err(format!(
+            "co-occurrence window {hours} hours is too large; maximum is {} hours",
+            crate::model::MAX_WINDOW_HOURS
+        ))
+    })
 }
 
 fn parse_target(kind_or_target: &str, target: Option<&str>) -> Result<Target> {
@@ -2446,17 +2482,8 @@ fn parse_target(kind_or_target: &str, target: Option<&str>) -> Result<Target> {
     }
 }
 
-fn truncate(text: &str, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    if text.chars().count() <= width {
-        text.to_string()
-    } else {
-        let mut output: String = text.chars().take(width.saturating_sub(1)).collect();
-        output.push('…');
-        output
-    }
+fn truncate(text: &str, width: usize, ascii: bool) -> String {
+    crate::tui::widgets::ellipsize(text, width, ascii)
 }
 
 #[cfg(test)]
@@ -2797,5 +2824,22 @@ mod tests {
         assert!(theme.glyphs.ascii);
         assert_eq!(theme.glyphs.external, "X");
         assert_eq!(theme.glyphs.ai, "*");
+    }
+
+    #[test]
+    fn cooccur_window_rejects_values_that_would_panic() {
+        let error = parse_cooccur_window(2_562_047_788_016).expect_err("must reject");
+        assert!(error.to_string().contains("too large"), "{error}");
+        let error = parse_cooccur_window(u64::MAX).expect_err("must reject");
+        assert!(error.to_string().contains("too large"), "{error}");
+        let ok = parse_cooccur_window(24).expect("default-sized window");
+        assert_eq!(ok, chrono::Duration::hours(24));
+    }
+
+    #[test]
+    fn json_flag_is_accepted_on_config() {
+        let cli = Cli::try_parse_from(["os-int", "--json", "config"]).expect("config json");
+        assert!(cli.json);
+        assert!(matches!(cli.command, Some(Command::Config)));
     }
 }

@@ -253,10 +253,11 @@ fn review_item_from_proposal(
     } else {
         ReviewKind::Agent
     };
+    let sep = if ascii { "-" } else { "·" };
     let group = run
         .map(|run| {
             format!(
-                "{} {} · {}",
+                "{} {} {sep} {}",
                 proposal.short_ref(),
                 run.short_ref(),
                 run.agent_name
@@ -269,7 +270,7 @@ fn review_item_from_proposal(
         run_id: Some(proposal.agent_run_id),
         merge: None,
         short_ref: Some(proposal.short_ref().to_string()),
-        title: proposal.action.summary(),
+        title: proposal.action.summary_with(ascii),
         group,
         preview: preview_lines(&proposal.action, kind, ascii),
         citations: citations_for(workspace, proposal.action.cited_sources()),
@@ -338,7 +339,8 @@ fn review_item_from_suggestion(
     item
 }
 
-fn review_item_from_run(run: &crate::model::AgentRun, _ascii: bool) -> ReviewItem {
+fn review_item_from_run(run: &crate::model::AgentRun, ascii: bool) -> ReviewItem {
+    let sep = if ascii { "-" } else { "·" };
     ReviewItem {
         kind: ReviewKind::History,
         proposal_id: None,
@@ -346,7 +348,7 @@ fn review_item_from_run(run: &crate::model::AgentRun, _ascii: bool) -> ReviewIte
         merge: None,
         short_ref: None,
         title: run.question.clone(),
-        group: format!("{} · {}", run.short_ref(), run.agent_name),
+        group: format!("{} {sep} {}", run.short_ref(), run.agent_name),
         preview: vec!["Transcript only. Nothing to accept.".into()],
         citations: Vec::new(),
         rationale: String::new(),

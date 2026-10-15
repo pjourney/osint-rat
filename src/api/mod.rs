@@ -3,6 +3,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -289,9 +290,10 @@ async fn propose_handler(
     headers: HeaderMap,
     State(state): State<ApiState>,
     Path(id): Path<String>,
-    Json(body): Json<ProposeBody>,
+    body: Result<Json<ProposeBody>, JsonRejection>,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
     authorize(&headers, &state.token)?;
+    let Json(body) = body.map_err(ApiError::malformed_json)?;
     let mut store = state.store.lock().await;
     let investigation = store
         .require_investigation(&id)
@@ -390,6 +392,19 @@ impl ApiError {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: error.to_string(),
+        }
+    }
+
+    fn malformed_json(rejection: JsonRejection) -> Self {
+        let status = rejection.status();
+        let status = if status == StatusCode::PAYLOAD_TOO_LARGE {
+            status
+        } else {
+            StatusCode::BAD_REQUEST
+        };
+        Self {
+            status,
+            message: rejection.body_text(),
         }
     }
 }
@@ -641,6 +656,36 @@ mod tests {
             .await
             .expect("send");
         assert_eq!(response.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn malformed_json_body_returns_json_400() {
+        let store = seeded_store();
+        let investigation = store
+            .list_investigations()
+            .expect("list")
+            .into_iter()
+            .next()
+            .expect("one");
+        let base = spawn_api(store, "secret-token").await;
+        let response = reqwest::Client::new()
+            .post(format!(
+                "{base}/v1/investigations/{}/actions",
+                investigation.investigation.id
+            ))
+            .header("Authorization", "Bearer secret-token")
+            .header("content-type", "application/json")
+            .body("{not json")
+            .send()
+            .await
+            .expect("send");
+        assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+        let body: serde_json::Value =
+            serde_json::from_slice(&response.bytes().await.expect("bytes")).expect("json");
+        assert!(
+            body["error"].as_str().is_some_and(|text| !text.is_empty()),
+            "{body}"
+        );
     }
 
     #[tokio::test]

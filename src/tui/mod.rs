@@ -8,13 +8,15 @@ mod preview;
 mod screens;
 mod table;
 mod theme;
-mod widgets;
+pub(crate) mod widgets;
 
 pub use glyphs::Glyphs;
 pub use motion::{Animator, MotionMode, TICK, TICK_MS, TimerNeed};
 pub use preview::render_preview;
 pub use table::relative_time_from;
-pub use theme::{ColorDepth, ColorMode, TerminalEnv, Theme, ThemeName};
+pub use theme::{
+    ColorDepth, ColorMode, TerminalEnv, Theme, ThemeName, env_os_int_plain, is_os_int_plain,
+};
 
 use std::time::Duration;
 
@@ -399,7 +401,7 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
     let available = area.width as usize;
     let (title, title_width) = if title_width + right_width > available {
         let keep = available.saturating_sub(right_width.saturating_add(1));
-        let truncated = truncate_width(&title, keep);
+        let truncated = truncate_width(&title, keep, theme.glyphs.ascii);
         let width = UnicodeWidthStr::width(truncated.as_str());
         (truncated, width)
     } else {
@@ -421,26 +423,8 @@ fn draw_confirm_bar(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, t
     frame.render_widget(Paragraph::new(line).style(theme.panel), area);
 }
 
-fn truncate_width(text: &str, max_width: usize) -> String {
-    if max_width == 0 {
-        return String::new();
-    }
-    if UnicodeWidthStr::width(text) <= max_width {
-        return text.to_string();
-    }
-    let mut output = String::new();
-    let mut width = 0usize;
-    let limit = max_width.saturating_sub(1);
-    for ch in text.chars() {
-        let ch_width = UnicodeWidthStr::width(ch.encode_utf8(&mut [0; 4]));
-        if width + ch_width > limit {
-            break;
-        }
-        output.push(ch);
-        width += ch_width;
-    }
-    output.push('…');
-    output
+fn truncate_width(text: &str, max_width: usize, ascii: bool) -> String {
+    widgets::ellipsize(text, max_width, ascii)
 }
 
 fn draw_status(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme: &Theme) {
@@ -614,7 +598,7 @@ mod tests {
         assert!(text.contains("café"), "{text}");
         let title = " os-int ─ Investigation: café  [TLP:AMBER] ";
         assert!(title.len() > UnicodeWidthStr::width(title));
-        assert_eq!(truncate_width("hello", 0), "");
+        assert_eq!(truncate_width("hello", 0, false), "");
     }
 
     #[test]
@@ -1746,6 +1730,18 @@ mod tests {
     }
 
     #[test]
+    fn apply_plain_mode_forces_no_colour() {
+        let (_directory, mut app) = snapshot_app();
+        app.config.ui.color = "truecolor".into();
+        app.config.ui.theme = "dark".into();
+        app.apply_plain_mode();
+        let theme = Theme::from_config(&app.config);
+        assert_eq!(theme.depth, ColorDepth::None);
+        assert!(theme.glyphs.ascii);
+        assert_eq!(app.config.ui.color, "none");
+    }
+
+    #[test]
     fn cockpit_render_matrix_covers_themes_color_motion_and_sizes() {
         let (_directory, mut app) = snapshot_app();
         let sizes = [(80u16, 24u16), (110, 24), (140, 40), (200, 50)];
@@ -1771,6 +1767,8 @@ mod tests {
                         Action::OpenGraph,
                         Action::OpenReview,
                         Action::OpenJobs,
+                        Action::OpenTools,
+                        Action::OpenObjectView,
                     ];
                     for action in views {
                         app.dispatch(action).expect("view");
@@ -1790,7 +1788,52 @@ mod tests {
                                 max_width <= width as usize,
                                 "{theme} {color} {motion} {width}x{height} overflow {max_width}"
                             );
+                            match app.view {
+                                View::Overview => {
+                                    assert!(
+                                        screen.contains("NEXT"),
+                                        "{theme} {color} {motion} {width}x{height} missing NEXT\n{screen}"
+                                    );
+                                }
+                                View::Graph => {
+                                    let has_edge = screen.contains("resolves_to")
+                                        && (screen.contains("─▶")
+                                            || screen.contains("->")
+                                            || screen.contains("|-")
+                                            || screen.contains("`-"));
+                                    assert!(
+                                        has_edge,
+                                        "{theme} {color} {motion} {width}x{height} missing graph edges\n{screen}"
+                                    );
+                                }
+                                View::Tools => {
+                                    assert!(
+                                        screen.contains("TOOLS") || screen.contains("Tools"),
+                                        "{theme} {color} {motion} {width}x{height} missing Tools\n{screen}"
+                                    );
+                                }
+                                View::Object => {
+                                    assert!(
+                                        screen.contains("Object")
+                                            || screen.contains("Properties")
+                                            || screen.contains("Linked"),
+                                        "{theme} {color} {motion} {width}x{height} missing Object View\n{screen}"
+                                    );
+                                }
+                                _ => {}
+                            }
                         }
+                    }
+                    app.view = View::Welcome;
+                    app.pane = crate::app::Pane::Main;
+                    for (width, height) in sizes {
+                        let screen = render_snapshot(&app, width, height);
+                        assert!(
+                            screen.contains("Welcome")
+                                || screen.contains("New investigation")
+                                || screen.contains("os-int"),
+                            "{theme} {color} {motion} {width}x{height} missing Welcome\n{screen}"
+                        );
                     }
                 }
             }
@@ -1801,6 +1844,7 @@ mod tests {
         assert!(plain.contains("NEXT"), "{plain}");
         assert!(!plain.contains('◇'), "{plain}");
         assert!(!plain.contains('│'), "{plain}");
+        assert!(!plain.contains('…'), "{plain}");
     }
 
     #[test]

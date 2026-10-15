@@ -467,6 +467,7 @@ impl App {
     pub fn apply_plain_mode(&mut self) {
         self.plain = true;
         self.config.ui.ascii = true;
+        self.config.ui.color = "none".into();
         self.motion = crate::tui::Animator::from_config(
             &self.config,
             &crate::tui::TerminalEnv::from_process(),

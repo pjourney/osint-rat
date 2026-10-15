@@ -32,6 +32,75 @@ fn run(config: &Path, data: &Path, args: &[&str]) -> std::process::Output {
         .expect("os-int")
 }
 
+fn run_env(
+    config: &Path,
+    data: &Path,
+    args: &[&str],
+    key: &str,
+    value: &str,
+) -> std::process::Output {
+    bin()
+        .env(key, value)
+        .args([
+            "--config",
+            config.to_str().expect("utf-8"),
+            "--data-dir",
+            data.to_str().expect("utf-8"),
+        ])
+        .args(args)
+        .output()
+        .expect("os-int")
+}
+
+fn seed_pending_review(config: &Path, data: &Path) {
+    let paths = AppPaths::new(config.to_path_buf(), data.to_path_buf());
+    paths.ensure_dirs().expect("dirs");
+    let mut store = Store::open(&paths.database()).expect("store");
+    let investigation = store.create_investigation("Case", "").expect("case");
+    let mut run = os_int::model::AgentRun {
+        id: "11111111-1111-4111-8111-111111111111"
+            .parse()
+            .expect("run id"),
+        investigation_id: investigation.id,
+        seq: 0,
+        thread_id: "22222222-2222-4222-8222-222222222222"
+            .parse()
+            .expect("thread id"),
+        page_id: None,
+        agent_name: "codex".into(),
+        program: "codex".into(),
+        args: Vec::new(),
+        question: "Propose a finding".into(),
+        response: String::new(),
+        status: os_int::model::JobStatus::Succeeded,
+        error: None,
+        focus: None,
+        context_artifact_id: None,
+        job_id: None,
+        model: None,
+        cost_usd: None,
+        created_at: os_int::model::now(),
+        finished_at: Some(os_int::model::now()),
+    };
+    store.insert_agent_run(&mut run).expect("run");
+    store
+        .insert_proposals(
+            investigation.id,
+            run.id,
+            vec![(
+                os_int::model::AgentAction::AddFinding {
+                    title: "pending gate".into(),
+                    details: "must stay pending until --yes".into(),
+                    confidence: Some("medium".into()),
+                    sources: Vec::new(),
+                },
+                os_int::model::ProposalStatus::Pending,
+                None,
+            )],
+        )
+        .expect("proposals");
+}
+
 fn stdout(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
@@ -129,14 +198,109 @@ fn plain_case_findings_glance_does_not_use_hollow_diamond() {
 #[test]
 fn review_accept_without_yes_is_refused_on_a_pipe() {
     let (_dir, config, data) = sandbox();
-    seed_case(&config, &data);
+    seed_pending_review(&config, &data);
+    let listed = run(&config, &data, &["review", "list", "Case"]);
+    assert!(listed.status.success(), "{}", stderr(&listed));
+    assert!(stdout(&listed).contains("X-1"), "{}", stdout(&listed));
     let output = run(&config, &data, &["review", "accept", "Case", "X-1"]);
     assert!(!output.status.success());
     let err = stderr(&output);
-    assert!(
-        err.contains("--yes") || err.contains("no Review item"),
-        "{err}"
+    assert!(err.contains("--yes"), "{err}");
+    assert!(!err.contains("no Review item"), "{err}");
+}
+
+#[test]
+fn os_int_plain_env_is_presence_based() {
+    let (_dir, config, data) = sandbox();
+    seed_case(&config, &data);
+    for value in ["1", "", "yes", "on"] {
+        let output = run_env(&config, &data, &["list"], "OS_INT_PLAIN", value);
+        assert!(
+            output.status.success(),
+            "OS_INT_PLAIN={value:?} must not clap-error: {}",
+            stderr(&output)
+        );
+        let err = stderr(&output);
+        assert!(
+            !err.contains("invalid value") && !err.contains("possible values"),
+            "OS_INT_PLAIN={value:?} clap bool parse leaked: {err}"
+        );
+    }
+    let off = run_env(&config, &data, &["list"], "OS_INT_PLAIN", "false");
+    assert!(off.status.success(), "{}", stderr(&off));
+}
+
+#[test]
+fn cooccur_huge_window_is_a_user_error() {
+    let (_dir, config, data) = sandbox();
+    seed_case(&config, &data);
+    let output = run(
+        &config,
+        &data,
+        &["cooccur", "Case", "--window", "2562047788016"],
     );
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(!err.contains("panic"), "{err}");
+    assert!(err.contains("too large") || err.contains("window"), "{err}");
+}
+
+#[test]
+fn config_json_returns_paths() {
+    let (_dir, config, data) = sandbox();
+    let output = run(&config, &data, &["--json", "config"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value: serde_json::Value = serde_json::from_str(&stdout(&output)).expect("json");
+    assert!(value["config"].as_str().is_some(), "{value}");
+    assert!(value["data"].as_str().is_some(), "{value}");
+    assert!(value["database"].as_str().is_some(), "{value}");
+    assert!(value["logs"].as_str().is_some(), "{value}");
+}
+
+#[test]
+fn plain_review_list_uses_ascii_glyphs() {
+    let (_dir, config, data) = sandbox();
+    seed_pending_review(&config, &data);
+    let output = run(&config, &data, &["--plain", "review", "list", "Case"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(!text.contains('◇'), "{text}");
+    assert!(!text.contains('·'), "{text}");
+    assert!(!text.contains('▶'), "{text}");
+}
+
+#[test]
+fn parallel_cli_processes_share_a_data_dir() {
+    let (_dir, config, data) = sandbox();
+    import_demo(&config, &data);
+    let workers = 8usize;
+    let mut handles = Vec::with_capacity(workers);
+    for index in 0..workers {
+        let config = config.clone();
+        let data = data.clone();
+        handles.push(std::thread::spawn(move || {
+            let args: &[&str] = if index % 2 == 0 {
+                &["list"]
+            } else {
+                &["--json", "list"]
+            };
+            run(&config, &data, args)
+        }));
+    }
+    for handle in handles {
+        let output = handle.join().expect("thread");
+        let err = stderr(&output);
+        assert!(
+            output.status.success(),
+            "parallel CLI failed: {err}\n{}",
+            stdout(&output)
+        );
+        assert!(
+            !err.to_ascii_lowercase().contains("database is locked"),
+            "{err}"
+        );
+        assert!(!err.to_ascii_lowercase().contains("sqlite_busy"), "{err}");
+    }
 }
 
 #[test]

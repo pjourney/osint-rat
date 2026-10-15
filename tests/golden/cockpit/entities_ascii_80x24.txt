@@ -1,4 +1,4 @@
- os-int > acme-phish > Entities  …  * 1 to review  ok jobs  agent X Claude Code
+ os-int > acme-phish > Entities...  * 1 to review  ok jobs  agent X Claude Code
  Rail         |>ENTITIES
  1 Case        KIND  VALUE                                      PROV  SRC   SEEN
 >2 Entities     DOM  acme-login.com                             AC      1     0s

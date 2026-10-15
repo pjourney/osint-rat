@@ -10,6 +10,9 @@ use super::workspace::InvestigationData;
 /// Default window used when two instants are treated as co-occurring.
 pub const DEFAULT_WINDOW: Duration = Duration::hours(24);
 
+/// Largest window the CLI accepts (10 years). Wider values error instead of overflowing.
+pub const MAX_WINDOW_HOURS: u64 = 24 * 365 * 10;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CoOccurrenceKind {
@@ -213,9 +216,18 @@ fn entity_spans(data: &InvestigationData) -> Vec<Span> {
     spans
 }
 
+fn saturating_add_window(
+    timestamp: chrono::DateTime<chrono::Utc>,
+    window: Duration,
+) -> chrono::DateTime<chrono::Utc> {
+    timestamp
+        .checked_add_signed(window)
+        .unwrap_or(chrono::DateTime::<chrono::Utc>::MAX_UTC)
+}
+
 fn overlaps(left: &Span, right: &Span, window: Duration) -> bool {
-    let left_end = left.end + window;
-    let right_end = right.end + window;
+    let left_end = saturating_add_window(left.end, window);
+    let right_end = saturating_add_window(right.end, window);
     left.start <= right_end && right.start <= left_end
 }
 
@@ -319,6 +331,34 @@ mod tests {
                 .windows(2)
                 .all(|window| cmp_pair(&window[0], &window[1]) != std::cmp::Ordering::Greater)
         );
+    }
+
+    #[test]
+    fn huge_window_does_not_overflow_datetime_add() {
+        let (data, ..) = fixture();
+        let huge = Duration::try_hours(24 * 365 * 200).unwrap_or(Duration::hours(24));
+        let actual = co_occur(
+            &data,
+            &CoOccurrenceQuery {
+                entity_ids: Vec::new(),
+                window: Some(huge),
+            },
+        );
+        assert!(!actual.is_empty() || data.entities.len() < 2);
+        let far = Utc.with_ymd_and_hms(9999, 12, 31, 0, 0, 0).unwrap();
+        let left = Span {
+            entity_id: Uuid::new_v4(),
+            start: far,
+            end: far,
+            title: "left".into(),
+        };
+        let right = Span {
+            entity_id: Uuid::new_v4(),
+            start: far,
+            end: far,
+            title: "right".into(),
+        };
+        assert!(overlaps(&left, &right, huge));
     }
 
     #[test]

@@ -57,7 +57,7 @@ pub fn rule_span(theme: &Theme) -> Span<'static> {
     Span::styled(glyph, theme.rule)
 }
 
-pub fn truncate(text: &str, max_width: usize) -> String {
+pub fn ellipsize(text: &str, max_width: usize, ascii: bool) -> String {
     if max_width == 0 {
         return String::new();
     }
@@ -65,9 +65,14 @@ pub fn truncate(text: &str, max_width: usize) -> String {
     if UnicodeWidthStr::width(clean.as_ref()) <= max_width {
         return clean.into_owned();
     }
+    let ellipsis = if ascii { "..." } else { "…" };
+    let ellipsis_width = if ascii { 3 } else { 1 };
+    if max_width <= ellipsis_width {
+        return ellipsis.chars().take(max_width).collect();
+    }
     let mut output = String::new();
     let mut width = 0usize;
-    let limit = max_width.saturating_sub(1);
+    let limit = max_width.saturating_sub(ellipsis_width);
     for ch in clean.chars() {
         let ch_width = UnicodeWidthStr::width(ch.encode_utf8(&mut [0; 4]));
         if width + ch_width > limit {
@@ -76,7 +81,7 @@ pub fn truncate(text: &str, max_width: usize) -> String {
         output.push(ch);
         width += ch_width;
     }
-    output.push('…');
+    output.push_str(ellipsis);
     output
 }
 
@@ -109,7 +114,7 @@ pub fn list_from<'a>(items: Vec<String>, selected: usize, theme: &Theme) -> List
             } else {
                 Style::default()
             };
-            ListItem::new(truncate(&item, 120)).style(style)
+            ListItem::new(ellipsize(&item, 120, theme.glyphs.ascii)).style(style)
         })
         .collect();
     List::new(rows)
@@ -229,23 +234,37 @@ fn hint_label(command: &crate::app::commands::Command, view: View) -> String {
 #[cfg(test)]
 mod tests {
     use super::super::theme::{ColorDepth, DetectedDepth, Theme, ThemeName};
-    use super::{rule_span, truncate};
+    use super::{ellipsize, rule_span};
 
     #[test]
     fn truncate_width_zero_emits_nothing() {
-        assert_eq!(truncate("hello", 0), "");
-        assert_eq!(truncate("café", 0), "");
+        assert_eq!(ellipsize("hello", 0, false), "");
+        assert_eq!(ellipsize("café", 0, false), "");
     }
 
     #[test]
     fn truncate_cjk_and_emoji_use_display_width() {
         use unicode_width::UnicodeWidthStr;
-        let cjk = truncate("你好世界", 5);
+        let cjk = ellipsize("你好世界", 5, false);
         assert!(UnicodeWidthStr::width(cjk.as_str()) <= 5, "{cjk}");
         assert!(cjk.ends_with('…'), "{cjk}");
-        let emoji = truncate("ok👍ok", 5);
+        let emoji = ellipsize("ok👍ok", 5, false);
         assert!(UnicodeWidthStr::width(emoji.as_str()) <= 5, "{emoji}");
         assert!(emoji.contains('…') || UnicodeWidthStr::width(emoji.as_str()) <= 5);
+    }
+
+    #[test]
+    fn ascii_truncate_uses_three_dot_ellipsis_and_width() {
+        use unicode_width::UnicodeWidthStr;
+        let ascii = ellipsize("abcdefghij", 6, true);
+        assert_eq!(ascii, "abc...");
+        assert_eq!(UnicodeWidthStr::width(ascii.as_str()), 6);
+        assert!(!ascii.contains('…'), "{ascii}");
+        let unicode = ellipsize("abcdefghij", 6, false);
+        assert_eq!(unicode, "abcde…");
+        assert_eq!(UnicodeWidthStr::width(unicode.as_str()), 6);
+        assert_eq!(ellipsize("hello", 2, true), "..");
+        assert_eq!(ellipsize("hello", 1, false), "…");
     }
 
     #[test]

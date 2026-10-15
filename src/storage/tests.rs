@@ -688,7 +688,7 @@ fn backfill_link_catalog_uses_original_relationship_time() {
         .connection()
         .execute("DELETE FROM link_types", [])
         .expect("clear catalog");
-    graph::backfill_link_catalog(store.connection()).expect("backfill");
+    graph::backfill_link_catalog(store.connection_mut()).expect("backfill");
     let seen: String = store
         .connection()
         .query_row(
@@ -2390,4 +2390,30 @@ fn scale_seed_and_incremental_patch_stay_consistent() {
         workspace.finding(finding.id).map(|row| row.title.as_str()),
         Some("scale note")
     );
+}
+
+#[test]
+fn concurrent_reopen_does_not_lock_after_catalog_exists() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("osint.sqlite");
+    {
+        let mut store = Store::open(&path).expect("open");
+        let investigation = store.create_investigation("Case", "").expect("case");
+        store
+            .apply_batch(
+                ApplyContext {
+                    investigation_id: investigation.id,
+                    page_id: None,
+                    job_id: None,
+                },
+                &dns_batch("reopen-hash"),
+            )
+            .expect("apply");
+    }
+    std::thread::scope(|scope| {
+        let first = scope.spawn(|| Store::open(&path));
+        let second = scope.spawn(|| Store::open(&path));
+        first.join().expect("first thread").expect("first open");
+        second.join().expect("second thread").expect("second open");
+    });
 }

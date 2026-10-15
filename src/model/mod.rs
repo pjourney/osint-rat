@@ -46,8 +46,8 @@ pub use batch::{
 pub use collaboration::{CONFLICT_POLICY, Member, Role, same_user};
 pub use common::{Confidence, Fields, Provenance, Timestamp, now};
 pub use cooccur::{
-    CoOccurrence, CoOccurrenceKind, CoOccurrenceQuery, DEFAULT_WINDOW, co_occur, event_involves,
-    intervals_overlap,
+    CoOccurrence, CoOccurrenceKind, CoOccurrenceQuery, DEFAULT_WINDOW, MAX_WINDOW_HOURS, co_occur,
+    event_involves, intervals_overlap,
 };
 pub use entity::{Entity, EntityKind};
 pub use event::{Event, NewEvent};

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use color_eyre::eyre::{Result, WrapErr, bail};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use uuid::Uuid;
 
 use super::rows::{RowExt, id, json, ts};
@@ -199,21 +199,43 @@ fn catalogue_link_type_at(
     Ok(())
 }
 
-pub(crate) fn backfill_link_catalog(connection: &Connection) -> rusqlite::Result<()> {
-    let mut statement = connection.prepare(
-        "SELECT investigation_id, kind, MIN(created_at) FROM relationships GROUP BY investigation_id, kind",
-    )?;
-    let rows = statement.query_map([], |row| {
-        Ok((
-            row.uuid(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-        ))
-    })?;
-    for row in rows {
-        let (investigation_id, kind, first_seen_at) = row?;
-        catalogue_link_type_at(connection, investigation_id, &kind, &first_seen_at)?;
+fn link_catalog_needs_backfill(connection: &Connection) -> rusqlite::Result<bool> {
+    connection.query_row(
+        "SELECT EXISTS (
+            SELECT 1 FROM relationships r
+            WHERE NOT EXISTS (
+                SELECT 1 FROM link_types t
+                WHERE t.investigation_id = r.investigation_id AND t.kind = r.kind
+            )
+         )",
+        [],
+        |row| row.get::<_, i64>(0).map(|value| value != 0),
+    )
+}
+
+pub(crate) fn backfill_link_catalog(connection: &mut Connection) -> rusqlite::Result<()> {
+    if !link_catalog_needs_backfill(connection)? {
+        return Ok(());
     }
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let rows = {
+        let mut statement = tx.prepare(
+            "SELECT investigation_id, kind, MIN(created_at) FROM relationships GROUP BY investigation_id, kind",
+        )?;
+        statement
+            .query_map([], |row| {
+                Ok((
+                    row.uuid(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for (investigation_id, kind, first_seen_at) in rows {
+        catalogue_link_type_at(&tx, investigation_id, &kind, &first_seen_at)?;
+    }
+    tx.commit()?;
     Ok(())
 }
 

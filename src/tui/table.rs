@@ -11,7 +11,7 @@ use crate::app::filter::SortKey;
 use crate::model::{Provenance, Timestamp};
 
 use super::theme::Theme;
-use super::widgets::{provenance_glyph, truncate};
+use super::widgets::{ellipsize, provenance_glyph};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Align {
@@ -178,7 +178,7 @@ fn header_line(
             _ => "",
         };
         let label = format!("{}{marker}", column.header);
-        let cell = pad_align(&label, width, column.align);
+        let cell = pad_align(&label, width, column.align, theme.glyphs.ascii);
         spans.push(Span::styled(cell, theme.muted));
     }
     Line::from(spans)
@@ -190,7 +190,7 @@ fn row_line(
     row: &[TableCell],
     style: Style,
     selected: bool,
-    _theme: &Theme,
+    theme: &Theme,
 ) -> Line<'static> {
     let mut spans = Vec::new();
     for (index, column) in columns.iter().enumerate() {
@@ -208,6 +208,7 @@ fn row_line(
             column.align,
             style,
             selected && index == 0,
+            theme.glyphs.ascii,
         ));
     }
     Line::from(spans)
@@ -219,6 +220,7 @@ fn fit_cell(
     align: Align,
     style: Style,
     _mark_selected: bool,
+    ascii: bool,
 ) -> Vec<Span<'static>> {
     let raw: String = cell
         .spans
@@ -226,11 +228,11 @@ fn fit_cell(
         .map(|span| span.content.as_ref())
         .collect();
     let mut text = if UnicodeWidthStr::width(raw.as_str()) > width {
-        truncate(&raw, width)
+        ellipsize(&raw, width, ascii)
     } else {
         raw
     };
-    text = pad_align(&text, width, align);
+    text = pad_align(&text, width, align, ascii);
     if cell.spans.len() == 1 {
         let span_style = cell.spans[0].style.patch(style);
         return vec![Span::styled(text, span_style)];
@@ -245,9 +247,11 @@ fn fit_cell(
         .iter()
         .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
         .sum();
+    let mark = if ascii { "..." } else { "…" };
+    let mark_width = if ascii { 3 } else { 1 };
     let ellipsis = total > width;
     let budget = if ellipsis {
-        width.saturating_sub(1)
+        width.saturating_sub(mark_width)
     } else {
         width
     };
@@ -269,8 +273,13 @@ fn fit_cell(
         used += piece_width;
     }
     if ellipsis {
-        spans.push(Span::styled("…".to_string(), style));
-        used = used.saturating_add(1);
+        let shown = if width < mark_width {
+            mark.chars().take(width).collect::<String>()
+        } else {
+            mark.to_string()
+        };
+        spans.push(Span::styled(shown.clone(), style));
+        used = used.saturating_add(UnicodeWidthStr::width(shown.as_str()));
     }
     if used < width {
         let pad = " ".repeat(width - used);
@@ -299,10 +308,10 @@ fn take_width(text: &str, max_width: usize) -> String {
     output
 }
 
-fn pad_align(text: &str, width: usize, align: Align) -> String {
+fn pad_align(text: &str, width: usize, align: Align, ascii: bool) -> String {
     let current = UnicodeWidthStr::width(text);
     if current >= width {
-        return truncate(text, width);
+        return ellipsize(text, width, ascii);
     }
     let pad = " ".repeat(width - current);
     match align {
@@ -361,10 +370,10 @@ mod tests {
 
     #[test]
     fn pad_align_respects_display_width() {
-        assert_eq!(pad_align("ab", 4, Align::Left), "ab  ");
-        assert_eq!(pad_align("12", 4, Align::Right), "  12");
+        assert_eq!(pad_align("ab", 4, Align::Left, false), "ab  ");
+        assert_eq!(pad_align("12", 4, Align::Right, false), "  12");
         assert_eq!(
-            UnicodeWidthStr::width(pad_align("café", 6, Align::Left).as_str()),
+            UnicodeWidthStr::width(pad_align("café", 6, Align::Left, false).as_str()),
             6
         );
     }
@@ -382,6 +391,7 @@ mod tests {
             2,
             Align::Left,
             ratatui::style::Style::default(),
+            false,
             false,
         );
         let text: String = spans.iter().map(|span| span.content.as_ref()).collect();

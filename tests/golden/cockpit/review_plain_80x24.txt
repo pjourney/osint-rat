@@ -1,9 +1,9 @@
- os-int > acme-phish > Review  un…  * 1 to review  ok jobs  agent X Claude Code
+ os-int > acme-phish > Review  ...  * 1 to review  ok jobs  agent X Claude Code
 RAIL
 1 Case  2 Entities  3 Evidence  4 Graph  >5 Review 1  6 Jobs
 >AI PROPOSES ONLY
 nothing is written until you accept
-X-1 Q-1 · codex
+X-1 Q-1 - codex
 >*? + Finding: mail.acme-login.com uses the same MX
 
 
@@ -18,7 +18,7 @@ X-1 Q-1 · codex
 + Finding  * AI
   mail.acme-login.com uses the same MX
 CITED EVIDENCE
-  ok S-1  DNS records for acme-login.…
+  ok S-1  DNS records for acme-logi...
 RATIONALE
  1 item(s) waiting. Shift+A then y writes. Enter never writes.    0 jobs
 / search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro
