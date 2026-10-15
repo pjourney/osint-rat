@@ -301,17 +301,10 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
                 glyph,
                 Span::styled(format!(" {src:<3}  {status} {done}"), theme.muted),
             ]));
+            if target.running {
+                lines.extend(observing_radar_lines(app, theme));
+            }
         }
-    }
-    if app.motion.playing(super::motion::AnimKind::Radar) && !app.is_plain_linear() {
-        lines.extend(super::motion::radar_lines(
-            app.motion
-                .frame_kind(super::motion::AnimKind::Radar)
-                .unwrap_or_else(|| super::motion::FrameView::first(8)),
-            theme,
-            theme.glyphs.ascii,
-            app.motion.mode(),
-        ));
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled("AT A GLANCE", theme.header)));
@@ -342,6 +335,17 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
             .scroll((app.scroll, 0)),
         area,
     );
+}
+
+fn observing_radar_lines(app: &App, theme: &Theme) -> Vec<Line<'static>> {
+    super::motion::radar_lines(
+        app.motion
+            .frame_kind(super::motion::AnimKind::Radar)
+            .unwrap_or_else(|| super::motion::FrameView::first(8)),
+        theme,
+        theme.glyphs.ascii,
+        app.motion.mode(),
+    )
 }
 
 fn glance_line(
@@ -961,7 +965,7 @@ fn graph_tree_lines(
         .iter()
         .map(|node| (node.id, node.hop))
         .collect();
-    let selected = visible.nodes.get(app.graph.selected).map(|node| node.id);
+    let selected = app.graph_tree_ids().get(app.graph.selected).copied();
     let mut adjacency: std::collections::HashMap<uuid::Uuid, Vec<&GraphEdge>> =
         std::collections::HashMap::new();
     for edge in &visible.edges {
@@ -1890,6 +1894,8 @@ fn draw_inspector(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             theme,
             area.height.saturating_sub(1) as usize,
         ));
+    } else if app.view == View::Overview && app.inspector_tab == InspectorTab::Props {
+        lines.extend(inspector_tab_lines(app, workspace, theme));
     } else {
         lines.extend(tab_bar(app, theme));
         lines.extend(inspector_tab_lines(app, workspace, theme));
@@ -1978,6 +1984,9 @@ fn inspector_tab_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<L
     if board_empty {
         return vec![Line::from(Span::styled("Nothing selected.", theme.muted))];
     }
+    if app.view == View::Overview && app.inspector_tab == InspectorTab::Props {
+        return case_inspector_props(app, workspace, theme);
+    }
     match app.inspector_tab {
         InspectorTab::Props => {
             let mut lines = detail_lines(app, workspace, theme);
@@ -1990,6 +1999,72 @@ fn inspector_tab_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<L
         InspectorTab::Notes => inspector_notes(app, workspace, theme),
         InspectorTab::History => inspector_history(app, workspace, theme),
     }
+}
+
+fn case_inspector_props(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let source_ids = inspector_source_ids(app, workspace);
+    if let Some(entity) = inspector_entity(app, workspace) {
+        let facts = entity.fields.len()
+            + workspace.outgoing(entity.id).len()
+            + workspace.incoming(entity.id).len();
+        lines.push(Line::from(format!(
+            "{}  {}",
+            Glyphs::entity_tag(&entity.kind),
+            entity.display_name()
+        )));
+        lines.push(Line::from(Span::styled(
+            format!(
+                "{} {} facts · {} sources",
+                theme.glyphs.provenance(entity.provenance),
+                facts.max(entity.source_ids.len()),
+                source_ids.len().max(entity.source_ids.len())
+            ),
+            theme.muted,
+        )));
+    } else if let Some(page) = app.page_id.and_then(|id| workspace.page(id)) {
+        lines.push(Line::from(format!(
+            "{}  {}",
+            page.kind.label(),
+            page.target.as_deref().unwrap_or(page.title.as_str())
+        )));
+        lines.push(Line::from(Span::styled(
+            format!("0 facts · {} sources", source_ids.len()),
+            theme.muted,
+        )));
+    } else {
+        lines.push(Line::from(Span::styled("Nothing selected.", theme.muted)));
+        return lines;
+    }
+    lines.extend(case_source_chain(app, workspace, theme));
+    lines.extend(inspector_notes(app, workspace, theme));
+    lines
+}
+
+fn case_source_chain(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(Span::styled("SOURCES", theme.header))];
+    let ids = inspector_source_ids(app, workspace);
+    if ids.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  No sources on this object.",
+            theme.muted,
+        )));
+        return lines;
+    }
+    for (index, id) in ids.iter().take(4).enumerate() {
+        if let Some(source) = workspace.source(*id) {
+            let collector = source.collector.as_deref().unwrap_or(source.kind.as_str());
+            lines.push(Line::from(vec![
+                Span::styled(format!("  S{} ", index + 1), theme.muted),
+                provenance_glyph(source.provenance, theme),
+                Span::raw(format!(
+                    "  {collector}  {}",
+                    relative_time(source.retrieved_at)
+                )),
+            ]));
+        }
+    }
+    lines
 }
 
 fn inspector_sources(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'static>> {
@@ -2039,10 +2114,31 @@ fn inspector_source_ids(app: &App, workspace: &Workspace) -> Vec<uuid::Uuid> {
         .entity_id
         .and_then(|id| workspace.entity(workspace.canonical_id(id)))
     {
-        return entity.source_ids.clone();
+        let mut ids = entity.source_ids.clone();
+        if app.view == View::Overview
+            && let Some(page_id) = app.page_id
+        {
+            for source in &workspace.data.sources {
+                if source.page_id == Some(page_id) && !ids.contains(&source.id) {
+                    ids.push(source.id);
+                }
+            }
+        }
+        return ids;
     }
     if let Some(finding) = app.finding_id.and_then(|id| workspace.finding(id)) {
         return finding.source_ids.clone();
+    }
+    if app.view == View::Overview
+        && let Some(page_id) = app.page_id
+    {
+        return workspace
+            .data
+            .sources
+            .iter()
+            .filter(|source| source.page_id == Some(page_id))
+            .map(|source| source.id)
+            .collect();
     }
     Vec::new()
 }
@@ -2126,10 +2222,7 @@ fn entity_inspector_props(
 }
 
 fn inspector_notes(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::from(Span::styled(
-        "NOTES  e edit entity notes",
-        theme.header,
-    ))];
+    let mut lines = vec![Line::from(Span::styled("NOTES  e edit", theme.header))];
     if let Some(entity) = inspector_entity(app, workspace)
         && !entity.notes.trim().is_empty()
     {
@@ -2435,15 +2528,19 @@ fn detail_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'st
                     .map(|job| job.stderr.clone())
                     .or_else(|| stored.map(|job| job.stderr.clone()))
                     .unwrap_or_default();
-                return vec![
+                let mut lines = vec![
                     Line::from(description),
                     Line::from(format!("Status   {status}")),
                     Line::from(format!("Program  {}", program.as_deref().unwrap_or("-"))),
                     Line::from(format!("Args     {}", args.join(" "))),
-                    Line::from(""),
-                    Line::from(sanitize_text(&log).into_owned()),
-                    Line::from(sanitize_text(&stderr).into_owned()),
                 ];
+                if status.is_active() && !live.is_some_and(|job| job.kind == "agent") {
+                    lines.extend(observing_radar_lines(app, theme));
+                }
+                lines.push(Line::from(""));
+                lines.push(Line::from(sanitize_text(&log).into_owned()));
+                lines.push(Line::from(sanitize_text(&stderr).into_owned()));
+                return lines;
             }
         }
         View::Artifacts => {

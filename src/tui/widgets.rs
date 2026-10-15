@@ -210,6 +210,13 @@ fn hint_label(command: &crate::app::commands::Command, view: View) -> String {
         "Ask Agent" => "ask agent".into(),
         "Command palette" => "commands".into(),
         "Run Collectors" => "collect".into(),
+        "New Page" => {
+            if view == View::Overview {
+                "new target".into()
+            } else {
+                "new page".into()
+            }
+        }
         "Search Around" => "search around".into(),
         "Open selection in Graph" => "graph".into(),
         "Select for accept" => "arm".into(),

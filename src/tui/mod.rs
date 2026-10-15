@@ -1,7 +1,7 @@
 //! Terminal event loop and rendering. Drawing is a pure function of `App`.
 
 mod glyphs;
-mod keymap;
+pub(crate) mod keymap;
 pub mod motion;
 mod overlays;
 mod preview;
@@ -1579,6 +1579,16 @@ mod tests {
         assert!(screen.contains("AT A GLANCE"), "{screen}");
         assert!(screen.contains("NEXT"), "{screen}");
         assert!(!screen.contains("braille"), "{screen}");
+        assert!(
+            screen.contains("facts") && screen.contains("sources"),
+            "Case Inspector must show N facts · M sources\n{screen}"
+        );
+        assert!(screen.contains("SOURCES"), "{screen}");
+        assert!(screen.contains("NOTES"), "{screen}");
+        assert!(
+            screen.contains("n new target"),
+            "Case context bar must keep n new target at 80x24\n{screen}"
+        );
     }
 
     #[test]
@@ -1609,6 +1619,34 @@ mod tests {
             .max()
             .unwrap_or(0);
         assert!(width <= 80, "graph exceeds 80 cols: {width}\n{screen}");
+    }
+
+    #[test]
+    fn graph_cursor_uses_tree_ids_after_reroot() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenGraph).expect("graph");
+        let ids = app.graph_tree_ids();
+        assert!(ids.len() >= 2, "need a child to re-root");
+        app.dispatch(Action::Move(1)).expect("j");
+        let selected = app.graph_tree_ids()[app.graph.selected];
+        assert_eq!(app.entity_id, Some(selected));
+        let name = app
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.entity(selected))
+            .map(|entity| entity.display_name().to_string())
+            .expect("node");
+        app.dispatch(Action::Select).expect("enter re-root");
+        assert_eq!(app.graph.focus_id, Some(selected));
+        assert_eq!(
+            app.graph_tree_ids().get(app.graph.selected).copied(),
+            Some(selected)
+        );
+        let screen = render_snapshot(&app, 80, 24);
+        let hit = screen
+            .lines()
+            .any(|line| line.contains(&name) && (line.contains('▌') || line.contains('>')));
+        assert!(hit, "cursor must sit on {name} after re-root\n{screen}");
     }
 
     #[test]
@@ -1648,8 +1686,9 @@ mod tests {
     fn a11y_snapshots_mono_ascii_motion_off() {
         let (_directory, mut app) = snapshot_app();
         app.config.ui.theme = "mono".into();
-        app.config.ui.ascii = true;
-        app.motion = crate::tui::Animator::new(crate::tui::MotionMode::Off);
+        app.apply_plain_mode();
+        assert!(app.is_plain_linear());
+        assert_eq!(app.motion.mode(), crate::tui::MotionMode::Off);
         let mut wrote = Vec::new();
         for (name, action) in [
             ("case_plain", Action::OpenOverview),

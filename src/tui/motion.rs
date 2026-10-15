@@ -1487,7 +1487,7 @@ pub fn corroboration_stroke(source_count: usize, ascii: bool) -> &'static str {
         return match corroboration_band(source_count) {
             0 => "-",
             1 => "=",
-            _ => "=",
+            _ => "#",
         };
     }
     match corroboration_band(source_count) {
@@ -1892,6 +1892,9 @@ mod tests {
         assert_eq!(corroboration_stroke(1, false), "─");
         assert_eq!(corroboration_stroke(3, false), "━");
         assert_eq!(corroboration_stroke(8, false), "═");
+        assert_eq!(corroboration_stroke(1, true), "-");
+        assert_eq!(corroboration_stroke(3, true), "=");
+        assert_eq!(corroboration_stroke(8, true), "#");
     }
 
     #[test]

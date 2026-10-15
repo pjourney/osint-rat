@@ -311,7 +311,7 @@ pub enum Command {
         /// Investigation name, UUID, or unique UUID prefix.
         investigation: String,
     },
-    /// List or decide Review items. Accept always requires `--yes` or an interactive y.
+    /// List or decide Review items (`X-n` refs). Accept always requires `--yes` or an interactive y.
     Review {
         #[command(subcommand)]
         command: ReviewCommand,
@@ -406,18 +406,18 @@ pub enum ReviewCommand {
         /// Investigation name, UUID, or unique UUID prefix.
         investigation: String,
     },
-    /// Accept a pending proposal (`A-n` or UUID). Requires `--yes` or an interactive y.
+    /// Accept a pending proposal (`X-n` or UUID). Requires `--yes` or an interactive y.
     Accept {
         /// Investigation name, UUID, or unique UUID prefix.
         investigation: String,
-        /// Proposal short reference (`A-1`) or UUID.
+        /// Proposal short reference (`X-1`) or full UUID. Exact match only; `X-1` does not select `X-10`.
         reference: String,
     },
-    /// Reject a pending proposal (`A-n` or UUID). Requires `--yes` or an interactive y.
+    /// Reject a pending proposal (`X-n` or UUID). Requires `--yes` or an interactive y.
     Reject {
         /// Investigation name, UUID, or unique UUID prefix.
         investigation: String,
-        /// Proposal short reference (`A-1`) or UUID.
+        /// Proposal short reference (`X-1`) or full UUID. Exact match only; `X-1` does not select `X-10`.
         reference: String,
     },
 }
@@ -1708,17 +1708,32 @@ fn review_decide(cli: &Cli, query: &str, reference: &str, accept: bool) -> Resul
     app.open_investigation(investigation.id)?;
     app.open_review_lane();
     let items = app.listed_review_items();
-    let index = items.iter().position(|item| {
-        item.group.contains(reference)
-            || item.title == reference
-            || item
-                .proposal_id
-                .is_some_and(|id| id.to_string() == reference)
-    });
+    let index = items
+        .iter()
+        .position(|item| item.matches_reference(reference));
     let Some(index) = index else {
         return Err(user_err(format!("no Review item {reference}")));
     };
     let item = &items[index];
+    review_write_guard(item, accept)?;
+    let prompt = review_confirm_prompt(item, accept);
+    if !confirm_write(cli, &prompt)? {
+        return Err(user_err("cancelled; nothing written"));
+    }
+    let written_as = item.written_as;
+    app.selected = index;
+    if accept {
+        app.review_armed = true;
+        app.dispatch(crate::app::Action::Accept)?;
+        println!("{}", review_accepted_copy(written_as, app.config.ui.ascii));
+    } else {
+        app.dispatch(crate::app::Action::Reject)?;
+        println!("Rejected {reference}.");
+    }
+    Ok(())
+}
+
+fn review_write_guard(item: &crate::app::review::ReviewItem, accept: bool) -> Result<()> {
     if accept && !item.is_writable() {
         return Err(user_err(
             "that Review row is transcript only; nothing to accept",
@@ -1729,29 +1744,40 @@ fn review_decide(cli: &Cli, query: &str, reference: &str, accept: bool) -> Resul
             "a citation points at a missing source; acceptance is blocked",
         ));
     }
-    let verb = if accept { "Accept" } else { "Reject" };
-    let prompt = if item.is_ai() && accept {
-        format!(
-            "{verb} AI item {:?}? It keeps agent provenance.",
-            item.title
-        )
-    } else {
-        format!("{verb} {:?}?", item.title)
-    };
-    if !confirm_write(cli, &prompt)? {
-        return Err(user_err("cancelled; nothing written"));
-    }
-    app.selected = index;
-    if accept {
-        app.review_armed = true;
-        app.dispatch(crate::app::Action::Accept)?;
-        let glyph = if app.config.ui.ascii { "*" } else { "◆" };
-        println!("Accepted. AI items keep {glyph} agent provenance.");
-    } else {
-        app.dispatch(crate::app::Action::Reject)?;
-        println!("Rejected {reference}.");
-    }
     Ok(())
+}
+
+fn review_confirm_prompt(item: &crate::app::review::ReviewItem, accept: bool) -> String {
+    if !accept {
+        return format!("Reject {:?}?", item.title);
+    }
+    match item.written_as {
+        Some(crate::model::Provenance::Agent) => format!(
+            "Accept AI item {:?}? It keeps agent provenance.",
+            item.title
+        ),
+        Some(crate::model::Provenance::Analyst) => {
+            format!("Accept {:?}? It keeps analyst provenance.", item.title)
+        }
+        Some(other) => format!(
+            "Accept {:?}? It keeps {} provenance.",
+            item.title,
+            other.as_str()
+        ),
+        None => format!("Accept {:?}?", item.title),
+    }
+}
+
+fn review_accepted_copy(written_as: Option<crate::model::Provenance>, ascii: bool) -> String {
+    let glyph = if ascii { "*" } else { "◆" };
+    match written_as {
+        Some(crate::model::Provenance::Agent) => {
+            format!("Accepted. AI items keep {glyph} agent provenance.")
+        }
+        Some(crate::model::Provenance::Analyst) => "Accepted. Analyst provenance kept.".into(),
+        Some(other) => format!("Accepted. {} provenance kept.", other.as_str()),
+        None => "Accepted.".into(),
+    }
 }
 
 fn jobs_command(cli: &Cli, query: &str) -> Result<()> {
@@ -2425,13 +2451,13 @@ mod tests {
         }
         let plain = Cli::try_parse_from(["os-int", "--plain"]).expect("plain");
         assert!(plain.plain);
-        let review = Cli::try_parse_from(["os-int", "--yes", "review", "accept", "Case", "A-1"])
+        let review = Cli::try_parse_from(["os-int", "--yes", "review", "accept", "Case", "X-1"])
             .expect("review accept");
         assert!(review.yes);
         match review.command {
             Some(Command::Review {
                 command: ReviewCommand::Accept { reference, .. },
-            }) => assert_eq!(reference, "A-1"),
+            }) => assert_eq!(reference, "X-1"),
             other => panic!("expected review accept {other:?}"),
         }
         let case = Cli::try_parse_from(["os-int", "--json", "case", "Case"]).expect("case");
@@ -2597,5 +2623,69 @@ mod tests {
                 .is_none()
         );
         assert!(store.list_investigations().expect("list").is_empty());
+    }
+
+    #[test]
+    fn confirm_write_refuses_without_yes_when_stdin_is_not_a_tty() {
+        let cli = Cli::try_parse_from(["os-int", "review", "accept", "Case", "X-1"]).expect("cli");
+        assert!(!cli.yes);
+        let error = confirm_write(&cli, "Accept AI item?").expect_err("non-tty");
+        let text = error.to_string();
+        assert!(text.contains("--yes"), "{text}");
+        assert!(
+            text.contains("not a TTY") || text.contains("Refusing"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn cli_review_accept_is_blocked_when_a_citation_is_missing() {
+        let item = crate::app::review::ReviewItem {
+            kind: crate::app::review::ReviewKind::Agent,
+            proposal_id: Some(Uuid::new_v4()),
+            run_id: None,
+            merge: None,
+            short_ref: Some("X-1".into()),
+            title: "blocked".into(),
+            group: "X-1 Q-1 · agent".into(),
+            preview: Vec::new(),
+            citations: vec![crate::app::review::ReviewCitation {
+                reference: "S-99".into(),
+                present: false,
+                label: "missing".into(),
+            }],
+            rationale: String::new(),
+            written_as: Some(crate::model::Provenance::Agent),
+        };
+        let error = review_write_guard(&item, true).expect_err("blocked");
+        assert!(error.to_string().contains("missing source"), "{error}");
+        assert!(item.matches_reference("X-1"));
+        assert!(!item.matches_reference("X-10"));
+    }
+
+    #[test]
+    fn cli_accept_copy_matches_item_provenance() {
+        let ai = crate::app::review::ReviewItem {
+            kind: crate::app::review::ReviewKind::Agent,
+            proposal_id: Some(Uuid::new_v4()),
+            run_id: None,
+            merge: None,
+            short_ref: Some("X-1".into()),
+            title: "phish".into(),
+            group: "X-1".into(),
+            preview: Vec::new(),
+            citations: Vec::new(),
+            rationale: String::new(),
+            written_as: Some(crate::model::Provenance::Agent),
+        };
+        assert!(review_confirm_prompt(&ai, true).contains("agent provenance"));
+        assert!(review_accepted_copy(ai.written_as, true).contains('*'));
+        assert!(review_accepted_copy(ai.written_as, false).contains('◆'));
+        let analyst = crate::app::review::ReviewItem {
+            written_as: Some(crate::model::Provenance::Analyst),
+            ..ai
+        };
+        assert!(review_confirm_prompt(&analyst, true).contains("analyst provenance"));
+        assert!(review_accepted_copy(analyst.written_as, false).contains("Analyst"));
     }
 }

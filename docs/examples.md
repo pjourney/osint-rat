@@ -63,7 +63,7 @@ In the workbench, press `Ctrl+K` and type `dns`, `rdap`, `http`, `tls`, `ct`, `i
 
 ## Follow an address the domain just revealed
 
-After the domain collection, open Entities (`5`), note an address, and collect it. An IP runs RDAP and IP intelligence (reverse DNS, origin ASN, prefix, registry country).
+After the domain collection, open Entities (`2`), note an address, and collect it. An IP runs RDAP and IP intelligence (reverse DNS, origin ASN, prefix, registry country).
 
 ```bash
 os-int-learn collect ip 192.0.2.15 --investigation "Example Corp"
@@ -215,7 +215,7 @@ os-int-learn report "Example Corp" --format markdown
 
 ```bash
 os-int-learn review list "Example Corp"
-os-int-learn review accept "Example Corp" A-1 --yes
+os-int-learn review accept "Example Corp" X-1 --yes
 os-int-learn search-around "Example Corp" --entity E-1 --hops 1
 ```
 

@@ -13,12 +13,12 @@
 
 
  Inspector · acme-login.com
-TABS  ·Props·  Sources  Notes  History
-acme-login.com
-Domain
-acme-login.com
-
-
+DOM  acme-login.com
+✎ 1 facts · 1 sources
+SOURCES
+  S1 ●  dns  0s
+NOTES  e edit
+  No notes yet. e edits in $EDITOR.
 
  Case — Enter opens. It never writes.    0 jobs
-/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro
+c collect  n new target  a ask agent  s search around  / search  Ctrl+K commands

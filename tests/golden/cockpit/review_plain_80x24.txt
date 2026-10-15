@@ -1,19 +1,19 @@
  os-int ▸ acme-phish ▸ Review  un…  * 1 to review  ok jobs  agent X Claude Code
- Rail         │>AI PROPOSES ONLY
- 1 Case        nothing is written until you accept
- 2 Entities    X-1 Q-1 · codex
- 3 Evidence    >*? + Finding: mail.acme-login.com uses the same MX
+RAIL
+ Rail
+ 1 Case
+ 2 Entities
+ 3 Evidence
  4 Graph
 >5 Review 1
- 6 Jobs
-
-
-
-
+>AI PROPOSES ONLY
+nothing is written until you accept
+X-1 Q-1 · codex
+>*? + Finding: mail.acme-login.com uses the same MX
 
 
  Inspector · Will write
-+ Finding  ◆ AI
++ Finding  * AI
   mail.acme-login.com uses the same MX
 CITED EVIDENCE
   ok S-1  DNS records for acme-login.…

@@ -206,7 +206,7 @@ Press `Ctrl+K` or `:`, then type to filter. Ingest, playbooks, tools, settings, 
 | Add team member | `owner` / `analyst` / `reader` |
 | Nearby (country / prefix) | List co-located entities |
 | Object View | Typed properties, catalogued links, sources, and findings (`Enter` also opens) |
-| Graph | Link-analysis canvas of entities and relationships (`g`) |
+| Graph | Edge-labelled tree of entities and relationships (`g`) |
 | Search Around | Expand 1–N hops from the selection and merge into Graph (`s`) |
 | Configure Agent | Agent profile and theme |
 | Doctor | Environment checks |
@@ -252,10 +252,10 @@ When the object is a resolved canonical, Object View lists **Constituents** (the
 
 ## Graph and Search Around
 
-Graph is a terminal link-analysis canvas (TUI-first; there is no embedded webview). Nodes are entities. Edges are relationships. The Inspector reuses Object View data for the selected node.
+Graph is an edge-labelled tree from the focused node (TUI-first; there is no embedded webview). Nodes are entities. Edges are relationships. The Inspector reuses Object View data for the selected node.
 
 - Press `g`, pick **Graph** on the Rail (`4`), or run the palette command **Graph**. The seed is the current entity (Entities highlight, Object View, or the page's primary entity). If none is focused, the first entity is used. Opening Graph expands **1 hop**.
-- Press `s` or the palette command **Search Around** to expand **2 hops** from the current selection. On an open Graph, those hops **merge** into the canvas. From any other screen, Search Around opens Graph at 2 hops.
+- Press `s` or the palette command **Search Around** to expand **2 hops** from the current selection. On an open Graph, those hops **merge** into the tree. From any other screen, Search Around opens Graph at 2 hops.
 - `+` / `-` change hop depth and re-query from the original seed (0–8). `hops` follows the last result's `hops_used`.
 - Press `t` to toggle the **time lens** on Graph, Evidence, or Entities. The facet strip counts the unfiltered set by entity kind, top link types, and provenance. Palette **Previous facet** / **Next facet** / **Apply facet** move and apply a facet; `x` clears filters.
 - Render caps are **200 nodes** and **400 edges**. Crossing either threshold warns and asks for confirm before the first 200 / 400 are drawn. A capped result is labelled in the status line.
@@ -632,7 +632,7 @@ os-int [OPTIONS] [COMMAND]
 | `theme preview [name\|--all]` | Print cockpit role swatches, a sample strip, and colour-blind ΔE without opening the TUI |
 | `case <name>` | Print the Case home dashboard (targets, glance, NEXT) |
 | `review list <name>` | Print pending Review items |
-| `review accept\|reject <name> <A-n>` | Decide a proposal. Requires `--yes` or an interactive `y` |
+| `review accept\|reject <name> <X-n>` | Decide a proposal by exact `X-n` short-ref or UUID. Requires `--yes` or an interactive `y` |
 | `jobs <name>` | List jobs |
 | `evidence <name>` | List findings and sources |
 | `tools` | List tools. Active tools print as refused |

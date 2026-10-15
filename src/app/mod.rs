@@ -631,6 +631,12 @@ impl App {
             .workspace
             .as_ref()
             .and_then(|workspace| workspace.data.pages.first().map(|page| page.id));
+        self.entity_id = self.workspace.as_ref().and_then(|workspace| {
+            workspace.data.pages.first().and_then(|page| {
+                page.entity_id
+                    .or_else(|| workspace.page_entity_ids(page.id).into_iter().next())
+            })
+        });
         self.selected = 0;
         self.nav_index = 0;
         self.overlay = Overlay::None;
@@ -1429,6 +1435,9 @@ impl App {
             View::Overview | View::Pages => {
                 if let Some(page) = workspace.data.pages.get(self.selected) {
                     self.page_id = Some(page.id);
+                    self.entity_id = page
+                        .entity_id
+                        .or_else(|| workspace.page_entity_ids(page.id).into_iter().next());
                 }
             }
             View::Entities if self.time_lens => self.sync_timeline_selection(),
@@ -1593,6 +1602,9 @@ impl App {
             View::Overview | View::Pages => {
                 if let Some(page) = workspace.data.pages.get(self.selected) {
                     self.page_id = Some(page.id);
+                    self.entity_id = page
+                        .entity_id
+                        .or_else(|| workspace.page_entity_ids(page.id).into_iter().next());
                     let _ = self.save_session();
                     self.status = format!("Target {}", page.title);
                 }
@@ -3097,7 +3109,7 @@ impl App {
                 format!("written · {glyph} AI"),
             );
             self.status = if accepted_ai {
-                "Accepted. AI items keep ◆ agent provenance.".into()
+                format!("Accepted. AI items keep {glyph} agent provenance.")
             } else {
                 "Accepted. Analyst / playbook items keep their provenance.".into()
             };
@@ -4933,6 +4945,38 @@ mod tests {
         create_named_investigation(&mut app, "Hallway");
         create_page(&mut app, "acme-login.com", "domain", "acme-login.com");
         let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let page_id = app.workspace.as_ref().expect("workspace").data.pages[0].id;
+        let job_id = Uuid::new_v4();
+        let mut job = sample_job("DNS", JobStatus::Succeeded, Some(page_id));
+        job.id = job_id;
+        job.investigation_id = Some(investigation_id);
+        app.job_records.insert(job_id, job);
+        let mut batch = crate::model::EvidenceBatch::new();
+        let source = crate::model::NewSource::collected(
+            crate::model::SourceKind::Dns,
+            "dns",
+            "DNS records for acme-login.com",
+        );
+        let key = batch.add_source(source);
+        batch.entity(
+            crate::model::EntityKind::Domain,
+            "acme-login.com",
+            Some(key),
+        );
+        app.apply_collection(job_id, CollectionOutput::new(batch))
+            .expect("collect");
+        app.reload().expect("reload");
+        let collected = app
+            .workspace
+            .as_ref()
+            .expect("workspace")
+            .data
+            .sources
+            .iter()
+            .find(|source| source.title.contains("DNS records"))
+            .expect("collected source");
+        let source_ref = collected.short_ref().to_string();
+        assert_eq!(source_ref, "S-1");
         let mut run = sample_run(investigation_id, Uuid::new_v4(), Uuid::new_v4(), "Phish?");
         app.store.insert_agent_run(&mut run).expect("run");
         app.store
@@ -4944,7 +4988,7 @@ mod tests {
                         title: "acme-login.com is phishing infra".into(),
                         details: "SAN mimics acme.com".into(),
                         confidence: Some("medium".into()),
-                        sources: Vec::new(),
+                        sources: vec![source_ref],
                     },
                     ProposalStatus::Pending,
                     None,
@@ -4957,13 +5001,47 @@ mod tests {
         let home = app.case_home();
         assert!(!home.targets.is_empty());
         app.open_review_lane();
-        app.dispatch(Action::Arm).expect("arm");
-        app.dispatch(Action::Accept).expect("accept");
+        let item = app.selected_review_item().expect("review item");
+        assert!(!item.has_missing_citation());
+        let arm = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('A'),
+            crossterm::event::KeyModifiers::SHIFT,
+        );
+        let action = crate::tui::keymap::map_key(
+            arm,
+            &app.overlay,
+            app.view,
+            app.is_editing(),
+            app.review_armed,
+            app.board_zoomed,
+        )
+        .expect("Shift+A");
+        assert!(matches!(action, Action::Arm));
+        app.dispatch(action).expect("arm");
+        assert!(app.review_armed);
+        let yes = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('y'),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        let action = crate::tui::keymap::map_key(
+            yes,
+            &app.overlay,
+            app.view,
+            app.is_editing(),
+            app.review_armed,
+            app.board_zoomed,
+        )
+        .expect("y");
+        assert!(matches!(action, Action::Accept));
+        app.dispatch(action).expect("accept");
         let data = app
             .store
             .load_investigation(investigation_id)
             .expect("loads");
         assert_eq!(data.findings[0].provenance, Provenance::Agent);
+        assert_eq!(data.findings[0].title, "acme-login.com is phishing infra");
+        assert_eq!(data.findings[0].source_ids.len(), 1);
+        assert_eq!(data.proposals[0].status, ProposalStatus::Accepted);
         let dest = directory.path().join("export");
         let files = crate::files::InvestigationFiles::new(&app.paths, investigation_id);
         crate::exchange::export_investigation(
@@ -4973,7 +5051,12 @@ mod tests {
             &dest,
         )
         .expect("export");
-        assert!(dest.join("investigation.osint.json").exists() || dest.exists());
+        let archive = dest.join("investigation.osint.json");
+        let body = std::fs::read_to_string(&archive).expect("export file");
+        assert!(body.contains("Hallway"), "{body}");
+        assert!(body.contains("acme-login.com is phishing infra"), "{body}");
+        assert!(body.contains("DNS records for acme-login.com"), "{body}");
+        assert!(body.contains("\"agent\""), "{body}");
         assert!(!matches!(app.overlay, Overlay::Help));
     }
 
