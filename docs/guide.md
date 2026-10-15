@@ -151,6 +151,8 @@ With no subcommand, os-int opens the terminal interface on your last investigati
 
 An investigation screen is always three panes: **Rail**, **Board**, and **Inspector**. The Rail has six destinations on keys `1`–`6`: Case, Entities, Evidence, Graph, Review, Jobs. The Inspector is a 44-column side pane; below 110 columns it becomes a bottom drawer (40% height). It is never hidden. Below 80 columns the Rail collapses to digits. The minimum comfortable size is 80×24. `z` zooms the Board; any key returns.
 
+Motion only tells you about state: a skippable boot splash on cold start, braille job spinners, a slower ◆ agent pulse, known-size progress bars, a focus pulse, the Inspector drawer slide, graph hop reveals with `+` markers, toasts (refusals always say why), the Review confirm bar (it never auto-confirms), and a radar sweep while a passive collector is observing. `ui.motion = full | reduced | off`. `--plain`, a screen reader (`OS_INT_PLAIN`), `NO_COLOR`, and `TERM=dumb` force off. Idle holds no timer. Palette **Theme** (`:theme`) cycles Cockpit Dark, Light, Mono, Phosphor, and Amber live; `y` saves, Esc reverts, Enter previews.
+
 Entities and Evidence are real tables (column headers, display-width truncation, `/` filter). `/` accepts `kind:ip`, `src:ct`, `prov:ai`, `sort:-seen`, and free text. Every fact row shows a provenance glyph (`●` collected, `◇` original, `✎` analyst, `◆` accepted AI; ASCII: `C X A *`) and a source count. The Inspector Sources tab is the full source chain for the selected object. History is per-object. Empty boards show a hint, not a fake `(no …)` row. Loading uses skeleton rows. Errors stay in an inline panel until you dismiss them with `x`.
 
 ```text
@@ -588,6 +590,7 @@ os-int [OPTIONS] [COMMAND]
 | `--config <file>` | `OS_INT_CONFIG` | Config file to read or create |
 | `--data-dir <dir>` | `OS_INT_DATA_DIR` | Data directory |
 | `--debug` | `RUST_LOG` | Debug-level tracing in the log file |
+| `--plain` | `OS_INT_PLAIN` | ASCII glyphs, no colour, and `ui.motion = off` (screen readers, pipes, `TERM=dumb`) |
 | `--version`, `--help` | | Version and command help |
 
 | Command | Purpose |
@@ -637,8 +640,11 @@ theme = "auto"
 color = "auto"
 # ASCII glyphs (C X A *) instead of Unicode (● ◇ ✎ ◆).
 ascii = false
-# Redraw interval in milliseconds while jobs are running. The UI is otherwise event-driven.
-tick_rate_ms = 250
+# full | reduced | off. Motion only tells you about state. Idle holds no timer.
+# --plain, OS_INT_PLAIN, NO_COLOR, and TERM=dumb force off.
+motion = "full"
+# Phosphor only: faint CRT scanline on alternate rows. Off by default. Never encodes data.
+scanline = false
 # editor = "nvim"
 
 [agent]
@@ -695,7 +701,8 @@ max_ingest_bytes = 20971520
 | `ui.theme` | `auto` | `auto`, `dark`, `light`, `mono`, `phosphor`, or `amber`. `auto` picks Cockpit Dark or Light from `COLORFGBG`. `NO_COLOR` forces Mono |
 | `ui.color` | `auto` | `auto`, `truecolor`, `256`, `16`, or `none`. Overrides COLORTERM / TERM / NO_COLOR detection |
 | `ui.ascii` | `false` | ASCII glyph fallback |
-| `ui.tick_rate_ms` | `250` | Redraw interval while jobs are running |
+| `ui.motion` | `full` | `full`, `reduced`, or `off`. `--plain`, screen-reader (`OS_INT_PLAIN`), `NO_COLOR`, and `TERM=dumb` force `off`. Slow SSH (more than 3 ticks behind) degrades to `reduced`. |
+| `ui.scanline` | `false` | Phosphor CRT scanline on alternate rows. Off by default; never encodes data |
 | `ui.editor` | unset | Long-form editor. Then `$VISUAL`, `$EDITOR`, `vi` |
 | `agent.active` | `claude` | Profile id: `claude`, `codex`, or a key under `[agents]` |
 | `agent.timeout_seconds` | `600` | Agent process timeout. `0` is warned about and would never time out |
@@ -774,7 +781,8 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `Enter` | Entities, Graph | Open Object View |
 | `?` | normal, overlays | Help (generated from the command registry) |
 | `1` … `6` | normal | Case, Entities, Evidence, Graph, Review, Jobs |
-| Palette | normal | Ingest, playbook, tools, settings, audit, artifacts, nearby, unresolve, cancel job, doctor, open investigation |
+| Palette `:theme` | normal | Cycle Dark / Light / Mono / Phosphor / Amber live. `y` saves to config, Esc reverts, Enter previews |
+| Palette | normal | Ingest, playbook, tools, settings, audit, artifacts, nearby, unresolve, cancel job, doctor, open investigation, theme |
 | `Shift+A` then `y` | Review | Arm, then accept. Shift is required (Caps Lock `A` does not arm). Any other key disarms. Enter never accepts. A missing citation blocks accept. |
 | `y` | confirm | Confirm a write, including a palette command that writes. Enter never writes. |
 | `Enter` | palette | Pick a command. Writes open a y-confirm and do not run until `y`. |

@@ -67,7 +67,7 @@ A useful order:
 | `exchange/` | Versioned, path-independent import and export of investigations. |
 | `demo/` | Bundled Example Corp investigation snapshot (`examples/demo-case/`). |
 | `app/` | `App` owns config, store, workspace, job manager, and all UI state (including `GraphState`, `TimelineState`, and Review items in `app/review.rs`). Keys map to `Action`s through the command registry in `app/commands.rs`; `App::dispatch` performs state transitions and side effects. Table `/` grammar and sort keys live in `app/filter.rs`. The Rail is six destinations (Case, Entities, Evidence, Graph, Review, Jobs). Per-investigation `ui_state` restores the last view, page, and agent thread after restart. Long notes open `$EDITOR` / `$VISUAL` without a shell. Errors persist in `last_error` until `x`. |
-| `tui/` | Terminal setup and restore, the async event loop, cockpit themes (roles in `theme.rs` only), glyphs, keymap, width-aware tables (`table.rs`), empty/loading/error widgets, screens, and overlays. Rendering is a pure function of `App`. The workspace is Rail \| Board \| Inspector (Inspector is a bottom drawer below 110 columns; minimum 80×24). Inspector Sources shows the provenance glyph and source chain for the selected object; History is per-object. `os-int theme preview` lives here. |
+| `tui/` | Terminal setup and restore, the async event loop, cockpit themes (roles in `theme.rs` only), glyphs, keymap, width-aware tables (`table.rs`), empty/loading/error widgets, screens, overlays, and the motion engine (`motion.rs`). Rendering is a pure function of `App` plus the current animation frame. The workspace is Rail \| Board \| Inspector (Inspector is a bottom drawer below 110 columns; minimum 80×24). Inspector Sources shows the provenance glyph and source chain for the selected object; History is per-object. `os-int theme preview` lives here. Graph edges use corroboration heat (source count, never risk). |
 | `cli/` | Clap definitions and non-TUI commands (`list`, `new`, `open`, `export`, `import`, `collect`, `ingest`, `playbook`, `watch`, `report`, `geojson`, `cooccur`, `marking`, `team`, `audit`, `get`, `objects`, `search-around`, `resolve`, `serve`, `bench`, `theme preview`, `doctor`, `config`). |
 | `api/` | Localhost ontology HTTP API (`os-int serve`). Token auth. Read + Action propose. OpenAPI at `/openapi.json`. |
 | `query/` | Scriptable list/get/search-around/resolve helpers shared by the CLI and the API. |
@@ -101,7 +101,8 @@ A useful order:
 | Change geo fields or GeoJSON | `model/geo.rs`, `src/geo/`, IP/RDAP collectors, `os-int export --format geojson` |
 | Change merge, unresolve, or suggestion rules | `model/resolution.rs` (bags + scoring), `storage/resolution.rs`, then `app/resolution.rs` and Object View |
 | Add a palette command | `app/commands.rs` (`in_palette: true`), then handle the id in `App::run_command` |
-| Change a colour or theme | `tui/theme.rs` only (`Color::` is forbidden elsewhere). Preview with `os-int theme preview`. WCAG and colour-blind floors are tests in that file. |
+| Change a colour or theme | `tui/theme.rs` only (`Color::` is forbidden elsewhere). Preview with `os-int theme preview` or palette `:theme` (`y` saves, Esc reverts, Enter previews). WCAG and colour-blind floors are tests in that file. Phosphor may enable an optional scanline (`ui.scanline`); it never encodes data. |
+| Add or change an animation | `tui/motion.rs` (`CATALOGUE` plus a row in [UX_REVAMP_PLAN.md](UX_REVAMP_PLAN.md) §8.2). `ui.motion = full \| reduced \| off`. `--plain`, `OS_INT_PLAIN`, `NO_COLOR`, and `TERM=dumb` force off. |
 | Add a report section | `report/`. Keep AI-written text labelled as inference |
 | Change the on-disk export | `exchange/`. Follow the bump rules in [ontology-exchange.md](ontology-exchange.md#format_version-bump-rules). Bump `FORMAT_VERSION` if older archives would no longer import, or if a new collection must survive round-trip |
 
@@ -116,7 +117,7 @@ key press ──▶ keymap ──▶ Action ──▶ App::dispatch ──┬─
    draw ◀── App (dirty) ◀── App::handle_job_event ◀── bounded mpsc ◀────────────┘
 ```
 
-- The event loop (`tui::run`) `select!`s over terminal events, job events, an optional tick (only while jobs are running, for elapsed-time display), and `SIGTERM` / `SIGHUP`. It redraws only when state is marked dirty.
+- The event loop (`tui::run`) `select!`s over terminal events, job events, an optional 60 ms motion tick, and `SIGTERM` / `SIGHUP`. The motion interval is created when the first animation starts and dropped when the last one finishes: idle is zero timer wakeups. Ticks never write case data (the Review confirm bar has no timer path to accept). It redraws only when state is marked dirty, and animation ticks skip `terminal.draw` unless a region produced a new frame index.
 - Collector output is applied in one SQLite transaction: sources are inserted, entities are upserted by `(kind, canonical value)`, relationships are upserted by `(from, kind, to)`, and every link records its supporting source.
 - Opening a case still loads a full snapshot. Hot mutations (finding, note, page, marking, member, collector apply) merge a `WorkspaceDelta` into the in-memory `Workspace` so a 100k-object case does not rebuild every index. Resolution, playbooks, ingest, and reports still reload. See [scale.md](scale.md).
 

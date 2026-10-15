@@ -513,6 +513,15 @@ pub const COMMANDS: &[Command] = &[
         false,
     ),
     cmd(
+        "theme",
+        "Theme",
+        "",
+        "Cycle cockpit themes live. y saves, Esc reverts, Enter previews.",
+        true,
+        false,
+        true,
+    ),
+    cmd(
         "open_notes",
         "Open Notes",
         "",
@@ -907,6 +916,7 @@ fn action_for_command(id: &str, view: View) -> Option<Action> {
         "open_jobs" => Action::OpenJobs,
         "open_tools" => Action::OpenTools,
         "open_settings" => Action::OpenSettings,
+        "theme" => Action::Command("theme"),
         "toggle_nearby" => Action::ToggleNearby,
         "open_object" => Action::OpenObjectView,
         "open_graph" | "search_around_graph" => Action::OpenGraph,
@@ -1060,6 +1070,7 @@ mod tests {
         assert!(command_writes("confirm_unresolve"));
         assert!(!command_writes("help"));
         assert!(!command_writes("graph_confirm_cap"));
+        assert!(command_writes("theme"));
     }
 
     #[test]

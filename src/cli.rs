@@ -47,6 +47,9 @@ pub struct Cli {
     /// Write debug logs to the daily log file. Does not print logs into the workbench.
     #[arg(long, global = true)]
     pub debug: bool,
+    /// ASCII glyphs, no colour, and motion off. Use with a screen reader or a dumb terminal.
+    #[arg(long, global = true)]
+    pub plain: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -629,11 +632,26 @@ fn load_config_only(cli: &Cli) -> Result<Config> {
 async fn launch_tui(cli: &Cli, open: Option<String>) -> Result<()> {
     let runtime = Runtime::load(cli)?;
     let mut app = runtime.app();
+    if cli.plain {
+        app.apply_plain_mode();
+    }
+    let cold_start = open.is_none();
     if let Some(query) = open {
         let investigation = app.store.require_investigation(&query)?;
         app.open_investigation(investigation.id)?;
     } else {
         app.open_last_or_welcome()?;
+    }
+    if cold_start && std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        let splash = app.workspace.as_ref().map(|workspace| {
+            (
+                workspace.investigation().name.clone(),
+                workspace.investigation().marking.label().to_string(),
+            )
+        });
+        if let Some((name, marking)) = splash {
+            app.motion.start_splash(&name, &marking);
+        }
     }
     crate::tui::run(&mut app).await
 }
@@ -1890,6 +1908,8 @@ mod tests {
             }) => assert!(!allow_non_loopback),
             other => panic!("expected serve {other:?}"),
         }
+        let plain = Cli::try_parse_from(["os-int", "--plain"]).expect("plain");
+        assert!(plain.plain);
         let preview =
             Cli::try_parse_from(["os-int", "theme", "preview", "--all"]).expect("preview");
         match preview.command {

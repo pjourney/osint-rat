@@ -4,8 +4,8 @@
  2 Entities    Domain:1  IP:1 │ Resolves to:1 │ ANL:1  COL:1
  3 Evidence    x clear   +/- hops   s Search Around   t time lens
 ▌4 Graph       ▌Neighborhood
- 5 Review 1    Hop 0            Hop 1
- 6 Jobs        *E-1 acme-logi…  E-2 203.0.113…
+ 5 Review 1    ▌DOM acme-login.com ✎
+ 6 Jobs        └─ resolves_to ──▶ IP  203.0.113.7 ●
 
 
 
