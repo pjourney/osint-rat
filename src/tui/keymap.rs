@@ -6,7 +6,14 @@ use crate::app::commands::{map_registered_key, tab_action};
 use crate::app::{Action, Overlay, View};
 
 /// Converts a key press into an action. `Repeat` is treated like `Press` so held arrows scroll.
-pub fn map_key(key: KeyEvent, overlay: &Overlay, view: View, editing: bool) -> Option<Action> {
+pub fn map_key(
+    key: KeyEvent,
+    overlay: &Overlay,
+    view: View,
+    editing: bool,
+    review_armed: bool,
+    board_zoomed: bool,
+) -> Option<Action> {
     if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
         return None;
     }
@@ -14,8 +21,17 @@ pub fn map_key(key: KeyEvent, overlay: &Overlay, view: View, editing: bool) -> O
     if ctrl && matches!(key.code, KeyCode::Char('c')) {
         return Some(Action::Quit);
     }
+    if board_zoomed {
+        return Some(Action::Unzoom);
+    }
     if let Overlay::Proposals { armed, .. } = overlay {
         return map_proposal_key(key, *armed);
+    }
+    if view == View::Review
+        && matches!(overlay, Overlay::None)
+        && let Some(action) = map_review_key(key, review_armed)
+    {
+        return Some(action);
     }
     if editing {
         return map_editing_key(key, overlay);
@@ -33,6 +49,10 @@ pub fn map_key(key: KeyEvent, overlay: &Overlay, view: View, editing: bool) -> O
 }
 
 fn map_proposal_key(key: KeyEvent, armed: bool) -> Option<Action> {
+    map_review_key(key, armed)
+}
+
+fn map_review_key(key: KeyEvent, armed: bool) -> Option<Action> {
     if armed {
         return match key.code {
             KeyCode::Char('y' | 'Y') => Some(Action::Accept),
@@ -41,12 +61,9 @@ fn map_proposal_key(key: KeyEvent, armed: bool) -> Option<Action> {
     }
     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
     match key.code {
-        KeyCode::Esc => Some(Action::Cancel),
-        KeyCode::Up | KeyCode::Char('k') => Some(Action::Move(-1)),
-        KeyCode::Down | KeyCode::Char('j') => Some(Action::Move(1)),
         KeyCode::Char('A') | KeyCode::Char('a') if shift => Some(Action::Arm),
         KeyCode::Char('A') => Some(Action::Arm),
-        KeyCode::Char('R' | 'r' | 'n') => Some(Action::Reject),
+        KeyCode::Char('y' | 'Y') => None,
         _ => None,
     }
 }
@@ -76,7 +93,7 @@ fn map_editing_key(key: KeyEvent, overlay: &Overlay) -> Option<Action> {
         KeyCode::End => Some(Action::End),
         KeyCode::Backspace => Some(Action::Backspace),
         KeyCode::Delete => Some(Action::Delete),
-        KeyCode::Char('p') if ctrl => Some(Action::Palette),
+        KeyCode::Char('k' | 'p') if ctrl => Some(Action::Palette),
         KeyCode::Char(ch) if !ctrl => Some(Action::InsertChar(ch)),
         _ => None,
     }
@@ -120,117 +137,82 @@ mod tests {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
+    fn map(key: KeyEvent, overlay: &Overlay, view: View) -> Option<Action> {
+        map_key(key, overlay, view, false, false, false)
+    }
+
     #[test]
-    fn palette_and_agent_keys_work_from_normal_mode() {
+    fn cockpit_keys_work_from_normal_mode() {
         let overlay = Overlay::None;
+        let ctrl_k = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL);
         assert!(matches!(
-            map_key(press(KeyCode::Char('p')), &overlay, View::Overview, false),
+            map(ctrl_k, &overlay, View::Overview),
             Some(Action::Palette)
         ));
         assert!(matches!(
-            map_key(press(KeyCode::Char('a')), &overlay, View::Overview, false),
+            map(press(KeyCode::Char(':')), &overlay, View::Overview),
+            Some(Action::Palette)
+        ));
+        assert!(map(press(KeyCode::Char('p')), &overlay, View::Overview).is_none());
+        assert!(matches!(
+            map(press(KeyCode::Char('a')), &overlay, View::Overview),
             Some(Action::AskAgent)
         ));
         assert!(matches!(
-            map_key(press(KeyCode::Char('/')), &overlay, View::Overview, false),
+            map(press(KeyCode::Char('/')), &overlay, View::Overview),
             Some(Action::Search)
         ));
         assert!(matches!(
-            map_key(press(KeyCode::Char('r')), &overlay, View::Overview, false),
+            map(press(KeyCode::Char('c')), &overlay, View::Overview),
             Some(Action::Refresh)
         ));
+        assert!(map(press(KeyCode::Char('r')), &overlay, View::Overview).is_none());
+        assert!(map(press(KeyCode::Char('i')), &overlay, View::Entities).is_none());
+        assert!(map(press(KeyCode::Char('b')), &overlay, View::Entities).is_none());
+        assert!(map(press(KeyCode::Char('v')), &overlay, View::Entities).is_none());
         assert!(matches!(
-            map_key(press(KeyCode::Char('i')), &overlay, View::Entities, false),
-            Some(Action::Command("ingest"))
-        ));
-        assert!(matches!(
-            map_key(press(KeyCode::Char('b')), &overlay, View::Entities, false),
-            Some(Action::Command("run_playbook"))
-        ));
-        assert!(map_key(press(KeyCode::Char('i')), &overlay, View::Graph, false).is_some());
-        assert!(matches!(
-            map_key(press(KeyCode::Char('v')), &overlay, View::Entities, false),
-            Some(Action::OpenObjectView)
-        ));
-        assert!(matches!(
-            map_key(press(KeyCode::Char('g')), &overlay, View::Entities, false),
+            map(press(KeyCode::Char('g')), &overlay, View::Entities),
             Some(Action::OpenGraph)
         ));
         assert!(matches!(
-            map_key(press(KeyCode::Char('s')), &overlay, View::Entities, false),
+            map(press(KeyCode::Char('s')), &overlay, View::Entities),
             Some(Action::SearchAround)
         ));
         assert!(matches!(
-            map_key(press(KeyCode::Char('+')), &overlay, View::Graph, false),
+            map(press(KeyCode::Char('+')), &overlay, View::Graph),
             Some(Action::GraphHops(1))
         ));
         assert!(matches!(
-            map_key(press(KeyCode::Char('-')), &overlay, View::Graph, false),
-            Some(Action::GraphHops(-1))
-        ));
-        assert!(matches!(
-            map_key(press(KeyCode::Char('[')), &overlay, View::Graph, false),
-            Some(Action::GraphFacetMove(-1))
-        ));
-        assert!(matches!(
-            map_key(press(KeyCode::Char(']')), &overlay, View::Graph, false),
-            Some(Action::GraphFacetMove(1))
-        ));
-        assert!(matches!(
-            map_key(press(KeyCode::Char('x')), &overlay, View::Graph, false),
+            map(press(KeyCode::Char('x')), &overlay, View::Graph),
             Some(Action::GraphClearFilters)
         ));
-        assert!(map_key(press(KeyCode::Char('f')), &overlay, View::Overview, false).is_none());
         assert!(matches!(
-            map_key(press(KeyCode::Char('f')), &overlay, View::Graph, false),
-            Some(Action::GraphApplyFacet)
-        ));
-        assert!(map_key(press(KeyCode::Char('-')), &overlay, View::Entities, false).is_none());
-        assert!(map_key(press(KeyCode::Char('[')), &overlay, View::Overview, false).is_none());
-        assert!(map_key(press(KeyCode::Char(']')), &overlay, View::Pages, false).is_none());
-        assert!(map_key(press(KeyCode::Char('x')), &overlay, View::Findings, false).is_none());
-        assert!(map_key(press(KeyCode::Char('+')), &overlay, View::Entities, false).is_none());
-        assert!(matches!(
-            map_key(press(KeyCode::Char('[')), &overlay, View::Timeline, false),
-            Some(Action::TimelineFacetMove(-1))
+            map(press(KeyCode::Char('t')), &overlay, View::Evidence),
+            Some(Action::ToggleTimeLens)
         ));
         assert!(matches!(
-            map_key(press(KeyCode::Char(']')), &overlay, View::Timeline, false),
-            Some(Action::TimelineFacetMove(1))
+            map(press(KeyCode::Char('z')), &overlay, View::Overview),
+            Some(Action::ToggleZoom)
         ));
         assert!(matches!(
-            map_key(press(KeyCode::Char('f')), &overlay, View::Timeline, false),
-            Some(Action::TimelineApplyFilter)
+            map(press(KeyCode::Char('l')), &overlay, View::Entities),
+            Some(Action::NextPane)
         ));
         assert!(matches!(
-            map_key(press(KeyCode::Char('x')), &overlay, View::Timeline, false),
-            Some(Action::TimelineClearFilter)
+            map(press(KeyCode::Char('h')), &overlay, View::Entities),
+            Some(Action::PrevPane)
         ));
         assert!(matches!(
-            map_key(press(KeyCode::Char('l')), &overlay, View::Timeline, false),
-            Some(Action::ToggleNearby)
-        ));
-        assert!(matches!(
-            map_key(press(KeyCode::Char('l')), &overlay, View::Entities, false),
-            Some(Action::ToggleNearby)
-        ));
-        assert!(map_key(press(KeyCode::Char('l')), &overlay, View::Overview, false).is_none());
-        assert!(map_key(press(KeyCode::Char('f')), &overlay, View::Entities, false).is_none());
-        assert!(matches!(
-            map_key(press(KeyCode::Char(' ')), &overlay, View::Entities, false),
+            map(press(KeyCode::Char(' ')), &overlay, View::Entities),
             Some(Action::ToggleMergeMark)
         ));
         assert!(matches!(
-            map_key(press(KeyCode::Char('m')), &overlay, View::Entities, false),
+            map(press(KeyCode::Char('m')), &overlay, View::Entities),
             Some(Action::ProposeMerge)
         ));
-        assert!(matches!(
-            map_key(press(KeyCode::Char('u')), &overlay, View::Object, false),
-            Some(Action::Unresolve)
-        ));
-        assert!(map_key(press(KeyCode::Char(' ')), &overlay, View::Graph, false).is_none());
-        assert!(map_key(press(KeyCode::Char('m')), &overlay, View::Overview, false).is_none());
-        assert!(map_key(press(KeyCode::Char('u')), &overlay, View::Pages, false).is_none());
+        assert!(map(press(KeyCode::Char('u')), &overlay, View::Object).is_none());
+        assert!(map(press(KeyCode::Char('1')), &overlay, View::Jobs).is_some());
+        assert!(map(press(KeyCode::Char('7')), &overlay, View::Overview).is_none());
     }
 
     #[test]
@@ -239,22 +221,42 @@ mod tests {
             input: crate::app::Input::default(),
         };
         assert!(matches!(
-            map_key(press(KeyCode::Char('a')), &overlay, View::Agent, true),
+            map_key(
+                press(KeyCode::Char('a')),
+                &overlay,
+                View::Review,
+                true,
+                false,
+                false
+            ),
             Some(Action::InsertChar('a'))
         ));
         assert!(matches!(
-            map_key(press(KeyCode::Esc), &overlay, View::Agent, true),
+            map_key(
+                press(KeyCode::Esc),
+                &overlay,
+                View::Review,
+                true,
+                false,
+                false
+            ),
             Some(Action::Cancel)
         ));
-        assert!(map_key(press(KeyCode::Enter), &overlay, View::Agent, true).is_none());
+        assert!(
+            map_key(
+                press(KeyCode::Enter),
+                &overlay,
+                View::Review,
+                true,
+                false,
+                false
+            )
+            .is_none()
+        );
         let save = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
         assert!(matches!(
-            map_key(save, &overlay, View::Agent, true),
+            map_key(save, &overlay, View::Review, true, false, false),
             Some(Action::Submit)
-        ));
-        assert!(matches!(
-            map_key(press(KeyCode::Char('i')), &overlay, View::Entities, true),
-            Some(Action::InsertChar('i'))
         ));
     }
 
@@ -267,44 +269,87 @@ mod tests {
     }
 
     #[test]
-    fn proposals_require_shift_a_then_y() {
-        let overlay = proposals(false);
-        assert!(map_key(press(KeyCode::Enter), &overlay, View::Agent, false).is_none());
-        assert!(map_key(press(KeyCode::Char('a')), &overlay, View::Agent, false).is_none());
-        assert!(map_key(press(KeyCode::Char('y')), &overlay, View::Agent, false).is_none());
+    fn review_and_proposals_require_shift_a_then_y() {
+        let overlay = Overlay::None;
+        assert!(
+            map_key(
+                press(KeyCode::Enter),
+                &overlay,
+                View::Review,
+                false,
+                false,
+                false
+            )
+            .is_some_and(|action| matches!(action, Action::Select))
+        );
+        assert!(
+            map_key(
+                press(KeyCode::Char('a')),
+                &overlay,
+                View::Review,
+                false,
+                false,
+                false
+            )
+            .is_some_and(|action| matches!(action, Action::AskAgent))
+        );
+        assert!(
+            map_key(
+                press(KeyCode::Char('y')),
+                &overlay,
+                View::Review,
+                false,
+                false,
+                false
+            )
+            .is_none()
+        );
         let shift_a = KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT);
         assert!(matches!(
-            map_key(shift_a, &overlay, View::Agent, false),
+            map_key(shift_a, &overlay, View::Review, false, false, false),
             Some(Action::Arm)
         ));
         assert!(matches!(
-            map_key(press(KeyCode::Char('A')), &overlay, View::Agent, false),
+            map_key(
+                press(KeyCode::Char('y')),
+                &overlay,
+                View::Review,
+                false,
+                true,
+                false
+            ),
+            Some(Action::Accept)
+        ));
+        assert!(matches!(
+            map_key(
+                press(KeyCode::Enter),
+                &overlay,
+                View::Review,
+                false,
+                true,
+                false
+            ),
+            Some(Action::Disarm)
+        ));
+        assert!(matches!(
+            map(press(KeyCode::Char('x')), &overlay, View::Review),
+            Some(Action::Reject)
+        ));
+        let modal = proposals(false);
+        assert!(map(press(KeyCode::Enter), &modal, View::Review).is_none());
+        assert!(map(press(KeyCode::Char('y')), &modal, View::Review).is_none());
+        assert!(matches!(
+            map(press(KeyCode::Char('A')), &modal, View::Review),
             Some(Action::Arm)
         ));
         let armed = proposals(true);
         assert!(matches!(
-            map_key(press(KeyCode::Char('y')), &armed, View::Agent, false),
+            map(press(KeyCode::Char('y')), &armed, View::Review),
             Some(Action::Accept)
         ));
         assert!(matches!(
-            map_key(press(KeyCode::Char('Y')), &armed, View::Agent, false),
-            Some(Action::Accept)
-        ));
-        assert!(matches!(
-            map_key(press(KeyCode::Enter), &armed, View::Agent, false),
+            map(press(KeyCode::Enter), &armed, View::Review),
             Some(Action::Disarm)
-        ));
-        assert!(matches!(
-            map_key(press(KeyCode::Char('a')), &armed, View::Agent, false),
-            Some(Action::Disarm)
-        ));
-        assert!(matches!(
-            map_key(press(KeyCode::Char('j')), &armed, View::Agent, false),
-            Some(Action::Disarm)
-        ));
-        assert!(matches!(
-            map_key(press(KeyCode::Char('r')), &overlay, View::Agent, false),
-            Some(Action::Reject)
         ));
     }
 
@@ -315,13 +360,13 @@ mod tests {
             message: "Write?".into(),
             command: "confirm_resolve".into(),
         };
-        assert!(map_key(press(KeyCode::Enter), &overlay, View::Entities, false).is_none());
+        assert!(map(press(KeyCode::Enter), &overlay, View::Entities).is_none());
         assert!(matches!(
-            map_key(press(KeyCode::Char('y')), &overlay, View::Entities, false),
+            map(press(KeyCode::Char('y')), &overlay, View::Entities),
             Some(Action::Select)
         ));
         assert!(matches!(
-            map_key(press(KeyCode::Esc), &overlay, View::Entities, false),
+            map(press(KeyCode::Esc), &overlay, View::Entities),
             Some(Action::Cancel)
         ));
     }
@@ -333,84 +378,31 @@ mod tests {
             selected: 0,
         };
         assert!(matches!(
-            map_key(press(KeyCode::Enter), &overlay, View::Overview, true),
+            map_key(
+                press(KeyCode::Enter),
+                &overlay,
+                View::Overview,
+                true,
+                false,
+                false
+            ),
             Some(Action::Select)
         ));
-        let save = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
-        assert!(matches!(
-            map_key(save, &overlay, View::Overview, true),
-            Some(Action::Submit)
-        ));
     }
 
     #[test]
-    fn ingest_key_is_unique_in_normal_mode() {
+    fn zoomed_board_any_key_returns() {
         let overlay = Overlay::None;
-        let ingest = map_key(press(KeyCode::Char('i')), &overlay, View::Entities, false);
-        assert!(matches!(ingest, Some(Action::Command("ingest"))));
-        let occupied: &[char] = &[
-            'q', 'a', 'p', 'n', 'e', 'r', 'v', 'g', 's', 'm', 'u', 'j', 'k', '/', '?', 'b', 'l',
-        ];
-        assert!(!occupied.contains(&'i'));
-        for ch in occupied {
-            let action = map_key(press(KeyCode::Char(*ch)), &overlay, View::Entities, false);
-            assert!(
-                action.is_some(),
-                "expected {ch} to stay bound so ingest cannot collide silently"
-            );
-            assert!(
-                !matches!(action, Some(Action::Command("ingest"))),
-                "{ch} must not also map to ingest"
-            );
-        }
-    }
-
-    #[test]
-    fn playbook_key_is_unique_in_normal_mode() {
-        let overlay = Overlay::None;
-        let playbook = map_key(press(KeyCode::Char('b')), &overlay, View::Entities, false);
-        assert!(matches!(playbook, Some(Action::Command("run_playbook"))));
-        let occupied: &[char] = &[
-            'q', 'a', 'p', 'n', 'e', 'r', 'v', 'g', 's', 'm', 'u', 'j', 'k', '/', '?', 'i', 'l',
-        ];
-        assert!(!occupied.contains(&'b'));
-        for ch in occupied {
-            let action = map_key(press(KeyCode::Char(*ch)), &overlay, View::Entities, false);
-            assert!(
-                action.is_some(),
-                "expected {ch} to stay bound so playbook cannot collide silently"
-            );
-            assert!(
-                !matches!(action, Some(Action::Command("run_playbook"))),
-                "{ch} must not also map to run_playbook"
-            );
-        }
         assert!(matches!(
-            map_key(press(KeyCode::Char('b')), &overlay, View::Entities, true),
-            Some(Action::InsertChar('b'))
-        ));
-    }
-
-    #[test]
-    fn nearby_key_is_unique_in_normal_mode() {
-        let overlay = Overlay::None;
-        let nearby = map_key(press(KeyCode::Char('l')), &overlay, View::Entities, false);
-        assert!(matches!(nearby, Some(Action::ToggleNearby)));
-        let occupied: &[char] = &[
-            'q', 'a', 'p', 'n', 'e', 'r', 'v', 'g', 's', 'm', 'u', 'j', 'k', '/', '?', 'i', 'b',
-        ];
-        assert!(!occupied.contains(&'l'));
-        for ch in occupied {
-            let action = map_key(press(KeyCode::Char(*ch)), &overlay, View::Entities, false);
-            assert!(action.is_some(), "expected {ch} to stay bound");
-            assert!(
-                !matches!(action, Some(Action::ToggleNearby)),
-                "{ch} must not also map to nearby"
-            );
-        }
-        assert!(matches!(
-            map_key(press(KeyCode::Char('l')), &overlay, View::Entities, true),
-            Some(Action::InsertChar('l'))
+            map_key(
+                press(KeyCode::Char('j')),
+                &overlay,
+                View::Entities,
+                false,
+                false,
+                true
+            ),
+            Some(Action::Unzoom)
         ));
     }
 
@@ -419,7 +411,7 @@ mod tests {
         let overlay = Overlay::Help;
         let key = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
         assert!(matches!(
-            map_key(key, &overlay, View::Overview, false),
+            map(key, &overlay, View::Overview),
             Some(Action::Quit)
         ));
     }

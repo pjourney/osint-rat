@@ -18,11 +18,11 @@ A **page** is a subject you chose to work on: "look at example.com". An **entity
 | Finding | A claim. It should cite sources by short id (`S-1`). A finding with no sources is a hypothesis. |
 | Note | Your writing, or text you accepted from an agent. Page notes live on the page. Standalone notes have their own id (`N-1`). |
 
-Press `e` on Overview to edit the current page's notes in your editor. Add a finding from the command palette (`p`, then "finding").
+Press `e` on Case to edit the current page's notes in your editor. Add a finding from the command palette (`Ctrl+K`, then "finding").
 
 ## How do I merge two entities that are the same thing?
 
-On **Entities**, mark each row with `Space`, press `m`, and confirm. The highlighted marked row is the canonical. Object View lists constituents. Graph shows one node. `u` on the canonical unresolves. Suggestions never auto-merge. See [Entity resolution](guide.md#entity-resolution).
+On **Entities**, mark each row with `Space`, press `m`. The merge lands in **Review**. `Shift+A` then `y` writes. The highlighted marked row is the canonical. Object View lists constituents. Graph shows one node. Palette **Unresolve entity** proposes unresolve. Suggestions never auto-merge. See [Entity resolution](guide.md#entity-resolution).
 
 ## What do the badges mean?
 

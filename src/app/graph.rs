@@ -392,7 +392,7 @@ impl App {
                     .iter()
                     .position(|entity| entity.id == canonical)
             }),
-            View::Pages => self
+            View::Pages | View::Overview => self
                 .page_id
                 .and_then(|id| workspace.data.pages.iter().position(|page| page.id == id)),
             _ => None,

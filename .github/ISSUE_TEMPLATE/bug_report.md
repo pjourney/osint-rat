@@ -29,7 +29,7 @@ A synthetic target (`example.com`, a file under `/tmp`) is ideal. Leave real inv
 
 - os-int version (`os-int --version`):
 - OS:
-- Terminal and size (the layout changes below 96 columns):
+- Terminal and size (minimum 80×24; Inspector becomes a drawer below 110 columns):
 - Install method: `cargo install --path .` / `cargo install --git` / other
 - Agent CLI, if the bug involves Ask (`claude`, `codex`, or a custom profile):
 

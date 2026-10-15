@@ -113,7 +113,7 @@ The Graph screen walks the same objects and catalogued links. Search Around is a
 
 ## Object View
 
-From **Entities**, press `Enter` (or `v`, or the palette command **Object View**) to open the highlighted row. From **Pages** or Overview, press `v` (or the palette) to open the current page — its primary entity when it has one. A leftover entity is never reused. Esc returns.
+From **Entities**, press `Enter` (or the palette command **Object View**) to open the highlighted row. From **Case**, press `Enter` (or the palette) to open the current page — its primary entity when it has one. A leftover entity is never reused. Esc returns.
 
 The screen shows:
 
@@ -121,7 +121,7 @@ The screen shows:
 2. **Linked objects** grouped by catalog link type (unknown verbs under Other), including edges from absorbed constituents remapped to the canonical.
 3. **Supporting sources** cited on the entity (union with constituents after a merge).
 4. **Findings** on pages that include the entity, or that share a cited source.
-5. **Constituents** when the object is the canonical of an active resolution bag. `u` unresolves.
+5. **Constituents** when the object is the canonical of an active resolution bag. Palette **Unresolve entity** proposes unresolve (Review, then `Shift+A` then `y`).
 
 ## See also
 

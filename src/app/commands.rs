@@ -155,7 +155,7 @@ pub const COMMANDS: &[Command] = &[
         "search",
         "Search",
         "/",
-        "Search pages, entities, findings, sources, artifacts, and agent runs.",
+        "Filter the current table, or search the case.",
         false,
         true,
         false,
@@ -163,10 +163,28 @@ pub const COMMANDS: &[Command] = &[
     cmd(
         "palette",
         "Command palette",
-        "p",
-        "Open the command palette. Ctrl+P is the same binding.",
+        "Ctrl+K",
+        "Open the command palette. : is an alias.",
         false,
         true,
+        false,
+    ),
+    cmd(
+        "focus_left",
+        "Focus previous pane",
+        "h",
+        "Move focus Rail ◀ Board ◀ Inspector.",
+        false,
+        false,
+        false,
+    ),
+    cmd(
+        "focus_right",
+        "Focus next pane",
+        "l",
+        "Move focus Rail ▶ Board ▶ Inspector.",
+        false,
+        false,
         false,
     ),
     cmd(
@@ -190,8 +208,8 @@ pub const COMMANDS: &[Command] = &[
     cmd_views(
         "open_investigation",
         "Open Investigation",
-        "o",
-        "Open an existing investigation (welcome screen).",
+        "",
+        "Open an existing investigation (welcome screen or palette).",
         true,
         false,
         false,
@@ -209,8 +227,8 @@ pub const COMMANDS: &[Command] = &[
     cmd(
         "run_collectors",
         "Run Collectors",
-        "r",
-        "Run the default passive collectors for this page.",
+        "c",
+        "Collect on the selected target (passive collectors only).",
         true,
         true,
         true,
@@ -299,7 +317,7 @@ pub const COMMANDS: &[Command] = &[
     cmd(
         "ingest",
         "Ingest file",
-        "i",
+        "",
         "Ingest STIX, MISP, CSV, JSON, or an Evidence Batch.",
         true,
         false,
@@ -308,7 +326,7 @@ pub const COMMANDS: &[Command] = &[
     cmd(
         "run_playbook",
         "Run playbook",
-        "b",
+        "",
         "Run a bundled YAML playbook. Active tools are refused.",
         true,
         false,
@@ -336,7 +354,7 @@ pub const COMMANDS: &[Command] = &[
         "ask_agent",
         "Ask Agent",
         "a",
-        "Ask the agent about the selection. Results land as proposals.",
+        "Ask the agent about the selection. Results land in Review.",
         true,
         true,
         true,
@@ -369,64 +387,46 @@ pub const COMMANDS: &[Command] = &[
         true,
     ),
     cmd(
-        "open_overview",
-        "Open Overview",
+        "open_case",
+        "Open Case",
         "1",
-        "Jump to Overview.",
+        "Jump to Case.",
         false,
-        false,
-        false,
-    ),
-    cmd(
-        "open_pages",
-        "Open Pages",
-        "2",
-        "Jump to Pages.",
-        false,
-        false,
-        false,
-    ),
-    cmd(
-        "open_sources",
-        "Open Sources",
-        "3",
-        "Jump to Sources.",
-        true,
-        false,
-        false,
-    ),
-    cmd(
-        "open_findings",
-        "Open Findings",
-        "4",
-        "Jump to Findings.",
-        true,
         false,
         false,
     ),
     cmd(
         "open_entities",
         "Open Entities",
-        "5",
+        "2",
         "Jump to Entities.",
         true,
         false,
         false,
     ),
     cmd(
-        "open_timeline",
-        "Open Timeline",
-        "6",
-        "Jump to Timeline.",
+        "open_evidence",
+        "Open Evidence",
+        "3",
+        "Jump to Evidence.",
         true,
         false,
         false,
     ),
     cmd(
-        "open_agent",
-        "Agent History",
-        "7",
-        "Jump to Agent history.",
+        "open_graph",
+        "Graph",
+        "4",
+        "Jump to Graph.",
+        true,
+        true,
+        false,
+    ),
+    cmd(
+        "open_review",
+        "Open Review",
+        "5",
+        "Jump to Review. AI and merge proposals wait here.",
         true,
         false,
         false,
@@ -434,8 +434,62 @@ pub const COMMANDS: &[Command] = &[
     cmd(
         "open_jobs",
         "Show Jobs",
-        "8",
+        "6",
         "Jump to Jobs.",
+        true,
+        false,
+        false,
+    ),
+    cmd(
+        "open_overview",
+        "Open Case",
+        "",
+        "Alias for Open Case.",
+        false,
+        false,
+        false,
+    ),
+    cmd(
+        "open_pages",
+        "Open Targets",
+        "",
+        "Targets live on Case.",
+        true,
+        false,
+        false,
+    ),
+    cmd(
+        "open_sources",
+        "Open Sources",
+        "",
+        "Sources live on Evidence and the Inspector Sources tab.",
+        true,
+        false,
+        false,
+    ),
+    cmd(
+        "open_findings",
+        "Open Findings",
+        "",
+        "Findings live on Evidence.",
+        true,
+        false,
+        false,
+    ),
+    cmd(
+        "open_timeline",
+        "Open Timeline",
+        "",
+        "Time lens on Evidence / Graph. Toggle with t.",
+        true,
+        false,
+        false,
+    ),
+    cmd(
+        "open_agent",
+        "Agent History",
+        "",
+        "Agent transcript is the Inspector for a Review run.",
         true,
         false,
         false,
@@ -443,8 +497,8 @@ pub const COMMANDS: &[Command] = &[
     cmd(
         "open_tools",
         "Show Tools",
-        "9",
-        "Jump to Tools. Active tools are listed as refused.",
+        "",
+        "List tools. Active tools are refused, with no enable option.",
         true,
         false,
         false,
@@ -452,8 +506,17 @@ pub const COMMANDS: &[Command] = &[
     cmd(
         "open_settings",
         "Configure Agent",
-        "0",
-        "Jump to Settings (agent profile and theme).",
+        "",
+        "Agent profile and theme.",
+        true,
+        false,
+        false,
+    ),
+    cmd(
+        "open_notes",
+        "Open Notes",
+        "",
+        "Notes live on the Inspector Notes tab. e edits in $EDITOR.",
         true,
         false,
         false,
@@ -488,12 +551,12 @@ pub const COMMANDS: &[Command] = &[
     cmd_views(
         "toggle_nearby",
         "Nearby (country / prefix)",
-        "l",
-        "List entities nearby by country or prefix (Timeline / Entities).",
+        "",
+        "List entities nearby by country or prefix.",
         true,
         false,
         false,
-        &[View::Timeline, View::Entities],
+        &[View::Timeline, View::Entities, View::Evidence],
     ),
     cmd(
         "open_artifacts",
@@ -507,18 +570,18 @@ pub const COMMANDS: &[Command] = &[
     cmd(
         "open_object",
         "Object View",
-        "v",
-        "Open Object View for the highlighted entity or the current page.",
+        "",
+        "Open Object View for the highlighted entity or the current page. Enter also opens.",
         true,
         false,
         false,
     ),
     cmd(
-        "open_graph",
-        "Graph",
+        "search_around_graph",
+        "Open selection in Graph",
         "g",
-        "Open Graph for the current entity (1 hop).",
-        true,
+        "Open the selection in Graph.",
+        false,
         true,
         false,
     ),
@@ -544,8 +607,8 @@ pub const COMMANDS: &[Command] = &[
     cmd_views(
         "unresolve_entity",
         "Unresolve entity",
-        "u",
-        "Propose unresolving the current bag. Confirm required.",
+        "",
+        "Propose unresolving the current bag. Lands in Review.",
         true,
         false,
         true,
@@ -563,8 +626,8 @@ pub const COMMANDS: &[Command] = &[
     cmd_views(
         "doctor",
         "Doctor",
-        "d",
-        "Run environment checks (welcome screen, or palette).",
+        "",
+        "Run environment checks.",
         true,
         false,
         false,
@@ -573,8 +636,8 @@ pub const COMMANDS: &[Command] = &[
     cmd_views(
         "cancel_job",
         "Cancel Running Job",
-        "c",
-        "Cancel the selected job (Jobs view).",
+        "",
+        "Cancel the selected job.",
         true,
         false,
         true,
@@ -584,71 +647,110 @@ pub const COMMANDS: &[Command] = &[
         "graph_hops_inc",
         "More hops",
         "+",
-        "Graph: expand Search Around depth.",
+        "Graph hops, or time-lens bucket.",
         false,
         false,
         false,
-        &[View::Graph],
+        &[View::Graph, View::Evidence, View::Timeline],
     ),
     cmd_views(
         "graph_hops_dec",
         "Fewer hops",
         "-",
-        "Graph: reduce Search Around depth.",
+        "Graph hops, or time-lens bucket.",
         false,
         false,
         false,
-        &[View::Graph],
+        &[View::Graph, View::Evidence, View::Timeline],
     ),
     cmd_views(
         "facet_prev",
         "Previous facet",
-        "[",
-        "Graph / Timeline: move the facet cursor left.",
+        "",
+        "Move the facet cursor left.",
+        true,
         false,
         false,
-        false,
-        &[View::Graph, View::Timeline],
+        &[View::Graph, View::Timeline, View::Evidence],
     ),
     cmd_views(
         "facet_next",
         "Next facet",
-        "]",
-        "Graph / Timeline: move the facet cursor right.",
+        "",
+        "Move the facet cursor right.",
+        true,
         false,
         false,
-        false,
-        &[View::Graph, View::Timeline],
+        &[View::Graph, View::Timeline, View::Evidence],
     ),
     cmd_views(
         "apply_facet",
         "Apply facet",
-        "f",
-        "Graph / Timeline: apply the highlighted facet.",
+        "",
+        "Apply the highlighted facet.",
+        true,
+        false,
+        false,
+        &[View::Graph, View::Timeline, View::Evidence],
+    ),
+    cmd_views(
+        "reject_review",
+        "Reject",
+        "x",
+        "Reject the highlighted Review item.",
         false,
         false,
         false,
-        &[View::Graph, View::Timeline],
+        &[View::Review],
     ),
     cmd_views(
         "clear_filters",
         "Clear filters",
         "x",
-        "Graph / Timeline: clear facet filters.",
+        "Clear the filter or time lens.",
         false,
         false,
         false,
-        &[View::Graph, View::Timeline],
+        &[View::Graph, View::Evidence, View::Timeline],
+    ),
+    cmd_views(
+        "toggle_time_lens",
+        "Time lens",
+        "t",
+        "Toggle the time lens on Evidence or Graph.",
+        false,
+        false,
+        false,
+        &[View::Evidence, View::Graph, View::Entities, View::Timeline],
+    ),
+    cmd(
+        "toggle_zoom",
+        "Zoom Board",
+        "z",
+        "Zoom the Board. Any key returns.",
+        false,
+        false,
+        false,
+    ),
+    cmd_views(
+        "arm_review",
+        "Select for accept",
+        "A",
+        "Arm the highlighted Review item. y confirms.",
+        false,
+        false,
+        false,
+        &[View::Review],
     ),
     cmd_views(
         "mark",
         "Mark row",
         "Space",
-        "Entities: mark or unmark for merge.",
+        "Mark a row for merge or batch accept.",
         false,
         false,
         false,
-        &[View::Entities],
+        &[View::Entities, View::Review],
     ),
 ];
 
@@ -666,10 +768,50 @@ pub fn filtered(query: &str) -> Vec<&'static Command> {
 }
 
 pub fn hint_commands() -> Vec<&'static Command> {
+    hint_commands_for(View::Overview)
+}
+
+pub fn hint_commands_for(view: View) -> Vec<&'static Command> {
     COMMANDS
         .iter()
-        .filter(|command| command.on_hint_bar)
+        .filter(|command| command.on_hint_bar && command.applies_to(view))
         .collect()
+}
+
+/// Context-bar commands for the focused pane.
+pub fn context_commands(view: View, pane: super::Pane) -> Vec<&'static Command> {
+    let _ = pane;
+    let mut commands = hint_commands_for(view);
+    for id in context_ids(view) {
+        if let Some(command) = COMMANDS.iter().find(|command| command.id == *id)
+            && !commands.iter().any(|existing| existing.id == command.id)
+        {
+            commands.push(command);
+        }
+    }
+    commands
+}
+
+fn context_ids(view: View) -> &'static [&'static str] {
+    match view {
+        View::Overview => &[
+            "run_collectors",
+            "new_investigation",
+            "ask_agent",
+            "search_around",
+        ],
+        View::Entities => &[
+            "search_around",
+            "search_around_graph",
+            "toggle_time_lens",
+            "mark",
+        ],
+        View::Evidence => &["toggle_time_lens", "search"],
+        View::Graph => &["search_around", "graph_hops_inc", "toggle_time_lens"],
+        View::Review => &["arm_review", "reject_review"],
+        View::Jobs => &["help"],
+        _ => &["help"],
+    }
 }
 
 /// Help overlay body. Generated from [`COMMANDS`] so it cannot drift from the keymap.
@@ -692,15 +834,14 @@ pub fn help_text() -> String {
     }
     lines.push(String::new());
     lines.push("  Ctrl+C       Quit from anywhere".into());
-    lines.push("  Ctrl+P       Command palette (same as p)".into());
+    lines.push("  Ctrl+K       Command palette (also :)".into());
     lines.push("  Ctrl+F       Search (same as /)".into());
     lines.push(String::new());
-    lines.push("  1 Overview  2 Pages  3 Sources  4 Findings  5 Entities".into());
-    lines.push("  6 Timeline  7 Agent  8 Jobs     9 Tools     0 Settings".into());
-    lines.push("  Graph and Audit are in the Navigate column (g or palette).".into());
+    lines.push("  1 Case  2 Entities  3 Evidence  4 Graph  5 Review  6 Jobs".into());
+    lines.push("  Tools, settings, audit, artifacts, ingest, playbooks: palette.".into());
     lines.push(String::new());
     lines.push("Enter opens. It never writes.".into());
-    lines.push("Shift+A then y accepts a proposal. Any other key disarms.".into());
+    lines.push("Shift+A then y accepts a Review item. Any other key disarms.".into());
     lines.push("y confirms a write prompt. Ctrl+S submits a form or agent prompt.".into());
     lines.push("Palette writes open a y-confirm. Enter on the palette does not run them.".into());
     lines.push(String::new());
@@ -737,6 +878,8 @@ fn action_for_command(id: &str, view: View) -> Option<Action> {
         "search" => Action::Search,
         "palette" => Action::Palette,
         "help" => Action::Help,
+        "focus_left" => Action::PrevPane,
+        "focus_right" => Action::NextPane,
         "new_investigation" | "new_page" => Action::NewItem,
         "open_investigation" => Action::Command("open_investigation"),
         "run_collectors" => Action::Refresh,
@@ -744,26 +887,31 @@ fn action_for_command(id: &str, view: View) -> Option<Action> {
         "run_playbook" => Action::Command("run_playbook"),
         "ask_agent" => Action::AskAgent,
         "add_note" => Action::Edit,
-        "open_overview" => Action::OpenOverview,
-        "open_pages" => Action::OpenPages,
-        "open_sources" => Action::OpenSources,
-        "open_findings" => Action::OpenFindings,
+        "open_overview" | "open_case" | "open_pages" => Action::OpenOverview,
+        "open_sources" | "open_findings" | "open_evidence" => Action::OpenEvidence,
         "open_entities" => Action::OpenEntities,
         "open_timeline" => Action::OpenTimeline,
-        "open_agent" => Action::OpenAgent,
+        "open_agent" => Action::OpenReview,
+        "open_review" => Action::OpenReview,
         "open_jobs" => Action::OpenJobs,
         "open_tools" => Action::OpenTools,
         "open_settings" => Action::OpenSettings,
         "toggle_nearby" => Action::ToggleNearby,
         "open_object" => Action::OpenObjectView,
-        "open_graph" => Action::OpenGraph,
+        "open_graph" | "search_around_graph" => Action::OpenGraph,
         "search_around" => Action::SearchAround,
+        "toggle_time_lens" => Action::ToggleTimeLens,
+        "toggle_zoom" => Action::ToggleZoom,
+        "arm_review" => Action::Arm,
+        "reject_review" => Action::Reject,
         "merge_entities" => Action::ProposeMerge,
         "unresolve_entity" => Action::Unresolve,
         "doctor" => Action::Command("doctor"),
         "cancel_job" => Action::Command("cancel_job"),
-        "graph_hops_inc" => Action::GraphHops(1),
-        "graph_hops_dec" => Action::GraphHops(-1),
+        "graph_hops_inc" if view == View::Graph => Action::GraphHops(1),
+        "graph_hops_inc" => Action::TimelineFacetMove(1),
+        "graph_hops_dec" if view == View::Graph => Action::GraphHops(-1),
+        "graph_hops_dec" => Action::TimelineFacetMove(-1),
         "facet_prev" if view == View::Graph => Action::GraphFacetMove(-1),
         "facet_prev" => Action::TimelineFacetMove(-1),
         "facet_next" if view == View::Graph => Action::GraphFacetMove(1),
@@ -792,7 +940,7 @@ pub fn map_registered_key(
     }
     if ctrl {
         return match code {
-            KeyCode::Char('p') => Some(Action::Palette),
+            KeyCode::Char('k') | KeyCode::Char('p') => Some(Action::Palette),
             KeyCode::Char('f') => Some(Action::Search),
             _ => None,
         };
@@ -800,8 +948,11 @@ pub fn map_registered_key(
     match code {
         KeyCode::Up => return Some(Action::Move(-1)),
         KeyCode::Down => return Some(Action::Move(1)),
+        KeyCode::Left => return Some(Action::PrevPane),
+        KeyCode::Right => return Some(Action::NextPane),
         KeyCode::PageUp => return Some(Action::Move(-10)),
         KeyCode::PageDown => return Some(Action::Move(10)),
+        KeyCode::Char(':') => return Some(Action::Palette),
         KeyCode::Char('=') if view == View::Graph => return Some(Action::GraphHops(1)),
         _ => {}
     }
@@ -884,13 +1035,18 @@ mod tests {
         let extras = [
             KeyCode::Up,
             KeyCode::Down,
+            KeyCode::Left,
+            KeyCode::Right,
             KeyCode::PageUp,
             KeyCode::PageDown,
             KeyCode::Char('='),
+            KeyCode::Char(':'),
         ];
         let views = [
             View::Welcome,
             View::Overview,
+            View::Evidence,
+            View::Review,
             View::Pages,
             View::Sources,
             View::Findings,
@@ -935,17 +1091,127 @@ mod tests {
     }
 
     #[test]
-    fn registered_keymap_keeps_ingest_unique() {
+    fn number_keys_match_the_rail() {
         let overlay = Overlay::None;
-        let ingest = map_registered_key(KeyCode::Char('i'), View::Entities, false, &overlay);
-        assert!(matches!(ingest, Some(Action::Command("ingest"))));
-        let occupied = [
-            'q', 'a', 'p', 'n', 'e', 'r', 'v', 'g', 's', 'm', 'u', 'j', 'k', '/', '?', 'b', 'l',
-        ];
-        for ch in occupied {
-            let action = map_registered_key(KeyCode::Char(ch), View::Entities, false, &overlay);
-            assert!(action.is_some(), "expected {ch} bound");
-            assert!(!matches!(action, Some(Action::Command("ingest"))));
+        assert!(matches!(
+            map_registered_key(KeyCode::Char('1'), View::Entities, false, &overlay),
+            Some(Action::OpenOverview)
+        ));
+        assert!(matches!(
+            map_registered_key(KeyCode::Char('2'), View::Overview, false, &overlay),
+            Some(Action::OpenEntities)
+        ));
+        assert!(matches!(
+            map_registered_key(KeyCode::Char('3'), View::Overview, false, &overlay),
+            Some(Action::OpenEvidence)
+        ));
+        assert!(matches!(
+            map_registered_key(KeyCode::Char('4'), View::Overview, false, &overlay),
+            Some(Action::OpenGraph)
+        ));
+        assert!(matches!(
+            map_registered_key(KeyCode::Char('5'), View::Overview, false, &overlay),
+            Some(Action::OpenReview)
+        ));
+        assert!(matches!(
+            map_registered_key(KeyCode::Char('6'), View::Overview, false, &overlay),
+            Some(Action::OpenJobs)
+        ));
+        for ch in ['7', '8', '9', '0'] {
+            assert!(
+                map_registered_key(KeyCode::Char(ch), View::Overview, false, &overlay).is_none(),
+                "{ch} must not jump views"
+            );
         }
+    }
+
+    #[test]
+    fn deleted_keys_are_unbound() {
+        let overlay = Overlay::None;
+        for ch in ['p', 'v', 'r', 'i', 'b', 'u', 'o', 'd', 'f', '[', ']'] {
+            assert!(
+                map_registered_key(KeyCode::Char(ch), View::Entities, false, &overlay).is_none(),
+                "{ch} should be deleted"
+            );
+            assert!(
+                map_registered_key(KeyCode::Char(ch), View::Welcome, false, &overlay).is_none(),
+                "{ch} should be deleted on Welcome"
+            );
+        }
+        assert!(
+            map_registered_key(KeyCode::Char('l'), View::Entities, false, &overlay)
+                .is_some_and(|action| matches!(action, Action::NextPane))
+        );
+    }
+
+    #[test]
+    fn no_key_has_two_meanings_on_one_view() {
+        let overlay = Overlay::None;
+        let views = [
+            View::Welcome,
+            View::Overview,
+            View::Entities,
+            View::Evidence,
+            View::Graph,
+            View::Review,
+            View::Jobs,
+        ];
+        for view in views {
+            let mut bound: std::collections::HashMap<KeyCode, &'static str> =
+                std::collections::HashMap::new();
+            for command in COMMANDS {
+                let Some(code) = hint_key(command.hint) else {
+                    continue;
+                };
+                if !command.applies_to(view) {
+                    continue;
+                }
+                if let Some(existing) = bound.insert(code, command.id) {
+                    let left = action_for_command(existing, view);
+                    let right = action_for_command(command.id, view);
+                    assert_eq!(
+                        left.map(|action| format!("{action:?}")),
+                        right.map(|action| format!("{action:?}")),
+                        "{code:?} on {view:?} maps to both {existing} and {}",
+                        command.id
+                    );
+                }
+            }
+            let _ = overlay;
+        }
+    }
+
+    #[test]
+    fn cut_functions_are_in_the_palette() {
+        let hits = filtered("");
+        for id in [
+            "ingest",
+            "run_playbook",
+            "open_artifacts",
+            "open_audit",
+            "open_tools",
+            "open_settings",
+            "open_notes",
+            "open_timeline",
+            "open_agent",
+            "unresolve_entity",
+            "doctor",
+            "open_investigation",
+        ] {
+            assert!(
+                hits.iter().any(|command| command.id == id),
+                "palette missing {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn collect_is_c_not_r() {
+        let overlay = Overlay::None;
+        assert!(matches!(
+            map_registered_key(KeyCode::Char('c'), View::Overview, false, &overlay),
+            Some(Action::Refresh)
+        ));
+        assert!(map_registered_key(KeyCode::Char('r'), View::Overview, false, &overlay).is_none());
     }
 }

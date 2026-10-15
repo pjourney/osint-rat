@@ -1,0 +1,40 @@
+ os-int ▸ acme-phish ▸ Graph  unmarked                                                           ◆ 1 to review  ✓ jobs  agent ◇ Claude Code
+ Rail         │┌Facets────────────────────────────────────────────────────────────────────────┐│ Inspector · acme-login.com
+ 1 Case        │1 hop(s) · 2 nodes · 1 edges · cap 200/400                                    │ TABS  ·Props·  Sources  Notes  History
+ 2 Entities    │Domain:1  IP:1 │ Resolves to:1 │ ANL:1  COL:1                                 │ E-1  acme-login.com
+ 3 Evidence    └──────────────────────────────────────────────────────────────────────────────┘ Domain  ✎ ANL
+▌4 Graph       ┌Neighborhood──────────────────────────────────────────────────────────────────┐ Sources  S-1
+ 5 Review 1    │Hop 0            Hop 1                                                        │
+ 6 Jobs        │*E-1 acme-logi…  E-2 203.0.113…                                               │ Relationships
+               │                                                                              │   --resolves_to-->  E-2 203.0.113.7
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               └──────────────────────────────────────────────────────────────────────────────┘
+               ┌Nodes─────────────────────────────────────────────────────────────────────────┐
+               │E-1  Domain      hop 0  acme-login.com                                        │
+               │E-2  IP          hop 1  203.0.113.7                                           │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               │                                                                              │
+               └──────────────────────────────────────────────────────────────────────────────┘
+ Graph · 1 hop(s) · 2 nodes · 1 edges. s Search Around, +/- hops, f facet.    0 jobs
+/ search  Ctrl+K commands  ? help  c collect  a ask agent  4 graph  g graph  s search around  + more hops  t time

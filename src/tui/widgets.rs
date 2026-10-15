@@ -6,8 +6,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem};
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::Input;
-use crate::app::commands::hint_commands;
+use crate::app::commands::context_commands;
+use crate::app::{Input, Pane, View};
 use crate::model::Provenance;
 use crate::sanitize::sanitize_line;
 
@@ -28,6 +28,23 @@ pub fn pane_block<'a>(title: &'a str, focused: bool, theme: &Theme) -> Block<'a>
         .title(title)
         .border_style(border)
         .title_style(if focused { theme.accent } else { theme.muted })
+}
+
+/// Title row for a cockpit pane. Unfocused panes have no box; the focused pane
+/// gets a ▌ accent and a bold title.
+pub fn pane_title(title: &str, focused: bool, theme: &Theme) -> Line<'static> {
+    if focused {
+        Line::from(Span::styled(
+            format!("{}{title}", theme.glyphs.focus),
+            theme.accent.add_modifier(Modifier::BOLD),
+        ))
+    } else {
+        Line::from(Span::styled(format!(" {title}"), theme.muted))
+    }
+}
+
+pub fn rule_span(theme: &Theme) -> Span<'static> {
+    Span::styled("│", theme.rule)
 }
 
 pub fn truncate(text: &str, max_width: usize) -> String {
@@ -99,13 +116,16 @@ pub fn provenance_span(provenance: Provenance, theme: &Theme) -> Span<'static> {
     Span::styled(format!("{glyph} {}", provenance.badge()), style)
 }
 
-pub fn hint_line(theme: &Theme) -> Line<'static> {
+pub fn context_line(view: View, pane: Pane, theme: &Theme) -> Line<'static> {
     let mut spans = Vec::new();
-    for (index, command) in hint_commands().into_iter().enumerate() {
+    for (index, command) in context_commands(view, pane).into_iter().enumerate() {
+        if command.hint.is_empty() {
+            continue;
+        }
         if index > 0 {
             spans.push(Span::raw("  "));
         }
-        spans.push(Span::styled(format!("[{}]", command.hint), theme.accent));
+        spans.push(Span::styled(command.hint.to_string(), theme.accent));
         spans.push(Span::raw(format!(" {}", short_hint_label(command.title))));
     }
     Line::from(spans)
@@ -113,11 +133,14 @@ pub fn hint_line(theme: &Theme) -> Line<'static> {
 
 fn short_hint_label(title: &str) -> String {
     match title {
-        "Ask Agent" => "Ask".into(),
-        "Command palette" => "Palette".into(),
-        "Run Collectors" => "Collect".into(),
-        "Search Around" => "Around".into(),
-        other => other.to_string(),
+        "Ask Agent" => "ask agent".into(),
+        "Command palette" => "commands".into(),
+        "Run Collectors" => "collect".into(),
+        "Search Around" => "search around".into(),
+        "Open selection in Graph" => "graph".into(),
+        "Select for accept" => "arm".into(),
+        "Time lens" => "time".into(),
+        other => other.to_ascii_lowercase(),
     }
 }
 

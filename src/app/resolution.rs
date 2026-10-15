@@ -104,21 +104,16 @@ impl App {
             .filter(|id| ids.contains(id))
             .or_else(|| ids.first().copied())
             .unwrap_or(ids[0]);
-        self.pending_resolve = Some(PendingResolve {
+        self.pending_merges.push(PendingResolve {
             entity_ids: ids.clone(),
             canonical_id,
             reason: "manual merge".into(),
         });
-        let labels = self.format_entity_labels(&ids);
-        self.overlay = Overlay::Confirm {
-            title: "Merge entities".into(),
-            message: format!(
-                "Merge {} into {}? This is reversible. Sources stay cited.",
-                labels,
-                self.format_entity_labels(&[canonical_id])
-            ),
-            command: "confirm_resolve".into(),
-        };
+        self.open_review_lane();
+        self.status = format!(
+            "Merge of {} proposed. Review it, then Shift+A and y. Enter never writes.",
+            self.format_entity_labels(&ids)
+        );
     }
 
     pub(crate) fn confirm_resolve(&mut self) -> Result<()> {
@@ -208,9 +203,9 @@ impl App {
             self.status = "No resolution suggestions.".into();
             return;
         }
-        self.overlay = Overlay::Suggestions { selected: 0 };
+        self.open_review_lane();
         self.status = format!(
-            "{} suggestion(s). Enter proposes a merge; nothing auto-merges.",
+            "{} suggestion(s) in Review. Shift+A then y writes. Nothing auto-merges.",
             suggestions.len()
         );
     }

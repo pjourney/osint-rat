@@ -1,0 +1,24 @@
+ os-int ▸ acme-phish ▸ Evidence  u…  ◆ 1 to review  ✓ jobs  agent ◇ Claude Code
+ Rail         │▌EVIDENCE
+ 1 Case        F  F-1  AI    acme-login.com is phishing infra
+ 2 Entities    S  S-1  COL  DNS records for acme-login.com
+▌3 Evidence
+ 4 Graph
+ 5 Review 1
+ 6 Jobs
+
+
+
+
+
+
+ Inspector · acme-login.com
+TABS  ·Props·  Sources  Notes  History
+acme-login.com
+Domain
+acme-login.com
+
+
+
+ Opened acme-phish    0 jobs
+/ search  Ctrl+K commands  ? help  c collect  a ask agent  4 graph  g graph  s s
