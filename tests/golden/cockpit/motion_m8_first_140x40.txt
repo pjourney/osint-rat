@@ -1,0 +1,40 @@
+ os-int ▸ acme-phish ▸ Case  unmarked                                                            ◆ 1 to review  ✓ jobs  agent ◇ Claude Code
+▌Rail         │ TARGETS                                                                      ✓ │ Inspector · acme-login.com
+▌1 Case        P-1  acme-login.com  Domain                                                      TABS  ·Props·  Sources  Notes  History
+ 2 Entities    Target  acme-login.com                                                           acme-login.com
+ 3 Evidence                                                                                     Domain
+ 4 Graph       Summary                                                                          acme-login.com
+ 5 Review 1      marking unmarked   role owner
+ 6 Jobs          1 pages   1 sources   1 findings   2 entities   0 jobs   0 audit
+
+               Entities on this page
+                 E-1  Domain      acme-login.com  ✎ ANL
+                 E-2  IP          203.0.113.7  ● COL
+
+               Findings
+                 F-1  ◆ AI  acme-login.com is phishing infra  []
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Opened acme-phish    0 jobs
+/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search around  n new investigation

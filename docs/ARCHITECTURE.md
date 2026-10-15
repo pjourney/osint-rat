@@ -101,7 +101,7 @@ A useful order:
 | Change geo fields or GeoJSON | `model/geo.rs`, `src/geo/`, IP/RDAP collectors, `os-int export --format geojson` |
 | Change merge, unresolve, or suggestion rules | `model/resolution.rs` (bags + scoring), `storage/resolution.rs`, then `app/resolution.rs` and Object View |
 | Add a palette command | `app/commands.rs` (`in_palette: true`), then handle the id in `App::run_command` |
-| Change a colour or theme | `tui/theme.rs` only (`Color::` is forbidden elsewhere). Preview with `os-int theme preview` or palette `:theme` (Enter saves, Esc reverts). WCAG and colour-blind floors are tests in that file. Phosphor may enable an optional scanline (`ui.scanline`); it never encodes data. |
+| Change a colour or theme | `tui/theme.rs` only (`Color::` is forbidden elsewhere). Preview with `os-int theme preview` or palette `:theme` (`y` saves, Esc reverts, Enter previews). WCAG and colour-blind floors are tests in that file. Phosphor may enable an optional scanline (`ui.scanline`); it never encodes data. |
 | Add or change an animation | `tui/motion.rs` (`CATALOGUE` plus a row in [UX_REVAMP_PLAN.md](UX_REVAMP_PLAN.md) §8.2). `ui.motion = full \| reduced \| off`. `--plain`, `OS_INT_PLAIN`, `NO_COLOR`, and `TERM=dumb` force off. |
 | Add a report section | `report/`. Keep AI-written text labelled as inference |
 | Change the on-disk export | `exchange/`. Follow the bump rules in [ontology-exchange.md](ontology-exchange.md#format_version-bump-rules). Bump `FORMAT_VERSION` if older archives would no longer import, or if a new collection must survive round-trip |

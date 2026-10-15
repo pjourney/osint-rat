@@ -21,7 +21,6 @@ const DEFAULT_MAX_REDIRECTS: usize = 10;
 const DEFAULT_AGENT_TIMEOUT_SECONDS: u64 = 600;
 const DEFAULT_MAX_CONTEXT_BYTES: usize = 200 * 1024;
 const DEFAULT_HISTORY_TURNS: usize = 4;
-const DEFAULT_TICK_RATE_MS: u64 = 250;
 const DEFAULT_MAX_CONCURRENT_JOBS: usize = 4;
 const DEFAULT_TOOL_TIMEOUT_SECONDS: u64 = 60;
 const DEFAULT_MAX_FILE_IMPORT_BYTES: u64 = 512 * 1024 * 1024;
@@ -33,7 +32,7 @@ pub const DEFAULT_MAX_INGEST_BYTES: u64 = 20 * 1024 * 1024;
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Theme, redraw interval, and the external editor.
+    /// Theme, motion, and the external editor.
     pub ui: UiConfig,
     /// Which agent profile is active, plus timeouts and context limits.
     pub agent: AgentSettings,
@@ -66,8 +65,6 @@ pub struct UiConfig {
     pub motion: String,
     /// Phosphor CRT scanline (alternate rows). Off by default; never used for data.
     pub scanline: bool,
-    /// Redraw interval while background jobs are running.
-    pub tick_rate_ms: u64,
     /// Command used for long-form editing (falls back to `$VISUAL`, `$EDITOR`, then `vi`).
     pub editor: Option<String>,
 }
@@ -80,7 +77,6 @@ impl Default for UiConfig {
             ascii: false,
             motion: "full".into(),
             scanline: false,
-            tick_rate_ms: DEFAULT_TICK_RATE_MS,
             editor: None,
         }
     }
@@ -382,8 +378,6 @@ ascii = false
 motion = "full"
 # Phosphor only: faint CRT scanline on alternate rows. Off by default. Never encodes data.
 scanline = false
-# Legacy redraw hint while jobs run. Motion uses a 60 ms tick only while animations are active.
-tick_rate_ms = 250
 # Editor for long-form notes (falls back to $VISUAL, $EDITOR, then vi).
 # editor = "nvim"
 

@@ -36,6 +36,9 @@ pub fn map_key(
     if matches!(overlay, Overlay::Confirm { .. }) {
         return map_confirm_key(key);
     }
+    if matches!(overlay, Overlay::ThemeCycle { .. }) {
+        return map_theme_cycle_key(key);
+    }
     if !matches!(overlay, Overlay::None) {
         return map_overlay_key(key);
     }
@@ -96,6 +99,18 @@ fn map_editing_key(key: KeyEvent, overlay: &Overlay) -> Option<Action> {
 fn map_confirm_key(key: KeyEvent) -> Option<Action> {
     match key.code {
         KeyCode::Esc | KeyCode::Char('q' | 'n') => Some(Action::Cancel),
+        KeyCode::Char('y' | 'Y') => Some(Action::Select),
+        KeyCode::Enter => None,
+        KeyCode::Up | KeyCode::Char('k') => Some(Action::Move(-1)),
+        KeyCode::Down | KeyCode::Char('j') => Some(Action::Move(1)),
+        KeyCode::Char('?') => Some(Action::Help),
+        _ => None,
+    }
+}
+
+fn map_theme_cycle_key(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => Some(Action::Cancel),
         KeyCode::Char('y' | 'Y') => Some(Action::Select),
         KeyCode::Enter => None,
         KeyCode::Up | KeyCode::Char('k') => Some(Action::Move(-1)),
@@ -340,6 +355,23 @@ mod tests {
         assert!(matches!(
             map(press(KeyCode::Char('x')), &overlay, View::Review),
             Some(Action::Reject)
+        ));
+    }
+
+    #[test]
+    fn theme_cycle_saves_with_y_enter_is_noop() {
+        let overlay = Overlay::ThemeCycle {
+            original: "dark".into(),
+            index: 0,
+        };
+        assert!(map(press(KeyCode::Enter), &overlay, View::Overview).is_none());
+        assert!(matches!(
+            map(press(KeyCode::Char('y')), &overlay, View::Overview),
+            Some(Action::Select)
+        ));
+        assert!(matches!(
+            map(press(KeyCode::Esc), &overlay, View::Overview),
+            Some(Action::Cancel)
         ));
     }
 

@@ -516,10 +516,10 @@ pub const COMMANDS: &[Command] = &[
         "theme",
         "Theme",
         "",
-        "Cycle cockpit themes live. Enter saves, Esc reverts.",
+        "Cycle cockpit themes live. y saves, Esc reverts, Enter previews.",
         true,
         false,
-        false,
+        true,
     ),
     cmd(
         "open_notes",
@@ -1070,6 +1070,7 @@ mod tests {
         assert!(command_writes("confirm_unresolve"));
         assert!(!command_writes("help"));
         assert!(!command_writes("graph_confirm_cap"));
+        assert!(command_writes("theme"));
     }
 
     #[test]

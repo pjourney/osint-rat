@@ -99,12 +99,13 @@ fn welcome_item<'a>(index: usize, selected: usize, label: &'a str, theme: &Theme
 
 const RAIL_WIDTH: u16 = 14;
 const INSPECTOR_WIDTH: u16 = 44;
-const INSPECTOR_BREAK: u16 = 110;
+pub(crate) const INSPECTOR_BREAK: u16 = 110;
 
-pub fn workspace(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+/// Draws the workspace and returns the Board rect so toasts stay on it.
+pub fn workspace(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) -> Rect {
     if app.board_zoomed {
         draw_main(frame, area, app, theme);
-        return;
+        return area;
     }
     if area.width < INSPECTOR_BREAK {
         let target = (area.height as u32 * 40 / 100).max(6) as u16;
@@ -121,7 +122,7 @@ pub fn workspace(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         frame.render_widget(Paragraph::new(rule_span(theme)), columns[1]);
         draw_main(frame, columns[2], app, theme);
         draw_inspector(frame, rows[1], app, theme);
-        return;
+        return columns[2];
     }
     let columns = Layout::horizontal([
         Constraint::Length(RAIL_WIDTH),
@@ -136,6 +137,7 @@ pub fn workspace(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     draw_main(frame, columns[2], app, theme);
     frame.render_widget(Paragraph::new(rule_span(theme)), columns[3]);
     draw_inspector(frame, columns[4], app, theme);
+    columns[2]
 }
 
 fn draw_rail(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, digits_only: bool) {
@@ -302,7 +304,7 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
             }
         }
     }
-    if app.has_active_jobs() {
+    if app.has_active_jobs() || app.motion.has_progress_visuals() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("Running", theme.warning)));
         if app.motion.playing(super::motion::AnimKind::Radar) {
@@ -315,29 +317,55 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
                 app.motion.mode(),
             ));
         }
-        for job in app
-            .job_records
-            .values()
-            .filter(|job| job.status.is_active())
-        {
-            let spin = if job.kind == "agent" {
+        let mut drawn = std::collections::HashSet::new();
+        for job in app.job_records.values() {
+            let key = format!("prog:{}", job.id);
+            let visual = app.motion.progress_visual(&key);
+            let active = job.status.is_active();
+            if !active && visual.is_none() {
+                continue;
+            }
+            drawn.insert(key.clone());
+            let spin = if !active {
+                ""
+            } else if job.kind == "agent" {
                 app.motion.agent_glyph(&theme.glyphs)
             } else {
                 app.motion.job_spinner_glyph(&theme.glyphs)
             };
             let progress = job.progress.as_deref().unwrap_or(job.description.as_str());
-            if let Some((current, total)) = super::motion::parse_known_progress(progress) {
-                lines.push(Line::from(format!("  {spin} {}", job.label)));
+            if let Some((current, total, fill)) = visual.or_else(|| {
+                super::motion::parse_known_progress(progress)
+                    .map(|(current, total)| (current, total, super::motion::ProgressFill::Running))
+            }) {
+                let prefix = if spin.is_empty() {
+                    String::new()
+                } else {
+                    format!("{spin} ")
+                };
+                lines.push(Line::from(format!("  {prefix}{}", job.label)));
                 lines.push(super::motion::progress_bar(
                     current,
                     total,
                     theme,
                     app.motion.mode(),
-                    super::motion::ProgressFill::Running,
+                    fill,
                 ));
-            } else {
+            } else if active {
                 lines.push(Line::from(format!("  {spin} {}  {progress}", job.label)));
             }
+        }
+        for (key, current, total, fill) in app.motion.progress_entries() {
+            if drawn.contains(&key) {
+                continue;
+            }
+            lines.push(super::motion::progress_bar(
+                current,
+                total,
+                theme,
+                app.motion.mode(),
+                fill,
+            ));
         }
     }
     lines.push(Line::from(""));

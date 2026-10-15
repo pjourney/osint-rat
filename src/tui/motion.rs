@@ -332,16 +332,35 @@ pub enum ToastKind {
     Refused,
 }
 
+/// Slide-in, static hold, then ease-in-quad slide-out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToastPhase {
+    In,
+    Hold,
+    Out,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Toast {
     pub kind: ToastKind,
     pub message: String,
-    pub hold_ticks: u16,
+    pub phase: ToastPhase,
     pub age: u16,
-    pub sliding: bool,
+    pub hold_until: Instant,
 }
 
-/// Why a tick ran. None of these write case data.
+const TOAST_IN_FRAMES: u16 = 4;
+const TOAST_OUT_FRAMES: u16 = 3;
+const SPLASH_REDUCED: Duration = Duration::from_millis(150);
+const SPINNER_REDUCED: Duration = Duration::from_secs(1);
+const PROGRESS_REDUCED: Duration = Duration::from_millis(500);
+const TOAST_HOLD_OK: Duration = Duration::from_secs(3);
+const TOAST_HOLD_ERR: Duration = Duration::from_secs(8);
+const TOAST_HOLD_REDUCED: Duration = Duration::from_secs(4);
+const PROGRESS_FLASH: Duration = Duration::from_millis(60);
+const PROGRESS_HOLD: Duration = Duration::from_millis(1500);
+
+/// Why a tick ran. None of these write case data. Exhaustive: a new variant must opt out of writes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TickEffect {
     Advanced,
@@ -356,8 +375,43 @@ pub enum TickEffect {
 impl TickEffect {
     /// Ticks never accept, never save, never run a tool.
     pub fn writes(self) -> bool {
-        false
+        match self {
+            Self::Advanced
+            | Self::SplashDone
+            | Self::ToastExpired
+            | Self::ConfirmPulseDone
+            | Self::GraphRevealDone
+            | Self::DrawerDone
+            | Self::FocusDone => false,
+        }
     }
+}
+
+/// What the event loop should wait on. Reduced never uses the 60 ms interval.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TimerNeed {
+    None,
+    Interval,
+    Deadline(Instant),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ProgressVisual {
+    current: u32,
+    total: u32,
+    fill: ProgressFill,
+    until: Option<Instant>,
+}
+
+fn is_transition(kind: AnimKind) -> bool {
+    matches!(
+        kind,
+        AnimKind::Splash
+            | AnimKind::Focus
+            | AnimKind::Drawer
+            | AnimKind::GraphExpand
+            | AnimKind::Confirm
+    )
 }
 
 /// Armed-bar visual phase. [`ConfirmPhase::Armed`] waits forever — no deadline.
@@ -399,6 +453,13 @@ pub struct Animator {
     last_tick_at: Option<Instant>,
     scanline: bool,
     ascii: bool,
+    splash_until: Option<Instant>,
+    spinner_until: Option<Instant>,
+    progress_until: Option<Instant>,
+    last_progress_at: Option<Instant>,
+    progress_pending: bool,
+    reduced_busy: bool,
+    progress: HashMap<String, ProgressVisual>,
 }
 
 impl Animator {
@@ -421,6 +482,13 @@ impl Animator {
             last_tick_at: None,
             scanline: false,
             ascii: false,
+            splash_until: None,
+            spinner_until: None,
+            progress_until: None,
+            last_progress_at: None,
+            progress_pending: false,
+            reduced_busy: false,
+            progress: HashMap::new(),
         }
     }
 
@@ -462,17 +530,76 @@ impl Animator {
 
     /// True when the event loop must hold a 60 ms interval. Idle is zero timer wakeups.
     pub fn wants_timer(&self) -> bool {
-        self.mode.allows_timer() && self.has_active()
+        matches!(self.timer_need(), TimerNeed::Interval)
     }
 
-    pub fn has_active(&self) -> bool {
-        !self.anims.is_empty()
-            || !self.toasts.is_empty()
-            || !self.toast_queue.is_empty()
+    pub fn timer_need(&self) -> TimerNeed {
+        if self.needs_interval() {
+            return TimerNeed::Interval;
+        }
+        match self.next_deadline() {
+            Some(at) => TimerNeed::Deadline(at),
+            None => TimerNeed::None,
+        }
+    }
+
+    fn needs_interval(&self) -> bool {
+        if self.mode != MotionMode::Full {
+            return false;
+        }
+        self.anims.iter().any(|anim| {
+            matches!(
+                anim.kind,
+                AnimKind::Splash
+                    | AnimKind::JobSpinner
+                    | AnimKind::AgentPulse
+                    | AnimKind::Focus
+                    | AnimKind::Drawer
+                    | AnimKind::GraphExpand
+                    | AnimKind::Toast
+                    | AnimKind::Confirm
+                    | AnimKind::Radar
+            )
+        }) || self
+            .toasts
+            .iter()
+            .any(|toast| matches!(toast.phase, ToastPhase::In | ToastPhase::Out))
             || matches!(
                 self.confirm,
                 ConfirmPhase::Rising | ConfirmPhase::Pulse | ConfirmPhase::Dropping
             )
+    }
+
+    fn next_deadline(&self) -> Option<Instant> {
+        let mut soonest: Option<Instant> = None;
+        let mut consider = |candidate: Option<Instant>| {
+            if let Some(at) = candidate {
+                soonest = Some(match soonest {
+                    Some(current) => current.min(at),
+                    None => at,
+                });
+            }
+        };
+        consider(self.splash_until);
+        if self.reduced_busy {
+            consider(self.spinner_until);
+        }
+        if self.progress_pending {
+            consider(self.progress_until);
+        }
+        for visual in self.progress.values() {
+            consider(visual.until);
+        }
+        for toast in &self.toasts {
+            if toast.phase == ToastPhase::Hold {
+                consider(Some(toast.hold_until));
+            }
+        }
+        soonest
+    }
+
+    pub fn has_active(&self) -> bool {
+        !matches!(self.timer_need(), TimerNeed::None)
     }
 
     /// Interval is live only while this is true. Tests use this as the idle=0 proof.
@@ -481,14 +608,20 @@ impl Animator {
     }
 
     pub fn is_idle(&self) -> bool {
-        !self.wants_timer()
+        matches!(self.timer_need(), TimerNeed::None)
     }
 
     pub fn freeze_at(&self, tick: u64) -> Self {
         let mut frozen = self.clone();
         frozen.tick = tick;
         for toast in &mut frozen.toasts {
-            toast.age = tick.min(u64::from(u16::MAX)) as u16;
+            let age = tick.min(u64::from(u16::MAX)) as u16;
+            if age < TOAST_IN_FRAMES && toast.phase == ToastPhase::In {
+                toast.age = age;
+            } else {
+                toast.phase = ToastPhase::Hold;
+                toast.age = age.saturating_sub(TOAST_IN_FRAMES);
+            }
         }
         frozen.recompute_changed();
         frozen
@@ -508,42 +641,44 @@ impl Animator {
         self.anims.iter().any(|anim| anim.kind == kind)
     }
 
-    /// Advance one 60 ms tick. Returns whether any region produced a new frame index.
-    /// Never accepts a Review item; [`TickEffect::writes`] is always false.
+    /// Advance one 60 ms tick or a one-shot deadline. Never accepts a Review item.
     pub fn advance(&mut self) -> Vec<TickEffect> {
         let mut effects = Vec::new();
         if self.mode == MotionMode::Off {
             return effects;
         }
-        self.note_wall_clock();
-        self.tick = self.tick.saturating_add(1);
         self.changed = false;
-        let mut finished = Vec::new();
-        for anim in &self.anims {
-            let view = self.view_of(anim);
-            let prev = self.prev_index.get(&anim.id).copied();
-            if prev != Some(view.index) {
-                self.changed = true;
+        if self.mode == MotionMode::Full {
+            self.note_wall_clock();
+            self.tick = self.tick.saturating_add(1);
+            let mut finished = Vec::new();
+            for anim in &self.anims {
+                let view = self.view_of(anim);
+                let prev = self.prev_index.get(&anim.id).copied();
+                if prev != Some(view.index) {
+                    self.changed = true;
+                }
+                self.prev_index.insert(anim.id.clone(), view.index);
+                if view.done && !anim.looping {
+                    finished.push(anim.id.clone());
+                    effects.push(match anim.kind {
+                        AnimKind::Splash => TickEffect::SplashDone,
+                        AnimKind::Confirm => TickEffect::ConfirmPulseDone,
+                        AnimKind::GraphExpand => TickEffect::GraphRevealDone,
+                        AnimKind::Drawer => TickEffect::DrawerDone,
+                        AnimKind::Focus => TickEffect::FocusDone,
+                        _ => TickEffect::Advanced,
+                    });
+                }
             }
-            self.prev_index.insert(anim.id.clone(), view.index);
-            if view.done && !anim.looping {
-                finished.push(anim.id.clone());
-                effects.push(match anim.kind {
-                    AnimKind::Splash => TickEffect::SplashDone,
-                    AnimKind::Confirm => TickEffect::ConfirmPulseDone,
-                    AnimKind::GraphExpand => TickEffect::GraphRevealDone,
-                    AnimKind::Drawer => TickEffect::DrawerDone,
-                    AnimKind::Focus => TickEffect::FocusDone,
-                    _ => TickEffect::Advanced,
-                });
+            for id in finished {
+                self.anims.retain(|anim| anim.id != id);
+                self.prev_index.remove(&id);
             }
+            self.advance_confirm(&mut effects);
         }
-        for id in finished {
-            self.anims.retain(|anim| anim.id != id);
-            self.prev_index.remove(&id);
-        }
+        self.advance_deadlines(&mut effects);
         self.advance_toasts(&mut effects);
-        self.advance_confirm(&mut effects);
         if self.changed {
             effects.push(TickEffect::Advanced);
         }
@@ -575,20 +710,112 @@ impl Animator {
                 AnimKind::Drawer | AnimKind::Toast | AnimKind::Radar | AnimKind::Splash
             )
         });
+        for toast in &mut self.toasts {
+            toast.phase = ToastPhase::Hold;
+            toast.age = 0;
+        }
+    }
+
+    fn advance_deadlines(&mut self, effects: &mut Vec<TickEffect>) {
+        let now = Instant::now();
+        if let Some(until) = self.splash_until
+            && now >= until
+        {
+            self.splash_until = None;
+            self.stop_kind(AnimKind::Splash);
+            effects.push(TickEffect::SplashDone);
+            self.changed = true;
+        }
+        if self.reduced_busy && self.spinner_until.is_some_and(|until| now >= until) {
+            self.spinner_until = Some(now + SPINNER_REDUCED);
+            self.changed = true;
+        }
+        if self.progress_pending && self.progress_until.is_some_and(|until| now >= until) {
+            self.progress_pending = false;
+            self.last_progress_at = Some(now);
+            self.progress_until = None;
+            self.changed = true;
+        }
+        let mut drop_keys = Vec::new();
+        for (key, visual) in &mut self.progress {
+            let Some(until) = visual.until else {
+                continue;
+            };
+            if now < until {
+                continue;
+            }
+            match visual.fill {
+                ProgressFill::CompleteFlash => {
+                    visual.fill = ProgressFill::Complete;
+                    visual.until = Some(now + PROGRESS_HOLD);
+                    self.changed = true;
+                }
+                ProgressFill::Complete | ProgressFill::Failed => {
+                    drop_keys.push(key.clone());
+                    self.changed = true;
+                }
+                ProgressFill::Running => visual.until = None,
+            }
+        }
+        for key in drop_keys {
+            self.progress.remove(&key);
+        }
     }
 
     fn advance_toasts(&mut self, effects: &mut Vec<TickEffect>) {
+        let now = Instant::now();
+        let travel = self.mode.allows_travel();
         for toast in &mut self.toasts {
-            toast.age = toast.age.saturating_add(1);
-            if toast.sliding && toast.age >= catalogue_row(AnimKind::Toast).frames {
-                toast.sliding = false;
+            match toast.phase {
+                ToastPhase::In => {
+                    toast.age = toast.age.saturating_add(1);
+                    if toast.age >= TOAST_IN_FRAMES {
+                        toast.phase = ToastPhase::Hold;
+                        toast.age = 0;
+                        toast.hold_until = Instant::now()
+                            + match toast.kind {
+                                ToastKind::Err | ToastKind::Refused => TOAST_HOLD_ERR,
+                                _ => TOAST_HOLD_OK,
+                            };
+                    }
+                }
+                ToastPhase::Hold if now >= toast.hold_until => {
+                    toast.phase = ToastPhase::Out;
+                    toast.age = if travel { 0 } else { TOAST_OUT_FRAMES };
+                }
+                ToastPhase::Hold => {}
+                ToastPhase::Out if travel => {
+                    toast.age = toast.age.saturating_add(1);
+                }
+                ToastPhase::Out => toast.age = TOAST_OUT_FRAMES,
             }
         }
         let before = self.toasts.len();
-        self.toasts.retain(|toast| toast.age < toast.hold_ticks);
+        self.toasts
+            .retain(|toast| !(toast.phase == ToastPhase::Out && toast.age >= TOAST_OUT_FRAMES));
         if self.toasts.len() != before {
             effects.push(TickEffect::ToastExpired);
             self.changed = true;
+        }
+        let sliding = self
+            .toasts
+            .iter()
+            .any(|toast| matches!(toast.phase, ToastPhase::In | ToastPhase::Out));
+        if travel
+            && self
+                .toasts
+                .iter()
+                .any(|toast| toast.phase == ToastPhase::Out)
+        {
+            if !self.playing(AnimKind::Toast) {
+                self.play(AnimKind::Toast, "toast-out", Rect::new(0, 0, TOAST_COLS, 1));
+                if let Some(anim) = self.anims.iter_mut().find(|anim| anim.id == "toast-out") {
+                    anim.frames = TOAST_OUT_FRAMES;
+                    anim.easing = Easing::EaseInQuad;
+                }
+            }
+        } else if !sliding {
+            self.stop_kind(AnimKind::Toast);
         }
         self.promote_toasts();
     }
@@ -701,14 +928,8 @@ impl Animator {
         if matches!(kind, AnimKind::Radar) && self.playing(AnimKind::Radar) {
             return;
         }
-        if matches!(kind, AnimKind::Drawer | AnimKind::Focus)
-            && self
-                .anims
-                .iter()
-                .any(|anim| matches!(anim.kind, AnimKind::Drawer | AnimKind::Focus))
-        {
-            self.anims
-                .retain(|anim| !matches!(anim.kind, AnimKind::Drawer | AnimKind::Focus));
+        if is_transition(kind) {
+            self.anims.retain(|anim| !is_transition(anim.kind));
         }
         let row = catalogue_row(kind);
         let id = id.into();
@@ -745,17 +966,28 @@ impl Animator {
         self.anims.retain(|anim| !anim.id.starts_with(prefix));
     }
 
+    pub fn clear_reduced_busy(&mut self) {
+        self.reduced_busy = false;
+        self.spinner_until = None;
+    }
+
     pub fn start_splash(&mut self, case_name: &str, marking: &str) {
-        if self.mode != MotionMode::Full {
+        if self.mode == MotionMode::Off {
             return;
         }
         self.splash_case = case_name.to_string();
         self.splash_marking = marking.to_string();
+        if self.mode == MotionMode::Reduced {
+            self.splash_until = Some(Instant::now() + SPLASH_REDUCED);
+            self.changed = true;
+            return;
+        }
         self.play(AnimKind::Splash, "splash", Rect::new(0, 0, 80, 24));
     }
 
     pub fn skip_splash(&mut self) {
         self.stop_kind(AnimKind::Splash);
+        self.splash_until = None;
         self.changed = true;
     }
 
@@ -768,7 +1000,7 @@ impl Animator {
     }
 
     pub fn showing_splash(&self) -> bool {
-        self.playing(AnimKind::Splash)
+        self.playing(AnimKind::Splash) || self.splash_until.is_some()
     }
 
     pub fn start_focus(&mut self) {
@@ -881,18 +1113,25 @@ impl Animator {
     }
 
     pub fn push_toast(&mut self, kind: ToastKind, message: impl Into<String>) {
+        if self.mode == MotionMode::Off {
+            return;
+        }
         let hold = match (self.mode, kind) {
-            (MotionMode::Off, _) => return,
-            (_, ToastKind::Err) => (8000 / TICK_MS) as u16,
-            (MotionMode::Reduced, _) => (4000 / TICK_MS) as u16,
-            _ => (3000 / TICK_MS) as u16 + catalogue_row(AnimKind::Toast).frames,
+            (_, ToastKind::Err | ToastKind::Refused) => TOAST_HOLD_ERR,
+            (MotionMode::Reduced, _) => TOAST_HOLD_REDUCED,
+            _ => TOAST_HOLD_OK,
         };
+        let travel = self.mode.allows_travel();
         let toast = Toast {
             kind,
             message: message.into(),
-            hold_ticks: hold,
+            phase: if travel {
+                ToastPhase::In
+            } else {
+                ToastPhase::Hold
+            },
             age: 0,
-            sliding: self.mode.allows_travel(),
+            hold_until: Instant::now() + hold,
         };
         self.toast_queue.push_back(toast);
         self.promote_toasts();
@@ -903,10 +1142,11 @@ impl Animator {
         while self.toasts.len() < TOAST_STACK
             && let Some(mut toast) = self.toast_queue.pop_front()
         {
-            if self.mode.allows_travel() && self.toasts.iter().any(|item| item.sliding) {
-                toast.sliding = false;
+            let sliding_in = self.toasts.iter().any(|item| item.phase == ToastPhase::In);
+            if self.mode.allows_travel() && sliding_in {
+                toast.phase = ToastPhase::Hold;
             }
-            if toast.sliding {
+            if toast.phase == ToastPhase::In {
                 self.play(
                     AnimKind::Toast,
                     format!("toast-{}", self.toasts.len()),
@@ -925,10 +1165,16 @@ impl Animator {
         self.toast_queue.len()
     }
 
-    pub fn dismiss_failed_toasts(&mut self) {
+    /// Dismiss err/refused toasts. Returns true when something was dismissed.
+    pub fn dismiss_failed_toasts(&mut self) -> bool {
+        let before = self.toasts.len();
         self.toasts
             .retain(|toast| !matches!(toast.kind, ToastKind::Err | ToastKind::Refused));
-        self.changed = true;
+        let dropped = self.toasts.len() != before;
+        if dropped {
+            self.changed = true;
+        }
+        dropped
     }
 
     pub fn ensure_spinner(&mut self, job_key: impl Into<String>) {
@@ -936,21 +1182,36 @@ impl Animator {
     }
 
     pub fn sync_spinner(&mut self, job_key: &str, region: Rect) {
-        if self.mode == MotionMode::Off {
-            return;
-        }
-        if self.frame(job_key).is_none() {
-            self.play(AnimKind::JobSpinner, job_key, region);
+        match self.mode {
+            MotionMode::Off => {}
+            MotionMode::Reduced => {
+                self.reduced_busy = true;
+                if self.spinner_until.is_none() {
+                    self.spinner_until = Some(Instant::now() + SPINNER_REDUCED);
+                }
+            }
+            MotionMode::Full => {
+                if self.frame(job_key).is_none() {
+                    self.play(AnimKind::JobSpinner, job_key, region);
+                }
+            }
         }
     }
 
     pub fn sync_agent(&mut self, running: bool) {
-        if running && self.mode != MotionMode::Off {
-            if !self.playing(AnimKind::AgentPulse) {
-                self.play(AnimKind::AgentPulse, "agent", Rect::new(0, 0, 2, 1));
+        match (running, self.mode) {
+            (true, MotionMode::Full) => {
+                if !self.playing(AnimKind::AgentPulse) {
+                    self.play(AnimKind::AgentPulse, "agent", Rect::new(0, 0, 2, 1));
+                }
             }
-        } else {
-            self.stop_kind(AnimKind::AgentPulse);
+            (true, MotionMode::Reduced) => {
+                self.reduced_busy = true;
+                if self.spinner_until.is_none() {
+                    self.spinner_until = Some(Instant::now() + SPINNER_REDUCED);
+                }
+            }
+            _ => self.stop_kind(AnimKind::AgentPulse),
         }
     }
 
@@ -965,13 +1226,101 @@ impl Animator {
     }
 
     pub fn sync_progress(&mut self, job_key: &str, known: bool) {
-        if known && self.mode != MotionMode::Off {
-            if self.frame(job_key).is_none() {
-                self.play(AnimKind::Progress, job_key, Rect::new(0, 0, 12, 1));
-            }
-        } else {
+        if !known || self.mode == MotionMode::Off {
+            self.progress.remove(job_key);
             self.stop_id(job_key);
         }
+    }
+
+    pub fn update_progress(&mut self, job_key: &str, current: u32, total: u32) {
+        if self.mode == MotionMode::Off {
+            return;
+        }
+        let entry = self
+            .progress
+            .entry(job_key.to_string())
+            .or_insert(ProgressVisual {
+                current,
+                total,
+                fill: ProgressFill::Running,
+                until: None,
+            });
+        entry.current = current;
+        entry.total = total.max(1);
+        if !matches!(
+            entry.fill,
+            ProgressFill::CompleteFlash | ProgressFill::Complete | ProgressFill::Failed
+        ) {
+            entry.fill = ProgressFill::Running;
+        }
+    }
+
+    pub fn complete_progress(&mut self, job_key: &str, current: u32, total: u32) {
+        if self.mode == MotionMode::Off {
+            return;
+        }
+        self.progress.insert(
+            job_key.to_string(),
+            ProgressVisual {
+                current: current.min(total.max(1)),
+                total: total.max(1),
+                fill: ProgressFill::CompleteFlash,
+                until: Some(Instant::now() + PROGRESS_FLASH),
+            },
+        );
+        self.changed = true;
+    }
+
+    pub fn fail_progress(&mut self, job_key: &str, current: u32, total: u32) {
+        if self.mode == MotionMode::Off {
+            return;
+        }
+        self.progress.insert(
+            job_key.to_string(),
+            ProgressVisual {
+                current,
+                total: total.max(1),
+                fill: ProgressFill::Failed,
+                until: Some(Instant::now() + TOAST_HOLD_ERR),
+            },
+        );
+        self.changed = true;
+    }
+
+    /// Reduced mode redraws known-size progress at most twice a second.
+    pub fn allow_progress_redraw(&mut self) -> bool {
+        if self.mode != MotionMode::Reduced {
+            return true;
+        }
+        let now = Instant::now();
+        if let Some(last) = self.last_progress_at
+            && now.saturating_duration_since(last) < PROGRESS_REDUCED
+        {
+            self.progress_pending = true;
+            self.progress_until = Some(last + PROGRESS_REDUCED);
+            return false;
+        }
+        self.last_progress_at = Some(now);
+        self.progress_pending = false;
+        self.progress_until = None;
+        true
+    }
+
+    pub fn has_progress_visuals(&self) -> bool {
+        !self.progress.is_empty()
+    }
+
+    pub fn progress_visual(&self, job_key: &str) -> Option<(u32, u32, ProgressFill)> {
+        self.progress
+            .get(job_key)
+            .map(|visual| (visual.current, visual.total, visual.fill))
+    }
+
+    pub fn progress_entries(&self) -> Vec<(String, u32, u32, ProgressFill)> {
+        self.progress
+            .iter()
+            .map(|(key, visual)| (key.clone(), visual.current, visual.total, visual.fill))
+            .collect()
     }
 
     pub fn job_spinner_glyph(&self, glyphs: &Glyphs) -> &'static str {
@@ -1056,15 +1405,23 @@ impl Animator {
     }
 
     pub fn toast_slide(&self, toast: &Toast) -> u16 {
-        if !toast.sliding || !self.mode.allows_travel() {
+        if !self.mode.allows_travel() {
             return 0;
         }
-        let frame = toast.age.min(3);
-        match frame {
-            0 => TOAST_COLS.saturating_sub(2),
-            1 => TOAST_COLS / 2,
-            2 => TOAST_COLS / 6,
-            _ => 0,
+        match toast.phase {
+            ToastPhase::Hold => 0,
+            ToastPhase::In => match toast.age.min(3) {
+                0 => TOAST_COLS.saturating_sub(2),
+                1 => TOAST_COLS / 2,
+                2 => TOAST_COLS / 6,
+                _ => 0,
+            },
+            ToastPhase::Out => {
+                let last = TOAST_OUT_FRAMES.saturating_sub(1).max(1);
+                let t = f64::from(toast.age.min(last)) / f64::from(last);
+                let eased = Easing::EaseInQuad.apply(t);
+                (eased * f64::from(TOAST_COLS.saturating_sub(2))).round() as u16
+            }
         }
     }
 }
@@ -1202,22 +1559,40 @@ pub fn radar_lines(
     } else {
         RADAR_ARROWS
     };
-    let trail1 = arrows[(index + 7) % 8];
-    let trail0 = arrows[(index + 6) % 8];
-    let now = arrows[index];
-    let top = if ascii { "+-+" } else { "╭─╮" };
-    let bot = if ascii { "+-+" } else { "╰─╯" };
     let core = if ascii { "O" } else { "◎" };
-    vec![
-        Line::from(Span::styled(format!(" {top}"), theme.rule)),
-        Line::from(vec![
-            Span::styled(format!(" │{core}│ "), theme.muted),
-            Span::styled(now, theme.heat2),
-            Span::styled(format!(" {trail1}"), theme.heat1),
-            Span::styled(format!(" {trail0}"), theme.heat0),
-        ]),
-        Line::from(Span::styled(format!(" {bot}"), theme.rule)),
-    ]
+    // 5×3 compass: previous two positions stay at their cells (heat1, heat0).
+    //  NW N  NE
+    //  W  ◎  E
+    //  SW S  SE
+    let compass = [
+        (2usize, 0usize), // N
+        (4, 0),           // NE
+        (4, 1),           // E
+        (4, 2),           // SE
+        (2, 2),           // S
+        (0, 2),           // SW
+        (0, 1),           // W
+        (0, 0),           // NW
+    ];
+    let mut grid = vec![(" ".to_string(), theme.muted); 15];
+    grid[7] = (core.to_string(), theme.muted);
+    for (dir, style) in [
+        (index, theme.heat2),
+        ((index + 7) % 8, theme.heat1),
+        ((index + 6) % 8, theme.heat0),
+    ] {
+        let (x, y) = compass[dir];
+        grid[y * 5 + x] = (arrows[dir].to_string(), style);
+    }
+    grid.chunks(5)
+        .map(|row| {
+            Line::from(
+                row.iter()
+                    .map(|(ch, style)| Span::styled(ch.clone(), *style))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect()
 }
 
 pub fn focus_style(view: Option<FrameView>, theme: &Theme) -> Style {
@@ -1227,7 +1602,7 @@ pub fn focus_style(view: Option<FrameView>, theme: &Theme) -> Style {
             .add_modifier(Modifier::BOLD)
             .add_modifier(Modifier::REVERSED),
         Some(1) => theme.accent.add_modifier(Modifier::BOLD),
-        _ => theme.accent.add_modifier(Modifier::BOLD),
+        _ => theme.accent,
     }
 }
 
@@ -1259,6 +1634,7 @@ pub enum ProgressFill {
     Running,
     Failed,
     CompleteFlash,
+    Complete,
 }
 
 pub fn progress_bar(
@@ -1278,6 +1654,7 @@ pub fn progress_bar(
     let active = matches!(fill, ProgressFill::Running);
     let failed = matches!(fill, ProgressFill::Failed);
     let complete_flash = matches!(fill, ProgressFill::CompleteFlash);
+    let complete = matches!(fill, ProgressFill::Complete);
     let exact = ratio * cells as f64;
     let filled = exact.floor() as usize;
     let frac = ((exact - exact.floor()) * 8.0).round() as usize;
@@ -1286,6 +1663,8 @@ pub fn progress_bar(
     for i in 0..cells {
         let (ch, style) = if complete_flash {
             ('█', theme.ok)
+        } else if complete {
+            ('█', theme.muted)
         } else if failed && (i as f64) >= exact {
             ('▒', theme.err)
         } else if i < filled {
@@ -1603,9 +1982,13 @@ mod tests {
                 let toast = animator.toasts().first().cloned().unwrap_or(Toast {
                     kind: ToastKind::Ok,
                     message: "ct done · 37 certs".into(),
-                    hold_ticks: 10,
+                    phase: if mode.allows_travel() {
+                        ToastPhase::In
+                    } else {
+                        ToastPhase::Hold
+                    },
                     age: 0,
-                    sliding: mode.allows_travel(),
+                    hold_until: Instant::now(),
                 });
                 if mode == MotionMode::Off {
                     vec![Line::from("message-line only")]
@@ -1696,71 +2079,155 @@ mod tests {
     }
 
     #[test]
-    fn per_tick_budget_cells_and_render_time() {
-        let theme = theme();
-        let glyphs = Glyphs::unicode();
-        let mut animator = Animator::new(MotionMode::Full);
-        animator.play(AnimKind::JobSpinner, "j1", Rect::new(0, 0, 1, 1));
-        animator.play(AnimKind::JobSpinner, "j2", Rect::new(1, 0, 1, 1));
-        animator.play(AnimKind::JobSpinner, "j3", Rect::new(2, 0, 1, 1));
-        animator.sync_agent(true);
-        let backend = TestBackend::new(120, 40);
-        let mut terminal = Terminal::new(backend).expect("terminal");
-        let mut times = Vec::new();
-        let mut prev = None;
-        for _ in 0..40 {
-            animator.advance();
-            let start = Instant::now();
-            terminal
-                .draw(|frame| {
-                    let area = frame.area();
-                    let line = Line::from(vec![
-                        Span::raw(animator.job_spinner_glyph(&glyphs)),
-                        Span::raw(" "),
-                        Span::raw(animator.job_spinner_glyph(&glyphs)),
-                        Span::raw(" "),
-                        Span::raw(animator.job_spinner_glyph(&glyphs)),
-                        Span::styled(animator.agent_glyph(&glyphs), animator.agent_style(&theme)),
-                    ]);
-                    frame.render_widget(ratatui::widgets::Paragraph::new(line), area);
-                })
-                .expect("draw");
-            times.push(start.elapsed());
-            let buffer = terminal.backend().buffer().clone();
-            if let Some(previous) = prev {
-                let bytes = diff_bytes(&previous, &buffer);
-                assert!(
-                    bytes <= 400,
-                    "animation tick wrote {bytes} bytes, budget is 400"
-                );
-            }
-            prev = Some(buffer);
-        }
-        times.sort();
-        let p99 = times[(times.len() * 99 / 100).min(times.len() - 1)];
-        assert!(
-            p99.as_millis() < 1 || p99.as_micros() < 1000,
-            "p99 render {p99:?} exceeds 1 ms"
-        );
-    }
-
-    fn diff_bytes(a: &ratatui::buffer::Buffer, b: &ratatui::buffer::Buffer) -> usize {
-        let area = a.area();
-        let mut bytes = 0usize;
-        for y in 0..area.height {
-            for x in 0..area.width {
-                let left = &a[(x, y)];
-                let right = &b[(x, y)];
-                if left.symbol() != right.symbol() || left.fg != right.fg || left.bg != right.bg {
-                    bytes += 8 + left.symbol().len() + right.symbol().len();
-                }
-            }
-        }
-        bytes
+    fn progress_unknown_total_has_no_bar() {
+        assert!(parse_known_progress("Querying DNS").is_none());
     }
 
     #[test]
-    fn progress_unknown_total_has_no_bar() {
-        assert!(parse_known_progress("Querying DNS").is_none());
+    fn reduced_spinner_is_static_ellipsis_with_no_interval() {
+        let mut animator = Animator::new(MotionMode::Reduced);
+        animator.sync_spinner("j", Rect::new(0, 0, 1, 1));
+        assert!(
+            !animator.wants_timer(),
+            "reduced must not hold a 60 ms timer"
+        );
+        assert!(matches!(animator.timer_need(), TimerNeed::Deadline(_)));
+        assert_eq!(animator.job_spinner_glyph(&Glyphs::unicode()), "…");
+        assert!(!animator.playing(AnimKind::JobSpinner));
+    }
+
+    #[test]
+    fn reduced_splash_is_one_static_frame_for_150ms() {
+        let mut animator = Animator::new(MotionMode::Reduced);
+        let start = Instant::now();
+        animator.start_splash("acme-phish", "TLP:AMBER");
+        assert!(animator.showing_splash());
+        assert!(!animator.wants_timer());
+        match animator.timer_need() {
+            TimerNeed::Deadline(at) => {
+                let wait = at.saturating_duration_since(start);
+                assert!(
+                    wait <= SPLASH_REDUCED + Duration::from_millis(20),
+                    "splash deadline {wait:?} exceeds 150 ms"
+                );
+                assert!(wait >= Duration::from_millis(100), "{wait:?}");
+            }
+            other => panic!("expected deadline, got {other:?}"),
+        }
+        let theme = theme();
+        let text = render_lines(
+            splash_lines(FrameView::last(10), "acme-phish", "TLP:AMBER", &theme),
+            48,
+            8,
+        );
+        assert!(text.contains("os-int"), "{text}");
+        animator.skip_splash();
+        assert!(!animator.showing_splash());
+    }
+
+    #[test]
+    fn reduced_progress_throttles_to_2hz() {
+        let mut animator = Animator::new(MotionMode::Reduced);
+        assert!(animator.allow_progress_redraw());
+        assert!(!animator.allow_progress_redraw());
+        match animator.timer_need() {
+            TimerNeed::Deadline(_) => {}
+            other => panic!("pending progress needs a deadline, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn toast_hold_uses_a_deadline_not_an_interval() {
+        let mut animator = Animator::new(MotionMode::Full);
+        animator.push_toast(ToastKind::Ok, "ct done · 37 certs");
+        assert!(animator.wants_timer(), "slide-in needs 60 ms");
+        for _ in 0..TOAST_IN_FRAMES {
+            animator.advance();
+        }
+        let toast = animator.toasts().first().expect("toast");
+        assert_eq!(toast.phase, ToastPhase::Hold);
+        assert!(
+            !animator.wants_timer(),
+            "static hold must drop the 60 ms interval"
+        );
+        assert!(matches!(animator.timer_need(), TimerNeed::Deadline(_)));
+    }
+
+    #[test]
+    fn toast_slide_out_is_three_ease_in_quad_frames() {
+        let mut animator = Animator::new(MotionMode::Full);
+        animator.push_toast(ToastKind::Ok, "ct done · 37 certs");
+        let mut toast = animator.toasts().first().cloned().expect("toast");
+        toast.phase = ToastPhase::Out;
+        toast.age = 0;
+        let a = animator.toast_slide(&toast);
+        toast.age = 1;
+        let b = animator.toast_slide(&toast);
+        toast.age = 2;
+        let c = animator.toast_slide(&toast);
+        assert!(a < b && b < c, "ease-in-quad pad {a} {b} {c}");
+        assert_eq!(c, TOAST_COLS.saturating_sub(2));
+    }
+
+    #[test]
+    fn concurrent_transitions_cap_at_one() {
+        let mut animator = Animator::new(MotionMode::Full);
+        animator.start_drawer();
+        animator.start_focus();
+        animator.start_graph_expand(2);
+        let transitions = animator
+            .anims
+            .iter()
+            .filter(|anim| is_transition(anim.kind))
+            .count();
+        assert_eq!(transitions, 1);
+    }
+
+    #[test]
+    fn complete_flash_then_muted_and_failed_remainder() {
+        let theme = theme();
+        let flash = render_lines(
+            vec![progress_bar(
+                100,
+                100,
+                &theme,
+                MotionMode::Full,
+                ProgressFill::CompleteFlash,
+            )],
+            20,
+            1,
+        );
+        let muted = render_lines(
+            vec![progress_bar(
+                100,
+                100,
+                &theme,
+                MotionMode::Full,
+                ProgressFill::Complete,
+            )],
+            20,
+            1,
+        );
+        let failed = render_lines(
+            vec![progress_bar(
+                54,
+                100,
+                &theme,
+                MotionMode::Full,
+                ProgressFill::Failed,
+            )],
+            20,
+            1,
+        );
+        assert!(flash.contains('█'), "{flash}");
+        assert!(muted.contains('█'), "{muted}");
+        assert!(failed.contains('▒'), "{failed}");
+        let mut animator = Animator::new(MotionMode::Full);
+        animator.complete_progress("prog:1", 8, 8);
+        let visual = animator.progress_visual("prog:1").expect("flash");
+        assert_eq!(visual.2, ProgressFill::CompleteFlash);
+        animator.fail_progress("prog:2", 4, 8);
+        let visual = animator.progress_visual("prog:2").expect("fail");
+        assert_eq!(visual.2, ProgressFill::Failed);
     }
 }

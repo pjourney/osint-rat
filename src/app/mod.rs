@@ -248,7 +248,7 @@ pub enum Overlay {
     Doctor,
     /// Inline `/` filter for the current table. Typing updates the board live.
     TableFilter { query: Input },
-    /// Palette `:theme` live cycle. Enter saves, Esc reverts.
+    /// Palette `:theme` live cycle. y saves, Esc reverts, Enter previews.
     ThemeCycle { original: String, index: usize },
 }
 
@@ -358,6 +358,8 @@ pub struct App {
     pub review_armed: bool,
     pub review_marks: Vec<usize>,
     pub board_zoomed: bool,
+    /// Last layout was the narrow Inspector drawer. Resize animates only on a false→true edge.
+    drawer_narrow: bool,
     pub time_lens: bool,
     pub inspector_tab: InspectorTab,
     pub board_filter: String,
@@ -438,6 +440,7 @@ impl App {
             review_armed: false,
             review_marks: Vec::new(),
             board_zoomed: false,
+            drawer_narrow: false,
             time_lens: false,
             inspector_tab: InspectorTab::Props,
             board_filter: String::new(),
@@ -519,6 +522,9 @@ impl App {
                 .stop_kind(crate::tui::motion::AnimKind::JobSpinner);
             self.motion.stop_prefix("prog:");
         }
+        if !collector && !agent {
+            self.motion.clear_reduced_busy();
+        }
     }
 
     pub fn clear_graph_plus(&mut self) {
@@ -543,7 +549,7 @@ impl App {
     fn apply_theme_preview(&mut self, index: usize) {
         let name = Self::THEME_CYCLE[index % Self::THEME_CYCLE.len()];
         self.config.ui.theme = name.into();
-        self.status = format!("Theme {name} — Enter saves, Esc reverts.");
+        self.status = format!("Theme {name} — y saves, Esc reverts, Enter previews.");
         self.mark_dirty();
     }
 
@@ -850,8 +856,18 @@ impl App {
             Action::Quit => self.quit_or_close(),
             Action::Cancel => self.cancel(),
             Action::Tick => {
-                let effects = self.motion.advance();
-                debug_assert!(effects.iter().all(|effect| !effect.writes()));
+                for effect in self.motion.advance() {
+                    match effect {
+                        crate::tui::motion::TickEffect::Advanced
+                        | crate::tui::motion::TickEffect::SplashDone
+                        | crate::tui::motion::TickEffect::ToastExpired
+                        | crate::tui::motion::TickEffect::ConfirmPulseDone
+                        | crate::tui::motion::TickEffect::GraphRevealDone
+                        | crate::tui::motion::TickEffect::DrawerDone
+                        | crate::tui::motion::TickEffect::FocusDone => {}
+                    }
+                    debug_assert!(!effect.writes());
+                }
                 if self.motion.needs_redraw() {
                     self.mark_dirty();
                 }
@@ -914,13 +930,11 @@ impl App {
                 self.status = if self.board_zoomed {
                     "Board zoomed. Any key returns.".into()
                 } else {
-                    self.motion.start_drawer();
                     "Board restored.".into()
                 };
             }
             Action::Unzoom => {
                 self.board_zoomed = false;
-                self.motion.start_drawer();
             }
             Action::OpenObjectView => self.open_object_view(),
             Action::OpenGraph => {
@@ -1091,6 +1105,11 @@ impl App {
     }
 
     fn clear_board(&mut self) {
+        if self.motion.dismiss_failed_toasts() {
+            self.status = "Toast dismissed.".into();
+            self.mark_dirty();
+            return;
+        }
         let had_error = self.last_error.take();
         let had_filter = !self.board_filter.is_empty();
         self.board_filter.clear();
@@ -1102,13 +1121,20 @@ impl App {
         } else if self.is_time_lens() {
             self.clear_timeline_filter();
         }
-        self.motion.dismiss_failed_toasts();
         if had_error.is_some() {
             self.status = "Error dismissed.".into();
         } else if had_filter {
             self.status = "Filter cleared.".into();
             self.restore_board_selection();
         }
+    }
+
+    /// Animate the Inspector drawer only when the layout crosses into the narrow breakpoint.
+    pub fn on_resize(&mut self, narrow: bool) {
+        if narrow && !self.drawer_narrow && !self.board_zoomed {
+            self.motion.start_drawer();
+        }
+        self.drawer_narrow = narrow;
     }
 
     pub fn active_board_filter(&self) -> &str {
@@ -1459,7 +1485,10 @@ impl App {
             Overlay::Palette { query, selected } => {
                 let items = filtered(&query.value);
                 if let Some(command) = items.get(*selected).copied() {
-                    if command.writes {
+                    if command.id == "theme" {
+                        self.overlay = Overlay::None;
+                        self.run_command(command.id)?;
+                    } else if command.writes {
                         self.overlay = Overlay::Confirm {
                             title: command.title.to_string(),
                             message: format!(
@@ -2216,7 +2245,7 @@ impl App {
             self.require_open_marking()?;
         } else if id == "add_member" {
             self.require_open_team()?;
-        } else if id != "new_investigation" && Self::command_requires_write(id) {
+        } else if id != "new_investigation" && id != "theme" && Self::command_requires_write(id) {
             self.require_open_write()?;
         }
         match id {
@@ -2705,6 +2734,7 @@ impl App {
     }
 
     fn handle_job(&mut self, event: JobEvent) -> Result<()> {
+        let mut dirty = true;
         match event {
             JobEvent::Started { job_id } => {
                 if let Some(job) = self.job_records.get_mut(&job_id) {
@@ -2734,9 +2764,16 @@ impl App {
             }
             JobEvent::Progress { job_id, message } => {
                 if let Some(job) = self.job_records.get_mut(&job_id) {
-                    job.progress = Some(message);
+                    job.progress = Some(message.clone());
                     let _ = self.store.update_job(job);
+                    if let Some((current, total)) =
+                        crate::tui::motion::parse_known_progress(&message)
+                    {
+                        self.motion
+                            .update_progress(&format!("prog:{job_id}"), current, total);
+                    }
                 }
+                dirty = self.motion.allow_progress_redraw();
             }
             JobEvent::Command {
                 job_id,
@@ -2762,7 +2799,9 @@ impl App {
             }
         }
         self.touch_workspace();
-        self.mark_dirty();
+        if dirty {
+            self.mark_dirty();
+        }
         Ok(())
     }
 
@@ -2805,6 +2844,11 @@ impl App {
                 error_text = Some("cancelled".into());
             }
         }
+        let progress_pair = self.job_records.get(&job_id).and_then(|job| {
+            job.progress
+                .as_deref()
+                .and_then(crate::tui::motion::parse_known_progress)
+        });
         if let Some(job) = self.job_records.get_mut(&job_id) {
             job.status = status;
             job.finished_at = Some(now());
@@ -2815,6 +2859,14 @@ impl App {
                 job.error = Some(error);
             }
             self.store.update_job(job)?;
+        }
+        if let Some((current, total)) = progress_pair {
+            let key = format!("prog:{job_id}");
+            if status == JobStatus::Succeeded {
+                self.motion.complete_progress(&key, current, total);
+            } else {
+                self.motion.fail_progress(&key, current, total);
+            }
         }
         if let Some(error) = error_text {
             self.status = error.clone();

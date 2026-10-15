@@ -10,7 +10,7 @@ mod table;
 mod theme;
 mod widgets;
 
-pub use motion::{Animator, MotionMode, TICK, TICK_MS};
+pub use motion::{Animator, MotionMode, TICK, TICK_MS, TimerNeed};
 pub use preview::render_preview;
 pub use theme::{ColorDepth, ColorMode, TerminalEnv, Theme, ThemeName};
 
@@ -54,7 +54,12 @@ async fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()>
     tokio::pin!(shutdown);
     app.mark_dirty();
     while !app.should_quit {
-        sync_motion_timer(&mut ticker, app.motion.wants_timer());
+        let need = app.motion.timer_need();
+        sync_motion_timer(&mut ticker, matches!(need, motion::TimerNeed::Interval));
+        let deadline = match need {
+            motion::TimerNeed::Deadline(at) => Some(at),
+            _ => None,
+        };
         if app.dirty {
             terminal
                 .draw(|frame| draw(frame, app))
@@ -65,19 +70,24 @@ async fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()>
             event = events.next() => {
                 match event {
                     Some(Ok(Event::Key(key))) => {
-                        if app.motion.showing_splash() {
-                            app.motion.skip_splash();
-                            app.mark_dirty();
-                            continue;
-                        }
-                        if let Some(action) = keymap::map_key(
+                        let action = keymap::map_key(
                             key,
                             &app.overlay,
                             app.view,
                             app.is_editing(),
                             app.review_armed,
                             app.board_zoomed,
-                        ) {
+                        );
+                        if matches!(action, Some(Action::Quit)) {
+                            dispatch(app, Action::Quit);
+                            continue;
+                        }
+                        if app.motion.showing_splash() {
+                            app.motion.skip_splash();
+                            app.mark_dirty();
+                            continue;
+                        }
+                        if let Some(action) = action {
                             dispatch(app, action);
                             if let Err(error) = run_external_editor(terminal, app) {
                                 app.status = error.to_string();
@@ -85,8 +95,8 @@ async fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()>
                             }
                         }
                     }
-                    Some(Ok(Event::Resize(_, _))) => {
-                        app.motion.start_drawer();
+                    Some(Ok(Event::Resize(width, _))) => {
+                        app.on_resize(width < screens::INSPECTOR_BREAK);
                         app.mark_dirty();
                     }
                     Some(Ok(Event::Paste(text))) => {
@@ -110,6 +120,9 @@ async fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()>
             _ = tick_optional(&mut ticker) => {
                 dispatch(app, Action::Tick);
             }
+            _ = sleep_deadline(deadline) => {
+                dispatch(app, Action::Tick);
+            }
             _ = &mut shutdown => {
                 app.should_quit = true;
             }
@@ -119,9 +132,9 @@ async fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()>
     Ok(())
 }
 
-/// Create the 60 ms interval when the first animation starts; drop it when the last one finishes.
-fn sync_motion_timer(ticker: &mut Option<tokio::time::Interval>, wants_timer: bool) {
-    if wants_timer {
+/// Create the 60 ms interval when the first Full-motion frame needs it; drop it otherwise.
+fn sync_motion_timer(ticker: &mut Option<tokio::time::Interval>, wants_interval: bool) {
+    if wants_interval {
         if ticker.is_none() {
             let mut interval = tokio::time::interval(TICK);
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -137,6 +150,18 @@ async fn tick_optional(ticker: &mut Option<tokio::time::Interval>) {
     match ticker.as_mut() {
         Some(interval) => {
             interval.tick().await;
+        }
+        None => std::future::pending::<()>().await,
+    }
+}
+
+async fn sleep_deadline(at: Option<std::time::Instant>) {
+    match at {
+        Some(instant) => {
+            let now = std::time::Instant::now();
+            if instant > now {
+                tokio::time::sleep(instant.saturating_duration_since(now)).await;
+            }
         }
         None => std::future::pending::<()>().await,
     }
@@ -238,12 +263,13 @@ pub fn draw(frame: &mut Frame, app: &App) {
     constraints.push(Constraint::Length(1));
     let rows = Layout::vertical(constraints).split(area);
     draw_header(frame, rows[0], app, &theme);
-    if app.view == View::Welcome {
+    let board = if app.view == View::Welcome {
         screens::welcome(frame, rows[1], app, &theme);
+        rows[1]
     } else {
-        screens::workspace(frame, rows[1], app, &theme);
-    }
-    draw_toasts(frame, rows[1], app, &theme);
+        screens::workspace(frame, rows[1], app, &theme)
+    };
+    draw_toasts(frame, board, app, &theme);
     let mut row = 2;
     if armed {
         draw_confirm_bar(frame, rows[row], app, &theme);
@@ -1224,6 +1250,341 @@ mod tests {
             wrote.is_empty(),
             "wrote snapshots; re-run to confirm: {}",
             wrote.join(", ")
+        );
+    }
+
+    #[test]
+    fn theme_cycle_enter_previews_y_saves() {
+        let (directory, mut app) = test_app();
+        let config_path = directory.path().join("config.toml");
+        app.config.ui.theme = "dark".into();
+        app.dispatch(Action::Command("theme")).expect("theme");
+        assert!(matches!(
+            app.overlay,
+            crate::app::Overlay::ThemeCycle { .. }
+        ));
+        app.dispatch(Action::Move(1)).expect("preview light");
+        assert_eq!(app.config.ui.theme, "light");
+        assert!(
+            keymap::map_key(
+                press(crossterm::event::KeyCode::Enter),
+                &app.overlay,
+                app.view,
+                app.is_editing(),
+                app.review_armed,
+                app.board_zoomed,
+            )
+            .is_none()
+        );
+        assert!(
+            !std::fs::read_to_string(&config_path)
+                .unwrap_or_default()
+                .contains("theme = \"light\"")
+        );
+        dispatch_key(&mut app, press(crossterm::event::KeyCode::Char('y')));
+        assert_eq!(app.overlay, crate::app::Overlay::None);
+        let saved = std::fs::read_to_string(&config_path).expect("saved config");
+        assert!(saved.contains("theme = \"light\""), "{saved}");
+    }
+
+    #[test]
+    fn palette_theme_opens_cycle_without_confirm() {
+        let (_directory, mut app) = test_app();
+        app.dispatch(Action::Palette).expect("palette");
+        if let crate::app::Overlay::Palette { query, selected } = &mut app.overlay {
+            query.set("theme");
+            *selected = 0;
+        }
+        let hits = crate::app::commands::filtered("theme");
+        assert_eq!(hits[0].id, "theme");
+        assert!(hits[0].writes);
+        dispatch_key(&mut app, press(crossterm::event::KeyCode::Enter));
+        assert!(
+            matches!(app.overlay, crate::app::Overlay::ThemeCycle { .. }),
+            "{:?}",
+            app.overlay
+        );
+    }
+
+    #[test]
+    fn x_on_toast_does_not_clear_the_filter() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenEntities).expect("entities");
+        app.board_filter = "kind:ip".into();
+        app.motion = crate::tui::Animator::new(crate::tui::MotionMode::Full);
+        app.motion
+            .push_toast(motion::ToastKind::Err, "ct failed — timeout");
+        app.dispatch(Action::ClearBoard).expect("dismiss toast");
+        assert_eq!(app.board_filter, "kind:ip");
+        assert!(app.motion.toasts().is_empty());
+        app.dispatch(Action::ClearBoard).expect("clear filter");
+        assert!(app.board_filter.is_empty());
+    }
+
+    #[test]
+    fn unzoom_and_repeat_narrow_resize_do_not_restart_the_drawer() {
+        let (_directory, mut app) = snapshot_app();
+        app.motion = crate::tui::Animator::new(crate::tui::MotionMode::Full);
+        app.on_resize(true);
+        assert!(app.motion.playing(motion::AnimKind::Drawer));
+        for _ in 0..8 {
+            let _ = app.dispatch(Action::Tick);
+        }
+        assert!(!app.motion.playing(motion::AnimKind::Drawer));
+        app.on_resize(true);
+        assert!(
+            !app.motion.playing(motion::AnimKind::Drawer),
+            "still-narrow resize must not restart the drawer"
+        );
+        app.board_zoomed = true;
+        app.dispatch(Action::Unzoom).expect("unzoom");
+        assert!(!app.board_zoomed);
+        assert!(
+            !app.motion.playing(motion::AnimKind::Drawer),
+            "unzoom must not restart the drawer"
+        );
+    }
+
+    #[test]
+    fn ctrl_c_maps_to_quit_while_an_overlay_is_open() {
+        let overlay = crate::app::Overlay::ThemeCycle {
+            original: "dark".into(),
+            index: 0,
+        };
+        let key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('c'),
+            crossterm::event::KeyModifiers::CONTROL,
+        );
+        assert!(matches!(
+            keymap::map_key(key, &overlay, View::Overview, false, false, false),
+            Some(Action::Quit)
+        ));
+    }
+
+    #[test]
+    fn toasts_sit_on_the_board_not_the_inspector() {
+        let (_directory, mut app) = snapshot_app();
+        app.motion = crate::tui::Animator::new(crate::tui::MotionMode::Reduced);
+        app.motion
+            .push_toast(motion::ToastKind::Ok, "ct done · 37 certs");
+        let screen = render_snapshot(&app, 140, 40);
+        let toast_col = screen
+            .lines()
+            .find_map(|line| line.find("ct done"))
+            .unwrap_or_else(|| panic!("toast missing\n{screen}"));
+        let inspector = screen
+            .lines()
+            .find_map(|line| line.find("Props").or_else(|| line.find("Inspector")))
+            .unwrap_or(140 - 44);
+        assert!(
+            toast_col < inspector,
+            "toast column {toast_col} covers inspector at {inspector}\n{screen}"
+        );
+    }
+
+    #[test]
+    fn cockpit_motion_first_mid_last_goldens() {
+        let (_directory, mut app) = snapshot_app();
+        app.config.ui.theme = "mono".into();
+        app.config.ui.color = "none".into();
+        app.motion = crate::tui::Animator::new(crate::tui::MotionMode::Full);
+        let mut wrote = Vec::new();
+        app.motion.start_splash("acme-phish", "TLP:AMBER");
+        wrote.extend(assert_screen_snapshot("motion_m1_first", &app, 80, 24));
+        app.motion = app.motion.freeze_at(5);
+        wrote.extend(assert_screen_snapshot("motion_m1_mid", &app, 80, 24));
+        app.motion = app.motion.freeze_at(9);
+        wrote.extend(assert_screen_snapshot("motion_m1_last", &app, 80, 24));
+        app.motion.skip_splash();
+        app.on_resize(true);
+        wrote.extend(assert_screen_snapshot("motion_m6_first", &app, 80, 24));
+        app.motion = app.motion.freeze_at(2);
+        wrote.extend(assert_screen_snapshot("motion_m6_mid", &app, 80, 24));
+        app.motion = app.motion.freeze_at(3);
+        wrote.extend(assert_screen_snapshot("motion_m6_last", &app, 80, 24));
+        app.motion = crate::tui::Animator::new(crate::tui::MotionMode::Full);
+        app.motion
+            .push_toast(motion::ToastKind::Ok, "ct done · 37 certs");
+        wrote.extend(assert_screen_snapshot("motion_m8_first", &app, 140, 40));
+        app.motion = app.motion.freeze_at(2);
+        wrote.extend(assert_screen_snapshot("motion_m8_mid", &app, 140, 40));
+        app.motion = app.motion.freeze_at(3);
+        wrote.extend(assert_screen_snapshot("motion_m8_last", &app, 140, 40));
+        assert!(
+            wrote.is_empty(),
+            "wrote snapshots; re-run to confirm: {}",
+            wrote.join(", ")
+        );
+    }
+
+    fn seed_jobs(app: &mut App) {
+        use crate::model::{JobRecord, JobStatus, now};
+        let investigation_id = app.workspace.as_ref().map(|workspace| workspace.id());
+        for (seq, (kind, label, progress)) in [
+            ("collector:dns", "DNS", "crt.sh page 2/8"),
+            ("collector:ct", "CT", "page 3/8"),
+            ("collector:whois", "WHOIS", "1/1"),
+            ("agent", "Claude", "thinking"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let job = JobRecord {
+                id: uuid::Uuid::new_v4(),
+                investigation_id,
+                seq: seq as i64 + 1,
+                kind: kind.into(),
+                label: label.into(),
+                description: progress.into(),
+                status: JobStatus::Running,
+                program: None,
+                args: Vec::new(),
+                created_at: now(),
+                started_at: Some(now()),
+                finished_at: None,
+                progress: Some(progress.into()),
+                log: String::new(),
+                stderr: String::new(),
+                result: None,
+                error: None,
+                page_id: None,
+            };
+            app.job_records.insert(job.id, job);
+        }
+        app.sync_motion();
+        app.mark_dirty();
+    }
+
+    #[test]
+    fn cockpit_tick_writes_at_most_400_crossterm_bytes() {
+        use std::cell::Cell;
+        use std::io::{self, Write};
+        use std::rc::Rc;
+
+        use ratatui::backend::{Backend, ClearType, CrosstermBackend, WindowSize};
+        use ratatui::layout::{Position, Size};
+
+        #[derive(Clone)]
+        struct Counter(Rc<Cell<usize>>);
+
+        struct CountingWriter(Counter);
+        impl Write for CountingWriter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.0.0.set(self.0.0.get() + buf.len());
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        struct SizedCrossterm {
+            inner: CrosstermBackend<CountingWriter>,
+            width: u16,
+            height: u16,
+        }
+        impl Backend for SizedCrossterm {
+            type Error = io::Error;
+            fn draw<'a, I>(&mut self, content: I) -> io::Result<()>
+            where
+                I: Iterator<Item = (u16, u16, &'a ratatui::buffer::Cell)>,
+            {
+                self.inner.draw(content)
+            }
+            fn hide_cursor(&mut self) -> io::Result<()> {
+                self.inner.hide_cursor()
+            }
+            fn show_cursor(&mut self) -> io::Result<()> {
+                self.inner.show_cursor()
+            }
+            fn get_cursor_position(&mut self) -> io::Result<Position> {
+                self.inner.get_cursor_position()
+            }
+            fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> io::Result<()> {
+                self.inner.set_cursor_position(position)
+            }
+            fn clear(&mut self) -> io::Result<()> {
+                self.inner.clear()
+            }
+            fn clear_region(&mut self, clear_type: ClearType) -> io::Result<()> {
+                self.inner.clear_region(clear_type)
+            }
+            fn size(&self) -> io::Result<Size> {
+                Ok(Size::new(self.width, self.height))
+            }
+            fn window_size(&mut self) -> io::Result<WindowSize> {
+                Ok(WindowSize {
+                    columns_rows: Size::new(self.width, self.height),
+                    pixels: Size::new(0, 0),
+                })
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Backend::flush(&mut self.inner)
+            }
+        }
+
+        let (_directory, mut app) = snapshot_app();
+        app.config.ui.theme = "dark".into();
+        app.config.ui.color = "truecolor".into();
+        app.motion = crate::tui::Animator::new(crate::tui::MotionMode::Full);
+        seed_jobs(&mut app);
+        let counter = Counter(Rc::new(Cell::new(0)));
+        let backend = SizedCrossterm {
+            inner: CrosstermBackend::new(CountingWriter(counter.clone())),
+            width: 120,
+            height: 40,
+        };
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let ticks = 40usize;
+        for i in 0..ticks {
+            let _ = app.dispatch(Action::Tick);
+            counter.0.set(0);
+            terminal
+                .draw(|frame| draw(frame, &app))
+                .expect("cockpit draw");
+            let bytes = counter.0.get();
+            if i >= 2 {
+                assert!(
+                    bytes <= 400,
+                    "tick {i} wrote {bytes} crossterm bytes, budget is 400"
+                );
+            }
+        }
+    }
+
+    /// CI threshold: p99 render ≤ 1 ms and ≤ 2% of one core at 120×40 with 3 jobs + the agent.
+    /// Run with `cargo test cockpit_cpu_budget_two_percent -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "CI threshold: p99 ≤ 1 ms and ≤ 2% of one core over N 60 ms ticks at 120×40 with 3 jobs + agent"]
+    fn cockpit_cpu_budget_two_percent() {
+        let (_directory, mut app) = snapshot_app();
+        app.motion = crate::tui::Animator::new(crate::tui::MotionMode::Full);
+        seed_jobs(&mut app);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let ticks = 80usize;
+        let mut times = Vec::new();
+        let start = std::time::Instant::now();
+        for _ in 0..ticks {
+            let _ = app.dispatch(Action::Tick);
+            let tick_start = std::time::Instant::now();
+            terminal
+                .draw(|frame| draw(frame, &app))
+                .expect("cockpit draw");
+            times.push(tick_start.elapsed());
+        }
+        let elapsed = start.elapsed();
+        times.sort();
+        let p99 = times[(times.len() * 99 / 100).min(times.len() - 1)];
+        let budget = TICK * ticks as u32 * 2 / 100;
+        assert!(
+            p99.as_millis() < 1 || p99.as_micros() < 1000,
+            "p99 cockpit render {p99:?} exceeds 1 ms (CI threshold)"
+        );
+        assert!(
+            elapsed <= budget,
+            "CPU {elapsed:?} over {ticks} ticks exceeds 2% of one core ({budget:?}). \
+             Documented CI threshold: ≤ 2% at 120×40 with 3 jobs + agent."
         );
     }
 }

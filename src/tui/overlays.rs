@@ -230,7 +230,7 @@ fn theme_cycle(frame: &mut Frame, area: Rect, original: &str, index: usize, them
     frame.render_widget(Clear, popup);
     let mut lines = vec![
         Line::from(Span::styled(
-            "Palette :theme — live preview. Enter saves, Esc reverts.",
+            "Palette :theme — live preview. y saves, Esc reverts, Enter previews.",
             theme.muted,
         )),
         Line::from(""),

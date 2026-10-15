@@ -212,7 +212,7 @@ Gradients interpolate in **OKLab** between the four `heat` stops and are quantis
 3. the colour-blind ΔE table;
 4. the detected colour depth and why (`COLORTERM=truecolor`).
 
-`os-int theme preview --all` stacks all five themes. In the TUI, palette `:theme` cycles themes live, `Enter` saves to config and `Esc` reverts. This command is also the snapshot fixture for UI tests.
+`os-int theme preview --all` stacks all five themes. In the TUI, palette `:theme` cycles themes live, `y` saves to config, `Esc` reverts, and `Enter` previews. This command is also the snapshot fixture for UI tests.
 
 
 ### Glyphs (Unicode; no Nerd Fonts; `ui.ascii = true` gives the fallback)
