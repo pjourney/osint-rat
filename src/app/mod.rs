@@ -9,6 +9,7 @@
 
 pub mod action;
 pub mod commands;
+pub mod filter;
 pub mod graph;
 pub mod input;
 pub mod resolution;
@@ -244,14 +245,8 @@ pub enum Overlay {
     },
     /// The same checks `os-int doctor` prints.
     Doctor,
-    /// Actions proposed by one agent run. Shift+A arms; `y` accepts.
-    Proposals {
-        run_id: Uuid,
-        selected: usize,
-        armed: bool,
-    },
-    /// Scored resolution suggestions. Enter proposes; nothing auto-merges.
-    Suggestions { selected: usize },
+    /// Inline `/` filter for the current table. Typing updates the board live.
+    TableFilter { query: Input },
 }
 
 /// Which form [`Overlay::Form`] is editing. The field list is built to match the kind.
@@ -362,6 +357,7 @@ pub struct App {
     pub board_zoomed: bool,
     pub time_lens: bool,
     pub inspector_tab: InspectorTab,
+    pub board_filter: String,
     pub status: String,
     pub dirty: bool,
     pub should_quit: bool,
@@ -420,6 +416,7 @@ impl App {
             board_zoomed: false,
             time_lens: false,
             inspector_tab: InspectorTab::Props,
+            board_filter: String::new(),
             status: "Press [?] for help, Ctrl+K for commands.".into(),
             dirty: true,
             should_quit: false,
@@ -717,12 +714,8 @@ impl App {
                     selected: 0,
                 }
             }
-            Action::Search => {
-                self.overlay = Overlay::Search {
-                    query: Input::default(),
-                    selected: 0,
-                }
-            }
+            Action::Search => self.open_search_or_filter(),
+            Action::ClearBoard => self.clear_board(),
             Action::AskAgent => {
                 self.require_open_write()?;
                 self.open_agent_prompt();
@@ -857,12 +850,11 @@ impl App {
             Overlay::Form(_)
             | Overlay::Palette { .. }
             | Overlay::Search { .. }
+            | Overlay::TableFilter { .. }
             | Overlay::AgentPrompt { .. }
             | Overlay::Help
             | Overlay::Text { .. }
-            | Overlay::Doctor
-            | Overlay::Proposals { .. }
-            | Overlay::Suggestions { .. } => {
+            | Overlay::Doctor => {
                 self.overlay = Overlay::None;
             }
         }
@@ -910,6 +902,110 @@ impl App {
         };
     }
 
+    fn view_uses_table_filter(view: View) -> bool {
+        matches!(
+            view,
+            View::Entities
+                | View::Evidence
+                | View::Jobs
+                | View::Tools
+                | View::Audit
+                | View::Artifacts
+                | View::Findings
+                | View::Sources
+                | View::Notes
+                | View::Pages
+        )
+    }
+
+    fn open_search_or_filter(&mut self) {
+        if Self::view_uses_table_filter(self.view) && !self.is_time_lens() {
+            self.overlay = Overlay::TableFilter {
+                query: Input::new(self.board_filter.clone()),
+            };
+            self.status = "Filter: kind:ip src:ct prov:ai   Enter apply   x clear".into();
+            return;
+        }
+        self.overlay = Overlay::Search {
+            query: Input::default(),
+            selected: 0,
+        };
+    }
+
+    fn clear_board(&mut self) {
+        let had_error = self.last_error.take();
+        let had_filter = !self.board_filter.is_empty();
+        self.board_filter.clear();
+        if matches!(self.overlay, Overlay::TableFilter { .. }) {
+            self.overlay = Overlay::None;
+        }
+        if self.view == View::Graph {
+            self.clear_graph_filters();
+        } else if self.is_time_lens() {
+            self.clear_timeline_filter();
+        }
+        if had_error.is_some() {
+            self.status = "Error dismissed.".into();
+        } else if had_filter {
+            self.status = "Filter cleared.".into();
+            self.selected = 0;
+            self.sync_board_selection();
+        }
+    }
+
+    pub fn active_board_filter(&self) -> &str {
+        if let Overlay::TableFilter { query } = &self.overlay {
+            query.value.as_str()
+        } else {
+            self.board_filter.as_str()
+        }
+    }
+
+    pub fn parsed_board_filter(&self) -> filter::TableFilter {
+        filter::TableFilter::parse(self.active_board_filter())
+    }
+
+    pub fn effective_sort(&self) -> Option<(filter::SortKey, bool)> {
+        self.parsed_board_filter().sort
+    }
+
+    fn set_error(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        self.last_error = Some(message.clone());
+        self.status = message;
+    }
+
+    fn select_tool_row(&mut self) {
+        let Some(entry) = self.tools.tools().get(self.selected) else {
+            return;
+        };
+        let name = entry.definition.name.clone();
+        let refused = entry.definition.activity == Activity::Active
+            || entry
+                .problem
+                .as_deref()
+                .is_some_and(|problem| problem.contains("refused"));
+        if refused {
+            let reason = entry
+                .problem
+                .clone()
+                .unwrap_or_else(|| "os-int observes public information only".into());
+            let mark = if self.config.ui.ascii { "no" } else { "⊘" };
+            self.set_error(format!(
+                "{mark} {name}  {}  refused: {reason}",
+                entry.definition.activity.as_str()
+            ));
+            return;
+        }
+        self.overlay = Overlay::Confirm {
+            title: format!("Run {name}"),
+            message: format!(
+                "Run {name}? This writes case data. Press y to confirm. Enter never runs a tool."
+            ),
+            command: format!("run_tool:{name}"),
+        };
+    }
+
     fn switch_view(&mut self, view: View) {
         if self.workspace.is_none() && !matches!(view, View::Welcome | View::Settings | View::Tools)
         {
@@ -921,7 +1017,10 @@ impl App {
         }
         self.review_armed = false;
         self.review_marks.clear();
-        if view != View::Evidence && view != View::Timeline && view != View::Graph {
+        if !matches!(
+            view,
+            View::Evidence | View::Timeline | View::Graph | View::Entities
+        ) {
             self.time_lens = false;
         }
         if !matches!(
@@ -969,7 +1068,9 @@ impl App {
             }
             View::Evidence => "Evidence. t toggles the time lens. Enter never writes.".into(),
             View::Graph => "Graph. t toggles the time lens. s Search Around.".into(),
-            View::Entities => "Entities. Space marks. m proposes a merge to Review.".into(),
+            View::Entities => {
+                "Entities. t toggles the time lens. Space marks. m proposes a merge.".into()
+            }
             View::Jobs => "Jobs. Enter opens the selected job. Cancel is in the palette.".into(),
             View::Tools => "Tools. Enter opens a y-confirm. Active tools stay refused.".into(),
             other => format!("{} — Enter opens. It never writes.", other.title()),
@@ -995,16 +1096,6 @@ impl App {
         } else {
             None
         };
-        let proposal_count = if let Overlay::Proposals { run_id, .. } = &self.overlay {
-            Some(self.pending_proposals(*run_id).len().max(1))
-        } else {
-            None
-        };
-        let suggestion_count = if matches!(self.overlay, Overlay::Suggestions { .. }) {
-            Some(self.listed_suggestions().len().max(1))
-        } else {
-            None
-        };
         match &mut self.overlay {
             Overlay::Palette { selected, query } => {
                 let count = filtered(&query.value).len().max(1);
@@ -1018,14 +1109,6 @@ impl App {
                 let count = form.fields.len().max(1);
                 form.index = (form.index as i32 + delta).rem_euclid(count as i32) as usize;
             }
-            Overlay::Proposals { selected, .. } => {
-                let count = proposal_count.unwrap_or(1);
-                *selected = (*selected as i32 + delta).rem_euclid(count as i32) as usize;
-            }
-            Overlay::Suggestions { selected } => {
-                let count = suggestion_count.unwrap_or(1);
-                *selected = (*selected as i32 + delta).rem_euclid(count as i32) as usize;
-            }
             Overlay::Text { scroll, .. } => {
                 *scroll = add_scroll(*scroll, delta);
             }
@@ -1037,6 +1120,7 @@ impl App {
                 self.selected = (self.selected as i32 + delta).rem_euclid(WELCOME_CHOICES) as usize;
             }
             Overlay::None
+            | Overlay::TableFilter { .. }
             | Overlay::AgentPrompt { .. }
             | Overlay::Confirm { .. }
             | Overlay::Doctor => {
@@ -1051,7 +1135,8 @@ impl App {
                 } else if self.view == View::Graph && !self.time_lens {
                     self.move_graph_selection(delta);
                 } else if self.view == View::Timeline
-                    || (self.time_lens && matches!(self.view, View::Evidence | View::Graph))
+                    || (self.time_lens
+                        && matches!(self.view, View::Evidence | View::Graph | View::Entities))
                 {
                     let count = self.timeline_list_len().max(1);
                     self.selected =
@@ -1079,6 +1164,7 @@ impl App {
                 .as_ref()
                 .map(|workspace| workspace.data.pages.len())
                 .unwrap_or(0),
+            View::Entities if self.time_lens => self.timeline_list_len(),
             View::Entities => self.listed_entities().len(),
             View::Evidence if self.time_lens => self.timeline_list_len(),
             View::Evidence => self.listed_evidence().len(),
@@ -1118,6 +1204,7 @@ impl App {
                     self.page_id = Some(page.id);
                 }
             }
+            View::Entities if self.time_lens => self.sync_timeline_selection(),
             View::Entities => {
                 if let Some(entity) = self.listed_entities().get(self.selected) {
                     self.entity_id = Some(entity.id);
@@ -1187,9 +1274,11 @@ impl App {
                     self.open_hit(&hit);
                 }
             }
-            Overlay::Suggestions { .. } => {
+            Overlay::TableFilter { query } => {
+                self.board_filter = query.value.clone();
                 self.overlay = Overlay::None;
-                self.open_review_lane();
+                self.selected = 0;
+                self.sync_board_selection();
             }
             Overlay::None if self.view == View::Welcome => match self.selected {
                 0 => self.open_new()?,
@@ -1232,16 +1321,7 @@ impl App {
             return;
         }
         if self.view == View::Tools {
-            if let Some(entry) = self.tools.tools().get(self.selected) {
-                let name = entry.definition.name.clone();
-                self.overlay = Overlay::Confirm {
-                    title: format!("Run {name}"),
-                    message: format!(
-                        "Run {name}? This writes case data. Press y to confirm. Enter never runs a tool."
-                    ),
-                    command: format!("run_tool:{name}"),
-                };
-            }
+            self.select_tool_row();
             return;
         }
         if self.view == View::Jobs {
@@ -1522,7 +1602,7 @@ impl App {
             self.overlay = Overlay::Form(form);
             return Ok(());
         }
-        if matches!(self.view, View::Notes | View::Overview | View::Evidence)
+        if self.workspace.is_some()
             && let Some(page) = self.current_page().cloned()
         {
             return self.open_external_editor(&page);
@@ -1532,6 +1612,8 @@ impl App {
                 FormKind::NewNote,
                 vec![field("Notes", &page.notes, "Markdown")],
             ));
+        } else {
+            self.status = "Select a target first, then press e to edit notes in $EDITOR.".into();
         }
         Ok(())
     }
@@ -2019,6 +2101,9 @@ impl App {
                 query.insert(ch);
                 *selected = 0;
             }
+            Overlay::TableFilter { query } => {
+                query.insert(ch);
+            }
             Overlay::AgentPrompt { input } => input.insert(ch),
             Overlay::Form(form) => {
                 if let Some(field) = form.current_mut() {
@@ -2027,6 +2112,7 @@ impl App {
             }
             _ => {}
         }
+        self.sync_table_filter();
     }
 
     fn backspace(&mut self) {
@@ -2050,7 +2136,9 @@ impl App {
 
     fn with_input(&mut self, op: fn(&mut Input)) {
         match &mut self.overlay {
-            Overlay::Palette { query, .. } | Overlay::Search { query, .. } => op(query),
+            Overlay::Palette { query, .. }
+            | Overlay::Search { query, .. }
+            | Overlay::TableFilter { query } => op(query),
             Overlay::AgentPrompt { input } => op(input),
             Overlay::Form(form) => {
                 if let Some(field) = form.current_mut() {
@@ -2058,6 +2146,15 @@ impl App {
                 }
             }
             _ => {}
+        }
+        self.sync_table_filter();
+    }
+
+    fn sync_table_filter(&mut self) {
+        if let Overlay::TableFilter { query } = &self.overlay {
+            self.board_filter = query.value.clone();
+            self.selected = 0;
+            self.sync_board_selection();
         }
     }
 
@@ -2546,26 +2643,6 @@ impl App {
             self.status = format!("{} replied", self.agent.profile.name);
         }
         Ok(())
-    }
-
-    fn proposals_for(&self, run_id: Uuid) -> Vec<Proposal> {
-        self.workspace
-            .as_ref()
-            .map(|workspace| {
-                workspace
-                    .proposals_for_run(run_id)
-                    .into_iter()
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    fn pending_proposals(&self, run_id: Uuid) -> Vec<Proposal> {
-        self.proposals_for(run_id)
-            .into_iter()
-            .filter(|proposal| proposal.status == ProposalStatus::Pending)
-            .collect()
     }
 
     fn decide_proposal(&mut self, status: ProposalStatus) -> Result<()> {
@@ -3100,7 +3177,19 @@ impl App {
                 .iter()
                 .map(|source| EvidenceRow::Source(source.id)),
         );
+        let filter = self.parsed_board_filter();
+        rows.retain(|row| filter::evidence_row_matches(&filter, *row, workspace));
+        if let Some(sort) = self.effective_sort() {
+            rows.sort_by(|left, right| filter::cmp_evidence(*left, *right, workspace, sort));
+        }
         rows
+    }
+
+    pub fn unfiltered_evidence_count(&self) -> usize {
+        let Some(workspace) = self.workspace.as_ref() else {
+            return 0;
+        };
+        workspace.data.findings.len() + workspace.data.sources.len()
     }
 
     /// Jobs in the order the Jobs pane lists them: persisted rows, then live jobs not reloaded yet.
@@ -3144,6 +3233,7 @@ impl App {
             self.overlay,
             Overlay::Palette { .. }
                 | Overlay::Search { .. }
+                | Overlay::TableFilter { .. }
                 | Overlay::AgentPrompt { .. }
                 | Overlay::Form(_)
         )
@@ -3159,28 +3249,22 @@ impl App {
 
     fn spawn_tool(&mut self, name: &str) -> Result<()> {
         let Some(entry) = self.tools.find(name).cloned() else {
-            bail_status(&mut self.status, &format!("unknown tool {name}"));
+            self.set_error(format!("unknown tool {name}"));
             return Ok(());
         };
         if !entry.is_available() {
-            bail_status(
-                &mut self.status,
-                &format!(
-                    "{} is not available: {}",
-                    entry.definition.name,
-                    entry.problem.as_deref().unwrap_or("not found on PATH")
-                ),
-            );
+            self.set_error(format!(
+                "{} is not available: {}",
+                entry.definition.name,
+                entry.problem.as_deref().unwrap_or("not found on PATH")
+            ));
             return Ok(());
         }
         if entry.definition.activity == Activity::Active {
-            bail_status(
-                &mut self.status,
-                &format!(
-                    "{} is an active probe. os-int only runs passive observation and diagnostic tools.",
-                    entry.definition.name
-                ),
-            );
+            self.set_error(format!(
+                "{} is an active probe. os-int only runs passive observation and diagnostic tools.",
+                entry.definition.name
+            ));
             return Ok(());
         }
         self.spawn_tool_inner(entry)
@@ -3272,14 +3356,14 @@ impl App {
             Ok(()) => {
                 if !matches!(
                     self.overlay,
-                    Overlay::AgentPrompt { .. } | Overlay::Text { .. } | Overlay::Proposals { .. }
+                    Overlay::AgentPrompt { .. } | Overlay::Text { .. }
                 ) {
                     self.overlay = Overlay::None;
                 }
                 Ok(())
             }
             Err(error) => {
-                self.status = error.to_string();
+                self.set_error(error.to_string());
                 Ok(())
             }
         }
@@ -5672,6 +5756,42 @@ mod tests {
         assert!(app.job_records.is_empty());
         app.dispatch(Action::Cancel).expect("esc");
         assert_eq!(app.overlay, Overlay::None);
+        assert!(app.job_records.is_empty());
+    }
+
+    #[test]
+    fn tools_enter_on_an_active_tool_sets_error_and_does_not_enable() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Tools Refused");
+        app.config
+            .tools
+            .custom
+            .push(crate::config::ToolDefinitionConfig {
+                name: "nmap".into(),
+                program: "nmap".into(),
+                args: vec!["{target}".into()],
+                accepts: vec!["ip".into()],
+                description: "active probe".into(),
+                activity: "active".into(),
+                ..Default::default()
+            });
+        app.tools = Arc::new(crate::tools::ToolRegistry::detect(&app.config.tools));
+        app.dispatch(Action::OpenTools).expect("tools");
+        let index = app
+            .tools
+            .tools()
+            .iter()
+            .position(|entry| entry.definition.name == "nmap")
+            .expect("nmap listed");
+        app.pane = Pane::Main;
+        app.selected = index;
+        app.dispatch(Action::Select).expect("enter");
+        assert_eq!(app.overlay, Overlay::None, "no enable or confirm path");
+        let error = app.last_error.as_deref().unwrap_or("");
+        assert!(
+            error.contains("refused") || error.contains("nmap"),
+            "{error}"
+        );
         assert!(app.job_records.is_empty());
     }
 

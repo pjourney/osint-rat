@@ -151,6 +151,8 @@ With no subcommand, os-int opens the terminal interface on your last investigati
 
 An investigation screen is always three panes: **Rail**, **Board**, and **Inspector**. The Rail has six destinations on keys `1`–`6`: Case, Entities, Evidence, Graph, Review, Jobs. The Inspector is a 44-column side pane; below 110 columns it becomes a bottom drawer (40% height). It is never hidden. Below 80 columns the Rail collapses to digits. The minimum comfortable size is 80×24. `z` zooms the Board; any key returns.
 
+Entities and Evidence are real tables (column headers, display-width truncation, `/` filter). `/` accepts `kind:ip`, `src:ct`, `prov:ai`, `sort:-seen`, and free text. Every fact row shows a provenance glyph (`●` collected, `◇` original, `✎` analyst, `◆` accepted AI; ASCII: `C X A *`) and a source count. The Inspector Sources tab is the full source chain for the selected object. History is per-object. Empty boards show a hint, not a fake `(no …)` row. Loading uses skeleton rows. Errors stay in an inline panel until you dismiss them with `x`.
+
 ```text
 ┌ os-int ▸ Example Corp ▸ Case   TLP:AMBER            ◆ 0 to review  agent ● ──┐
 │ Rail         │ Board                              │ Inspector              │
@@ -213,8 +215,8 @@ Press `Ctrl+K` or `:`, then type to filter. Ingest, playbooks, tools, settings, 
 1. `n` on the welcome screen. Enter a name and an optional description. The description is used as the executive summary of a Markdown report.
 2. `n` again. Pick a page type with `Left` / `Right` and enter the target. The form shows an example for that type (`example.com`, `192.0.2.15`, `AS13335`, …).
 3. `c` on Case to collect on the selected target (passive collectors only).
-4. Open **Entities** (`2`) or **Evidence** (`3`). The Inspector shows the selected record (Props, Sources, Notes, History). Press `Enter` on an entity to open **Object View**. Press `g` to open **Graph**, then `s` to Search Around.
-5. `e` on Case edits the current page's notes in your editor (`ui.editor`, then `$VISUAL`, then `$EDITOR`, then `vi`). os-int suspends the terminal UI, runs the editor, and reloads the note when the editor exits. Notes also live on the Inspector Notes tab.
+4. Open **Entities** (`2`) or **Evidence** (`3`). Sort and filter with `/` (`kind:dom`, `prov:ai`, `sort:-seen`). The Inspector shows the selected record (Props, Sources, Notes, History). Sources lists the chain with provenance glyphs. History is scoped to that object. Press `Enter` on an entity to open **Object View**. Press `g` to open **Graph**, then `s` to Search Around.
+5. `e` edits the current page's notes in your editor (`ui.editor`, then `$VISUAL`, then `$EDITOR`, then `vi`) from Case, Entities (including the Notes tab), or Evidence. os-int suspends the terminal UI, runs the editor, and reloads the note when the editor exits. Notes also live on the Inspector Notes tab.
 6. Add a finding from the palette when you want to record a conclusion. Cite sources by short id (`S-1, S-4`). A finding you add this way is provenance `analyst`.
 
 ### From the shell
@@ -249,7 +251,7 @@ Graph is a terminal link-analysis canvas (TUI-first; there is no embedded webvie
 - Press `g`, pick **Graph** on the Rail (`4`), or run the palette command **Graph**. The seed is the current entity (Entities highlight, Object View, or the page's primary entity). If none is focused, the first entity is used. Opening Graph expands **1 hop**.
 - Press `s` or the palette command **Search Around** to expand **2 hops** from the current selection. On an open Graph, those hops **merge** into the canvas. From any other screen, Search Around opens Graph at 2 hops.
 - `+` / `-` change hop depth and re-query from the original seed (0–8). `hops` follows the last result's `hops_used`.
-- Press `t` to toggle the **time lens** on Graph or Evidence. The facet strip counts the unfiltered set by entity kind, top link types, and provenance. Palette **Previous facet** / **Next facet** / **Apply facet** move and apply a facet; `x` clears filters.
+- Press `t` to toggle the **time lens** on Graph, Evidence, or Entities. The facet strip counts the unfiltered set by entity kind, top link types, and provenance. Palette **Previous facet** / **Next facet** / **Apply facet** move and apply a facet; `x` clears filters.
 - Render caps are **200 nodes** and **400 edges**. Crossing either threshold warns and asks for confirm before the first 200 / 400 are drawn. A capped result is labelled in the status line.
 - `Enter` opens Object View for the selected node. `Esc` returns to the screen that opened Graph. The Entities table is unchanged: `Enter` there still opens Object View.
 
@@ -261,7 +263,7 @@ Resolved constituents are hidden: the graph shows **one node** for the canonical
 
 Time and place are first-class. The time lens overlays **collection log rows** (`T-n`) and **Event objects** (`C-n`) on Evidence and Graph. An Event is an instant when `ended_at` is absent, otherwise an interval. STIX `first_observed` / `last_observed` and Evidence Batch `events` import as Events. Observation-hash changes and diagnostic flips also promote Events (`change_intelligence` on the field bag). Agent-suggested findings still require accept.
 
-- Press `t` on Evidence or Graph, or the palette command **Open Timeline**.
+- Press `t` on Evidence, Graph, or Entities, or the palette command **Open Timeline**.
 - Palette **Previous facet** / **Next facet** / **Apply facet** filter the overlay by entity (resolution bags included). `x` clears the filter.
 - `Enter` on a row with a linked entity opens Object View. `Esc` returns to the same selection.
 - Palette **Nearby** lists entities that share a `country` or `prefix`. `Esc` restores the previous list and selection. Empty data does not crash.
@@ -753,7 +755,7 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `j` `k` or `↑` `↓` | normal, lists | Move the selection |
 | `PgUp` `PgDn` | normal | Move by 10 |
 | `Enter` | normal | Open or drill in. **Never writes.** |
-| `/` `Ctrl+F` | normal | Filter the current table, or search the case |
+| `/` `Ctrl+F` | tables | Filter inline: `kind:ip src:ct prov:ai sort:-seen` plus free text |
 | `Ctrl+K` `:` | normal | Command palette |
 | `a` | normal | Ask the agent. Results land in Review |
 | `n` | normal | New investigation, target, or finding |
@@ -761,10 +763,10 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `c` | normal | Collect on the selected target (passive collectors only) |
 | `g` | normal | Open the selection in Graph (1 hop) |
 | `s` | normal | Search Around (default 2 hops; merges on Graph) |
-| `t` | Evidence, Graph | Toggle the time lens |
+| `t` | Evidence, Graph, Entities | Toggle the time lens |
 | `+` `-` | Graph / time lens | More / fewer hops, or time bucket |
 | `x` | Review | Reject the highlighted item |
-| `x` | Graph, Evidence | Clear filters or the time lens |
+| `x` | tables, Graph, Evidence, Entities | Clear the filter, dismiss the error panel, or clear the time lens |
 | `Space` | Entities, Review | Mark a row |
 | `m` | Entities | Propose merge of marked rows → Review |
 | `z` | normal | Zoom the Board. Any key returns |
@@ -793,7 +795,7 @@ Inside a text field, letters insert text. They are not treated as commands until
 | `unknown collector` | Use `dns`, `rdap`, `http`, `tls`, `ct`, `ip`, `repository`, `file`, `email`, `username`, `subdomain`, or a configured external id. |
 | Repository collection is unavailable | Install `git`. `gh` is optional and only adds GitHub metadata. |
 | The agent runs but proposes nothing | You can still use the answer as reading. Proposals appear only when the reply contains an `os-int-actions` block. Accepting is a separate step. |
-| A custom tool never runs | Palette **Show Tools** and read the problem line. Typical causes: the program is not on `PATH`, `accepts` lists no known target kind, the argument template is invalid, or `activity` is `active`. Active tools show `⊘` refused with no enable option. |
+| A custom tool never runs | Palette **Show Tools**. Passive tools are listed as passive. Active tools show `⊘` (ASCII `no`) and `refused:` with the reason. There is no enable toggle. Typical causes: the program is not on `PATH`, `accepts` lists no known target kind, the argument template is invalid, or `activity` is `active`. |
 | The interface looks cramped | Widen the terminal. The Inspector is a side pane at 110 columns or more, and a bottom drawer below that. The minimum size is 80×24. |
 
 Logs are daily files under the data directory. Redact anything sensitive before you attach a log to a bug report. The [bug report template](../.github/ISSUE_TEMPLATE/bug_report.md) asks for `os-int doctor` output.

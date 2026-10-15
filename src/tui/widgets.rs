@@ -105,15 +105,67 @@ pub fn list_from<'a>(items: Vec<String>, selected: usize, theme: &Theme) -> List
     List::new(rows)
 }
 
-pub fn provenance_span(provenance: Provenance, theme: &Theme) -> Span<'static> {
-    let style = match provenance {
+pub fn provenance_style(provenance: Provenance, theme: &Theme) -> Style {
+    match provenance {
         Provenance::Agent => theme.ai,
         Provenance::Collected => theme.col,
         Provenance::External => theme.ext,
         Provenance::Analyst => theme.anl,
-    };
+    }
+}
+
+pub fn provenance_glyph(provenance: Provenance, theme: &Theme) -> Span<'static> {
+    Span::styled(
+        theme.glyphs.provenance(provenance).to_string(),
+        provenance_style(provenance, theme),
+    )
+}
+
+pub fn provenance_span(provenance: Provenance, theme: &Theme) -> Span<'static> {
     let glyph = theme.glyphs.provenance(provenance);
-    Span::styled(format!("{glyph} {}", provenance.badge()), style)
+    Span::styled(
+        format!("{glyph} {}", provenance.badge()),
+        provenance_style(provenance, theme),
+    )
+}
+
+/// Shared empty board: a glyph, a sentence, and the keys that populate it. Not a selectable row.
+pub fn empty_state(title: &str, body: &str, actions: &str, theme: &Theme) -> Vec<Line<'static>> {
+    vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("            {}  {title}", theme.glyphs.external),
+            theme.muted,
+        )),
+        Line::from(Span::styled(format!("            {body}"), theme.muted)),
+        Line::from(Span::styled(format!("            {actions}"), theme.accent)),
+    ]
+}
+
+/// Skeleton rows while a job is running. Not selectable.
+pub fn loading_state(job_ref: &str, label: &str, theme: &Theme) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            format!("  {} {job_ref}  {label}", theme.glyphs.spinner[0]),
+            theme.muted,
+        )),
+        Line::from(Span::styled("  ░░░░░░░░░░░░░░░░░░░░", theme.muted)),
+        Line::from(Span::styled("  ░░░░░░░░░░░░░░░░░░░░", theme.muted)),
+    ]
+}
+
+/// Inline error panel. Stays until the analyst dismisses it with `x`.
+pub fn error_panel(message: &str, theme: &Theme) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            format!("  {}  {}", theme.glyphs.failed, sanitize_line(message)),
+            theme.err,
+        )),
+        Line::from(Span::styled(
+            "     Check the cause, then Ctrl+K doctor.  x dismiss",
+            theme.muted,
+        )),
+    ]
 }
 
 pub fn context_line(view: View, pane: Pane, theme: &Theme) -> Line<'static> {

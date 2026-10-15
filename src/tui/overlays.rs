@@ -1,4 +1,4 @@
-//! Modal overlays: help, command palette, search, forms, agent prompt, doctor, proposals.
+//! Modal overlays: help, command palette, search, forms, agent prompt, doctor.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -9,12 +9,11 @@ use ratatui::widgets::{Clear, Paragraph, Wrap};
 use crate::app::commands::filtered;
 use crate::app::{App, Overlay};
 use crate::doctor::CheckStatus;
-use crate::model::ProposalStatus;
 use crate::sanitize::sanitize_line;
 
 use super::keymap::help_text;
 use super::theme::Theme;
-use super::widgets::{centered, input_line, list_from, pane_block, truncate};
+use super::widgets::{centered, empty_state, input_line, list_from, pane_block, truncate};
 
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     match &app.overlay {
@@ -31,12 +30,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         Overlay::AgentPrompt { input } => agent_prompt(frame, area, app, input, theme),
         Overlay::Form(form) => form_modal(frame, area, form, theme),
         Overlay::Confirm { title, message, .. } => confirm(frame, area, title, message, theme),
-        Overlay::Proposals {
-            run_id,
-            selected,
-            armed,
-        } => proposals(frame, area, app, *run_id, *selected, *armed, theme),
-        Overlay::Suggestions { selected } => suggestions(frame, area, app, *selected, theme),
+        Overlay::TableFilter { .. } => {}
     }
 }
 
@@ -132,16 +126,23 @@ fn search(
         Paragraph::new(input_line(query)).block(pane_block("Search investigation", true, theme)),
         rows[0],
     );
-    let list = if items.is_empty() {
-        list_from(
-            vec!["(type to search pages, entities, findings, sources)".into()],
-            0,
-            theme,
-        )
-    } else {
-        list_from(items, selected, theme)
-    };
-    frame.render_widget(list.block(pane_block("Results", false, theme)), rows[1]);
+    if items.is_empty() {
+        frame.render_widget(
+            Paragraph::new(empty_state(
+                "No matches",
+                "Type to search pages, entities, findings, and sources.",
+                "Enter opens a hit · Esc closes",
+                theme,
+            ))
+            .block(pane_block("Results", false, theme)),
+            rows[1],
+        );
+        return;
+    }
+    frame.render_widget(
+        list_from(items, selected, theme).block(pane_block("Results", false, theme)),
+        rows[1],
+    );
 }
 
 fn agent_prompt(
@@ -230,114 +231,6 @@ fn confirm(frame: &mut Frame, area: Rect, title: &str, message: &str, theme: &Th
     ];
     frame.render_widget(
         Paragraph::new(lines).block(pane_block(title, true, theme)),
-        popup,
-    );
-}
-
-fn proposals(
-    frame: &mut Frame,
-    area: Rect,
-    app: &App,
-    run_id: uuid::Uuid,
-    selected: usize,
-    armed: bool,
-    theme: &Theme,
-) {
-    let proposals: Vec<_> = app
-        .workspace
-        .as_ref()
-        .map(|workspace| workspace.proposals_for_run(run_id))
-        .unwrap_or_default();
-    let mut lines = vec![
-        Line::from(format!("{} suggests:", app.agent.profile.name)),
-        Line::from(""),
-    ];
-    let pending: Vec<_> = proposals
-        .iter()
-        .filter(|proposal| proposal.status == ProposalStatus::Pending)
-        .collect();
-    for (index, proposal) in pending.iter().enumerate() {
-        let style = if index == selected {
-            theme.selected
-        } else {
-            Style::default()
-        };
-        lines.push(Line::from(Span::styled(proposal.action.summary(), style)));
-        let cited = proposal.action.cited_sources();
-        if !cited.is_empty() {
-            lines.push(Line::from(Span::styled(
-                format!("    evidence: {}", cited.join(", ")),
-                theme.muted,
-            )));
-        }
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        if armed {
-            "Leftover overlay. Accept lives in Review: Shift+A then y."
-        } else {
-            "Leftover overlay. Proposals live in Review. Esc close"
-        },
-        theme.muted,
-    )));
-    let popup = centered(area, 70, 16);
-    frame.render_widget(Clear, popup);
-    frame.render_widget(
-        Paragraph::new(lines).block(pane_block("Agent proposals", true, theme)),
-        popup,
-    );
-}
-
-fn suggestions(frame: &mut Frame, area: Rect, app: &App, selected: usize, theme: &Theme) {
-    let items: Vec<String> = app
-        .listed_suggestions()
-        .into_iter()
-        .map(|suggestion| {
-            let labels = suggestion
-                .entity_ids
-                .iter()
-                .filter_map(|id| {
-                    app.workspace
-                        .as_ref()
-                        .and_then(|workspace| workspace.entity(*id))
-                        .map(|entity| entity.short_ref().to_string())
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!(
-                "{:>3}  {:<22}  {}  {}",
-                suggestion.score,
-                suggestion.rule.as_str(),
-                labels,
-                suggestion.reason
-            )
-        })
-        .collect();
-    let height = (items.len() as u16 + 4).clamp(8, 18);
-    let popup = centered(area, 72, height);
-    frame.render_widget(Clear, popup);
-    let mut lines = vec![
-        Line::from("Leftover overlay. Enter opens Review. Nothing auto-merges."),
-        Line::from(""),
-    ];
-    for (index, item) in items.iter().enumerate() {
-        let style = if index == selected {
-            theme.selected
-        } else {
-            Style::default()
-        };
-        lines.push(Line::from(Span::styled(item.clone(), style)));
-    }
-    if items.is_empty() {
-        lines.push(Line::from(Span::styled("(none)", theme.muted)));
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Enter opens Review   Esc close",
-        theme.muted,
-    )));
-    frame.render_widget(
-        Paragraph::new(lines).block(pane_block("Resolution suggestions", true, theme)),
         popup,
     );
 }

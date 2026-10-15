@@ -155,7 +155,7 @@ pub const COMMANDS: &[Command] = &[
         "search",
         "Search",
         "/",
-        "Filter the current table, or search the case.",
+        "Filter the current table (`kind:ip src:ct prov:ai sort:-seen`), or search the case.",
         false,
         true,
         false,
@@ -608,7 +608,7 @@ pub const COMMANDS: &[Command] = &[
         "unresolve_entity",
         "Unresolve entity",
         "",
-        "Propose unresolving the current bag. Lands in Review.",
+        "Propose unresolving the current bag. Opens a y-confirm overlay. Enter never writes.",
         true,
         false,
         true,
@@ -651,7 +651,7 @@ pub const COMMANDS: &[Command] = &[
         false,
         false,
         false,
-        &[View::Graph, View::Evidence, View::Timeline],
+        &[View::Graph, View::Evidence, View::Timeline, View::Entities],
     ),
     cmd_views(
         "graph_hops_dec",
@@ -661,7 +661,7 @@ pub const COMMANDS: &[Command] = &[
         false,
         false,
         false,
-        &[View::Graph, View::Evidence, View::Timeline],
+        &[View::Graph, View::Evidence, View::Timeline, View::Entities],
     ),
     cmd_views(
         "facet_prev",
@@ -707,17 +707,32 @@ pub const COMMANDS: &[Command] = &[
         "clear_filters",
         "Clear filters",
         "x",
-        "Clear the filter or time lens.",
+        "Clear the filter, error panel, or time lens.",
         false,
         false,
         false,
-        &[View::Graph, View::Evidence, View::Timeline],
+        &[
+            View::Graph,
+            View::Evidence,
+            View::Timeline,
+            View::Entities,
+            View::Jobs,
+            View::Tools,
+            View::Overview,
+            View::Audit,
+            View::Artifacts,
+            View::Pages,
+            View::Sources,
+            View::Findings,
+            View::Notes,
+            View::Object,
+        ],
     ),
     cmd_views(
         "toggle_time_lens",
         "Time lens",
         "t",
-        "Toggle the time lens on Evidence or Graph.",
+        "Toggle the time lens on Evidence, Graph, or Entities.",
         false,
         false,
         false,
@@ -914,8 +929,7 @@ fn action_for_command(id: &str, view: View) -> Option<Action> {
         "facet_next" => Action::TimelineFacetMove(1),
         "apply_facet" if view == View::Graph => Action::GraphApplyFacet,
         "apply_facet" => Action::TimelineApplyFilter,
-        "clear_filters" if view == View::Graph => Action::GraphClearFilters,
-        "clear_filters" => Action::TimelineClearFilter,
+        "clear_filters" => Action::ClearBoard,
         "mark" => Action::ToggleMergeMark,
         _ => return None,
     })
@@ -996,8 +1010,22 @@ mod tests {
             "help must list x as reject\n{help}"
         );
         assert!(
-            help.contains("Clear the filter or time lens"),
+            help.contains("Clear the filter, error panel, or time lens"),
             "help must list x as clear filters\n{help}"
+        );
+        let unresolve = COMMANDS
+            .iter()
+            .find(|command| command.id == "unresolve_entity")
+            .expect("unresolve_entity");
+        assert!(
+            unresolve.summary.contains("y-confirm"),
+            "{}",
+            unresolve.summary
+        );
+        assert!(
+            !unresolve.summary.contains("Lands in Review"),
+            "{}",
+            unresolve.summary
         );
         for command in COMMANDS.iter().filter(|command| !command.hint.is_empty()) {
             assert!(

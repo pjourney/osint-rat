@@ -1,9 +1,9 @@
  os-int ▸ acme-phish ▸ Jobs  unmarked                                                            ◆ 1 to review  ✓ jobs  agent ◇ Claude Code
- Rail         │▌Jobs                                                                           │ Inspector · acme-login.com
- 1 Case        (no jobs yet — press c on a target)                                              TABS  ·Props·  Sources  Notes  History
- 2 Entities                                                                                     Nothing selected.
- 3 Evidence
- 4 Graph
+ Rail         │▌JOBS                                                                           │ Inspector · acme-login.com
+ 1 Case                                                                                         TABS  ·Props·  Sources  Notes  History
+ 2 Entities                ◇  No jobs yet                                                       Nothing selected.
+ 3 Evidence                Collect on a target to start a job.
+ 4 Graph                   c collect
  5 Review 1
 ▌6 Jobs
 
