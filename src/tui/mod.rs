@@ -1,10 +1,15 @@
 //! Terminal event loop and rendering. Drawing is a pure function of `App`.
 
+mod glyphs;
 mod keymap;
 mod overlays;
+mod preview;
 mod screens;
 mod theme;
 mod widgets;
+
+pub use preview::render_preview;
+pub use theme::{ColorDepth, ColorMode, TerminalEnv, Theme, ThemeName};
 
 use std::time::Duration;
 
@@ -13,13 +18,12 @@ use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Paragraph};
 use ratatui::{DefaultTerminal, Frame};
+use unicode_width::UnicodeWidthStr;
 
 use crate::app::{Action, App, View};
 use crate::sanitize::sanitize_line;
-
-use self::theme::Theme;
 
 /// Runs the TUI until the user quits. Always restores the terminal, including on error.
 pub async fn run(app: &mut App) -> Result<()> {
@@ -166,6 +170,9 @@ fn run_external_editor(terminal: &mut DefaultTerminal, app: &mut App) -> Result<
 pub fn draw(frame: &mut Frame, app: &App) {
     let theme = Theme::from_config(&app.config);
     let area = frame.area();
+    if theme.paints_background {
+        frame.render_widget(Block::default().style(theme.bg), area);
+    }
     let rows = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(5),
@@ -202,17 +209,25 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
         .unwrap_or("unmarked");
     let title = format!(" os-int ─ Investigation: {investigation}  [{marking}] ");
     let right = format!(" {agent} ");
-    let spacer = " ".repeat(
-        area.width
-            .saturating_sub((title.len() + right.len()) as u16) as usize,
-    );
+    let title_width = UnicodeWidthStr::width(title.as_str());
+    let right_width = UnicodeWidthStr::width(right.as_str());
+    let available = area.width as usize;
+    let (title, title_width) = if title_width + right_width > available {
+        let keep = available.saturating_sub(right_width.saturating_add(1));
+        let truncated = truncate_width(&title, keep);
+        let width = UnicodeWidthStr::width(truncated.as_str());
+        (truncated, width)
+    } else {
+        (title, title_width)
+    };
+    let spacer = " ".repeat(available.saturating_sub(title_width.saturating_add(right_width)));
     let line = Line::from(vec![
         Span::styled(title, theme.title),
         Span::raw(spacer),
         Span::styled(
             right,
             if app.agent.available {
-                theme.agent
+                theme.ai
             } else {
                 theme.muted
             },
@@ -221,14 +236,41 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
     frame.render_widget(Paragraph::new(line), area);
 }
 
+fn truncate_width(text: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if UnicodeWidthStr::width(text) <= max_width {
+        return text.to_string();
+    }
+    let mut output = String::new();
+    let mut width = 0usize;
+    let limit = max_width.saturating_sub(1);
+    for ch in text.chars() {
+        let ch_width = UnicodeWidthStr::width(ch.encode_utf8(&mut [0; 4]));
+        if width + ch_width > limit {
+            break;
+        }
+        output.push(ch);
+        width += ch_width;
+    }
+    output.push('…');
+    output
+}
+
 fn draw_status(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme: &Theme) {
     let jobs = app.job_status_line();
     let style = if app.last_error.is_some() {
-        theme.error
+        theme.err
     } else {
-        theme.status
+        theme.fg
     };
-    let text = format!(" {}    {jobs}", sanitize_line(&app.status));
+    let hint = theme.degrade_hint.unwrap_or("");
+    let text = if hint.is_empty() {
+        format!(" {}    {jobs}", sanitize_line(&app.status))
+    } else {
+        format!(" {}    {jobs}    {hint}", sanitize_line(&app.status))
+    };
     frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
 }
 
@@ -368,5 +410,109 @@ mod tests {
             .expect("draw entities");
         let entities = visible_text(&terminal);
         assert!(entities.contains("example.com"), "{entities}");
+    }
+
+    #[test]
+    fn header_spacer_uses_display_width_not_bytes() {
+        let (_directory, mut app) = test_app();
+        app.dispatch(Action::Command("new_investigation"))
+            .expect("form");
+        if let crate::app::Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set("café");
+        }
+        app.dispatch(Action::Submit).expect("create");
+        let backend = TestBackend::new(80, 3);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| {
+                let theme = Theme::from_config(&app.config);
+                draw_header(frame, frame.area(), &app, &theme);
+            })
+            .expect("draw");
+        let text = visible_text(&terminal);
+        assert!(text.contains("os-int"), "{text}");
+        assert!(text.contains("café"), "{text}");
+        let title = " os-int ─ Investigation: café  [TLP:AMBER] ";
+        assert!(title.len() > UnicodeWidthStr::width(title));
+        assert_eq!(truncate_width("hello", 0), "");
+    }
+
+    #[test]
+    fn status_shows_degrade_hint_when_phosphor_falls_back() {
+        let (_directory, mut app) = test_app();
+        app.config.ui.theme = "phosphor".into();
+        app.config.ui.color = "16".into();
+        app.status = "ready".into();
+        let backend = TestBackend::new(100, 8);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal.draw(|frame| draw(frame, &app)).expect("draw");
+        let text = visible_text(&terminal);
+        assert!(text.contains("phosphor needs 256 colours"), "{text}");
+    }
+
+    fn press(code: crossterm::event::KeyCode) -> crossterm::event::KeyEvent {
+        crossterm::event::KeyEvent::new(code, crossterm::event::KeyModifiers::NONE)
+    }
+
+    fn dispatch_key(app: &mut App, key: crossterm::event::KeyEvent) {
+        let action =
+            keymap::map_key(key, &app.overlay, app.view, app.is_editing()).expect("key should map");
+        app.dispatch(action).expect("dispatch");
+    }
+
+    #[test]
+    fn palette_enter_on_write_command_waits_for_y() {
+        let (_directory, mut app) = test_app();
+        app.dispatch(Action::Command("new_investigation"))
+            .expect("form");
+        if let crate::app::Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set("Palette Write");
+        }
+        app.dispatch(Action::Submit).expect("create");
+        app.dispatch(Action::Palette).expect("palette");
+        if let crate::app::Overlay::Palette { query, selected } = &mut app.overlay {
+            query.set("generate_report");
+            *selected = 0;
+        }
+        let hits = crate::app::commands::filtered("generate_report");
+        assert_eq!(hits[0].id, "generate_report");
+        assert!(hits[0].writes);
+        dispatch_key(&mut app, press(crossterm::event::KeyCode::Enter));
+        assert!(
+            matches!(
+                app.overlay,
+                crate::app::Overlay::Confirm { ref command, .. } if command == "generate_report"
+            ),
+            "{:?}",
+            app.overlay
+        );
+        assert!(
+            app.workspace
+                .as_ref()
+                .expect("workspace")
+                .data
+                .artifacts
+                .iter()
+                .all(|artifact| artifact.kind != crate::model::ArtifactKind::Report)
+        );
+        assert!(
+            keymap::map_key(
+                press(crossterm::event::KeyCode::Enter),
+                &app.overlay,
+                app.view,
+                app.is_editing()
+            )
+            .is_none()
+        );
+        dispatch_key(&mut app, press(crossterm::event::KeyCode::Char('y')));
+        assert!(
+            app.workspace
+                .as_ref()
+                .expect("workspace")
+                .data
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.kind == crate::model::ArtifactKind::Report)
+        );
     }
 }

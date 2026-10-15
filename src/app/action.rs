@@ -99,10 +99,14 @@ pub enum Action {
     Submit,
     /// Cycle a form choice (page type, and similar fields) by this many steps.
     Cycle(i32),
-    /// Accept the highlighted agent proposal.
+    /// Accept the highlighted agent proposal (only after `Arm`).
     Accept,
     /// Reject the highlighted agent proposal.
     Reject,
+    /// Arm the proposals overlay so `y` can accept. Shift+A.
+    Arm,
+    /// Drop the armed accept on the proposals overlay.
+    Disarm,
     /// A progress or completion event from a background job.
     Job(JobEvent),
     /// Insert a character into the focused text field.

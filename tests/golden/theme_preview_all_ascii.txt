@@ -1,0 +1,208 @@
+detected colour depth: truecolor (ui.color=truecolor)
+ui.ascii = true
+
+# Cockpit Dark
+resolved: Cockpit Dark
+depth: truecolor (ui.color=truecolor)
+
+role     hex       256 16           vs bg  vs panel
+bg       #14171C   234 Black          1.0       1.1
+panel    #1B1F26   235 Black          1.1       1.0
+fg       #D8DEE6   253 White         13.3      12.2
+muted    #8B95A1   246 Gray           5.9       5.4
+rule     #2C323B   236 DarkGray       1.4       1.3
+accent   #4FB3D9    74 Cyan           7.5       6.9
+ok       #8FD694   114 Green         10.4       9.6
+warn     #E5B567   179 Yellow         9.5       8.8
+err      #E0607E   168 LightRed       5.3       4.8
+col      #56C2A6    73 Cyan           8.3       7.6
+ext      #A9B1D6   146 Blue           8.5       7.8
+anl      #D8DEE6   253 White         13.3      12.2
+ai       #C792EA   176 Magenta        7.5       6.9
+heat0    #2C4A5A   238 DarkGray       1.9       1.8
+heat1    #4FB3D9    74 Cyan           7.5       6.9
+heat2    #E5B567   179 Yellow         9.5       8.8
+heat3    #E0607E   168 LightRed       5.3       4.8
+
+sample (80×12)
+--------------------------------------------------------------------------------
+>Case    │KIND VALUE            PROV SRC            >Inspector
+ Entities│DOM acme-login.com    C    6              DOM acme-login.com
+ Evidence│IP  203.0.113.7       X    3              C 14 facts · 6 sources
+ Graph   │*? Finding: phishing host                 Will write
+>Review 3│Accept 1 AI finding? It will keep agent pr+ Finding  * AI
+ Jobs    │
+────────────────────────────────────────────────────────────────────────────────
+ Accept 1 AI finding? y confirm   any other key cancels
+--------------------------------------------------------------------------------
+
+colour-blind ΔE (Machado 2009, severity 1.0)
+  deutan min 5 (ai/accent)  close: ai/accent 5
+  protan min 4 (ext/accent)  close: ext/accent 4
+  tritan min 7 (col/accent)  close: col/accent 7
+  critical ok/err: deutan 19  protan 45  tritan 95
+  critical warn/err: deutan 37  protan 53  tritan 40
+
+# Cockpit Light
+resolved: Cockpit Light
+depth: truecolor (ui.color=truecolor)
+
+role     hex       256 16           vs bg  vs panel
+bg       #F7F7F5   255 White          1.0       1.1
+panel    #EEEEEA   254 White          1.1       1.0
+fg       #1D232B   235 Black         14.7      13.6
+muted    #5C6670   241 DarkGray       5.5       5.0
+rule     #C9CDD2   251 Gray           1.5       1.4
+accent   #0B6E99    24 Blue           5.3       4.9
+ok       #1E5B2A    22 Green          7.6       7.0
+warn     #8A5A00    94 Yellow         5.5       5.1
+err      #C2185B   125 Red            5.5       5.0
+col      #17705A    23 Cyan           5.6       5.2
+ext      #4A5394    60 Blue           6.6       6.1
+anl      #1D232B   235 Black         14.7      13.6
+ai       #7B3FA0    90 Magenta        6.4       5.9
+heat0    #D6E4EC   253 Gray           1.2       1.1
+heat1    #0B6E99    24 Blue           5.3       4.9
+heat2    #8A5A00    94 Yellow         5.5       5.1
+heat3    #C2185B   125 Red            5.5       5.0
+
+sample (80×12)
+--------------------------------------------------------------------------------
+>Case    │KIND VALUE            PROV SRC            >Inspector
+ Entities│DOM acme-login.com    C    6              DOM acme-login.com
+ Evidence│IP  203.0.113.7       X    3              C 14 facts · 6 sources
+ Graph   │*? Finding: phishing host                 Will write
+>Review 3│Accept 1 AI finding? It will keep agent pr+ Finding  * AI
+ Jobs    │
+────────────────────────────────────────────────────────────────────────────────
+ Accept 1 AI finding? y confirm   any other key cancels
+--------------------------------------------------------------------------------
+
+colour-blind ΔE (Machado 2009, severity 1.0)
+  deutan min 4 (ext/ai)  close: ext/ai 4, ext/accent 8, ai/accent 9
+  protan min 10 (ext/ai)  close: ext/ai 10
+  tritan min 8 (col/accent)  close: ok/col 10, col/accent 8
+  critical ok/err: deutan 15  protan 35  tritan 101
+  critical warn/err: deutan 35  protan 55  tritan 44
+
+# Mono
+resolved: Mono
+depth: none (mono theme)
+
+role     hex       256 16           vs bg  vs panel
+bg       —           — default          —         —
+panel    —           — default          —         —
+fg       —           — default          —         —
+muted    —           — default          —         —
+rule     —           — default          —         —
+accent   —           — default          —         —
+ok       —           — default          —         —
+warn     —           — default          —         —
+err      —           — default          —         —
+col      —           — default          —         —
+ext      —           — default          —         —
+anl      —           — default          —         —
+ai       —           — default          —         —
+heat0    —           — default          —         —
+heat1    —           — default          —         —
+heat2    —           — default          —         —
+heat3    —           — default          —         —
+
+sample (80×12)
+--------------------------------------------------------------------------------
+>Case    │KIND VALUE            PROV SRC            >Inspector
+ Entities│DOM acme-login.com    C    6              DOM acme-login.com
+ Evidence│IP  203.0.113.7       X    3              C 14 facts · 6 sources
+ Graph   │*? Finding: phishing host                 Will write
+>Review 3│Accept 1 AI finding? It will keep agent pr+ Finding  * AI
+ Jobs    │
+────────────────────────────────────────────────────────────────────────────────
+ Accept 1 AI finding? y confirm   any other key cancels
+--------------------------------------------------------------------------------
+
+colour-blind ΔE (Machado 2009, severity 1.0)
+  Mono never relies on colour.
+
+# Phosphor
+resolved: Phosphor
+depth: truecolor (ui.color=truecolor)
+
+role     hex       256 16           vs bg  vs panel
+bg       #050A06    16 Black          1.0       1.1
+panel    #0C1A10   233 Black          1.1       1.0
+fg       #7CFF9B   121 Green         15.8      14.2
+muted    #3FAE5F    71 Green          7.1       6.3
+rule     #163822   234 DarkGray       1.5       1.4
+accent   #C8FFD4   194 LightGreen    17.8      16.0
+ok       #7CFF9B   121 Green         15.8      14.2
+warn     #E8FF7A   192 Yellow        18.1      16.2
+err      #FF6B5E   203 LightRed       7.1       6.4
+col      #4DE680    78 Green         12.3      11.1
+ext      #9FD9B0   151 LightGreen    12.4      11.1
+anl      #7CFF9B   121 Green         15.8      14.2
+ai       #B8FFC9   158 LightGreen    17.3      15.5
+heat0    #0C3B1A   234 DarkGray       1.6       1.4
+heat1    #1F9E44    35 Green          5.7       5.2
+heat2    #7CFF9B   121 Green         15.8      14.2
+heat3    #E8FF7A   192 Yellow        18.1      16.2
+
+sample (80×12)
+--------------------------------------------------------------------------------
+>Case    │KIND VALUE            PROV SRC            >Inspector
+ Entities│DOM acme-login.com    C    6              DOM acme-login.com
+ Evidence│IP  203.0.113.7       X    3              C 14 facts · 6 sources
+ Graph   │*? Finding: phishing host                 Will write
+>Review 3│Accept 1 AI finding? It will keep agent pr+ Finding  * AI
+ Jobs    │
+────────────────────────────────────────────────────────────────────────────────
+ Accept 1 AI finding? y confirm   any other key cancels
+--------------------------------------------------------------------------------
+
+colour-blind ΔE (Machado 2009, severity 1.0)
+  deutan min 3 (ai/accent)  close: ok/col 9, ai/accent 3
+  protan min 5 (ai/accent)  close: ok/col 9, ai/accent 5
+  tritan min 6 (ai/accent)  close: ok/col 10, ai/accent 6
+  critical ok/err: deutan 23  protan 42  tritan 121
+  critical warn/err: deutan 31  protan 56  tritan 81
+
+# Amber
+resolved: Amber
+depth: truecolor (ui.color=truecolor)
+
+role     hex       256 16           vs bg  vs panel
+bg       #0E0900    16 Black          1.0       1.1
+panel    #1C1300   232 Black          1.1       1.0
+fg       #FFB000   214 Yellow        10.8      10.0
+muted    #B88220   136 Yellow         5.9       5.5
+rule     #2E2200   233 DarkGray       1.3       1.2
+accent   #FFD580   222 LightYellow    14.3      13.2
+ok       #FFC94D   221 Yellow        13.0      12.0
+warn     #FFE9B0   223 LightYellow    16.6      15.3
+err      #FF6A3D   203 LightRed       7.0       6.5
+col      #FFA31A   214 Yellow         9.9       9.2
+ext      #E0B870   179 Yellow        10.6       9.9
+anl      #FFB000   214 Yellow        10.8      10.0
+ai       #FFE0A3   223 LightYellow    15.5      14.4
+heat0    #3A2600   234 DarkGray       1.4       1.3
+heat1    #B88220   136 Yellow         5.9       5.5
+heat2    #FFB000   214 Yellow        10.8      10.0
+heat3    #FF6A3D   203 LightRed       7.0       6.5
+
+sample (80×12)
+--------------------------------------------------------------------------------
+>Case    │KIND VALUE            PROV SRC            >Inspector
+ Entities│DOM acme-login.com    C    6              DOM acme-login.com
+ Evidence│IP  203.0.113.7       X    3              C 14 facts · 6 sources
+ Graph   │*? Finding: phishing host                 Will write
+>Review 3│Accept 1 AI finding? It will keep agent pr+ Finding  * AI
+ Jobs    │
+────────────────────────────────────────────────────────────────────────────────
+ Accept 1 AI finding? y confirm   any other key cancels
+--------------------------------------------------------------------------------
+
+colour-blind ΔE (Machado 2009, severity 1.0)
+  deutan min 4 (warn/ai)  close: ok/col 12, warn/ai 4, ext/accent 12
+  protan min 4 (warn/ai)  close: ok/col 12, warn/ai 4, ext/accent 12
+  tritan min 5 (warn/ai)  close: ok/ext 5, ok/accent 8, warn/ai 5, ext/accent 10, ai/accent 7
+  critical ok/err: deutan 20  protan 37  tritan 52
+  critical warn/err: deutan 37  protan 38  tritan 72

@@ -161,7 +161,7 @@ Switch to Codex in the config file:
 active = "codex"
 ```
 
-Or press `0` for Settings, then `e`, and set the active profile. From any investigation screen, press `a`, ask a question, and press `Enter`. If the reply contains an `os-int-actions` block, os-int shows each proposed change. `Enter` accepts the selected one. `R` rejects it. An accepted finding keeps the `[AI]` badge.
+Or press `0` for Settings, then `e`, and set the active profile. From any investigation screen, press `a`, ask a question, and press `Ctrl+S`. If the reply contains an `os-int-actions` block, os-int shows each proposed change. `Shift+A` then `y` accepts the selected one. `R` rejects it. An accepted finding keeps the `[AI]` badge.
 
 A generic CLI, with the prompt passed as an argument:
 

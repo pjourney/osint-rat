@@ -35,6 +35,14 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
         run: cargo test --all-targets
+      - name: Colour roles stay in theme.rs
+        run: |
+          leaks=$(grep -R --include='*.rs' -n 'Color::' src | grep -v 'src/tui/theme.rs' || true)
+          if [ -n "$leaks" ]; then
+            echo "Color:: must live only in src/tui/theme.rs:"
+            echo "$leaks"
+            exit 1
+          fi
       - name: Doctor (smoke)
         run: cargo run --quiet -- doctor
       - name: Install cargo-audit

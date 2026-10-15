@@ -56,14 +56,14 @@ An **entity** is a normalized identifier (domain, IP, URL, email, ASN, repositor
 
 A **finding** is a claim. It should cite the sources that support it. Confidence is `unknown`, `low`, `medium`, or `high`.
 
-**Provenance** is stored on every record and shown as a badge:
+**Provenance** is stored on every record and shown as a glyph plus a short badge. Colour reinforces the glyph and never replaces it. `ui.ascii = true` uses the ASCII column.
 
-| Provenance | Badge | Meaning |
-| --- | --- | --- |
-| `collected` | `COL` | Gathered by a collector or external tool |
-| `external` | `EXT` | Original material you supplied |
-| `analyst` | `ANL` | Written by you |
-| `agent` | `AI` | Inference from an agent. Stays labelled this way after you accept it |
+| Provenance | Glyph | ASCII | Badge | Meaning |
+| --- | --- | --- | --- | --- |
+| `collected` | `●` | `C` | `COL` | Gathered by a collector or external tool |
+| `external` | `◇` | `X` | `EXT` | Original material you supplied |
+| `analyst` | `✎` | `A` | `ANL` | Written by you |
+| `agent` | `◆` | `*` | `AI` | Inference from an agent. Stays labelled this way after you accept it |
 
 **Short references** are how you cite records in notes, findings, agent questions, and reports:
 
@@ -157,7 +157,7 @@ The footer is always:
 [a] Ask   [/] Search   [p] Palette   [r] Collect   [g] Graph   [s] Around   [?] Help
 ```
 
-Background work (HTTP, DNS, TLS, subprocesses, agent calls, report rendering) runs on a job queue. The interface never waits on that I/O. Open **Jobs** (`8`) to watch or cancel a job. Open **Tools** (`9`) to see which external programs were found. Open **Settings** (`0`) or press `e` there to change the active agent, an optional program override, the agent timeout, and the theme (`default`, `high-contrast`, `monochrome`).
+Background work (HTTP, DNS, TLS, subprocesses, agent calls, report rendering) runs on a job queue. The interface never waits on that I/O. Open **Jobs** (`8`) to watch or cancel a job. Open **Tools** (`9`) to see which external programs were found. Open **Settings** (`0`) or press `e` there to change the active agent, an optional program override, the agent timeout, and the theme (`auto`, `dark`, `light`, `mono`, `phosphor`, `amber`). Press `?` for help generated from the command registry. Preview palettes with `os-int theme preview --all` without opening the workbench.
 
 os-int remembers the last view, page, and agent thread for each investigation.
 
@@ -292,7 +292,7 @@ A shared `--data-dir` plus roles is optional. Empty membership is single-user ow
 
 ### Keys
 
-- **Entities:** `Space` marks or unmarks. `m` proposes a merge of the marked set (the highlighted marked row is the canonical). Enter confirms; Esc cancels.
+- **Entities:** `Space` marks or unmarks. `m` proposes a merge of the marked set (the highlighted marked row is the canonical). `y` confirms; Esc cancels.
 - **Object View / Entities:** `u` proposes unresolve of the active bag on the canonical.
 - Palette: **Merge selected entities**, **Unresolve entity**, **Resolution suggestions**.
 
@@ -365,7 +365,7 @@ os-int ingest tests/fixtures/ingest/observables.csv --format csv
 os-int ingest tests/fixtures/ingest/events-batch.json --format batch
 ```
 
-`--format` is guessed from the file name when omitted. `--map kind=type,value=indicator` and `--kind domain` cover bulk CSV/JSON. Esc on the ingest form restores the entity selection; Enter applies and keeps that selection (canonical id after a merge). An empty path or a parse error leaves the form open. Caps, encoding, and the sidecar protocol: [connectors.md](connectors.md).
+`--format` is guessed from the file name when omitted. `--map kind=type,value=indicator` and `--kind domain` cover bulk CSV/JSON. Esc on the ingest form restores the entity selection; Ctrl+S applies and keeps that selection (canonical id after a merge). An empty path or a parse error leaves the form open. Caps, encoding, and the sidecar protocol: [connectors.md](connectors.md).
 
 The in-repo sidecar example is [`examples/connectors/hello-batch/`](../examples/connectors/hello-batch/).
 
@@ -373,7 +373,7 @@ The in-repo sidecar example is [`examples/connectors/hello-batch/`](../examples/
 
 A playbook is a YAML document: a seed object type plus ordered steps (`collect`, `search_around`, `run_tool`, `assert_finding_template`, `propose_resolve`). Collect and tool steps run; Search Around is a graph query; finding templates and merges become **pending proposals**. Nothing from a template is written until you accept it.
 
-From the workbench, press `b` (or palette **Run playbook**). Left/Right cycles bundled ids (`domain-infra`, `mail-policy`, `cert-estate`, `repo-surface`). Mode `run` / `dry-run`. Esc closes the form and leaves the entity selection in place. Enter on dry-run shows the plan as text; Enter on run queues a job you can cancel from Jobs with `c`. Palette **Playbook prompt** seeds the agent question with suggested Actions — the agent still only proposes. Palette **Watch playbook** re-runs collect steps (`dry-run` / `once`) and opens proposals on changes.
+From the workbench, press `b` (or palette **Run playbook**). Left/Right cycles bundled ids (`domain-infra`, `mail-policy`, `cert-estate`, `repo-surface`). Mode `run` / `dry-run`. Esc closes the form and leaves the entity selection in place. Ctrl+S on dry-run shows the plan as text; Ctrl+S on run queues a job you can cancel from Jobs with `c`. Palette **Playbook prompt** seeds the agent question with suggested Actions — the agent still only proposes. Palette **Watch playbook** re-runs collect steps (`dry-run` / `once`) and opens proposals on changes.
 
 From the shell:
 
@@ -471,7 +471,7 @@ os-int does not ship a model and does not call a provider API. It runs a local C
 
 `--tools ""` on Claude Code disables that CLI's built-in tools, so text inside a web page cannot make the agent run commands or read files. Codex is launched with `--sandbox read-only`.
 
-Press `a`, type a question, and press `Enter`. os-int writes a context pack that includes the investigation, the page you are on, related entities, findings, and sources. Untrusted material (HTTP bodies, DNS TXT, tool output, repository text) is sanitized for the terminal and wrapped like this:
+Press `a`, type a question, and press `Ctrl+S`. os-int writes a context pack that includes the investigation, the page you are on, related entities, findings, and sources. Untrusted material (HTTP bodies, DNS TXT, tool output, repository text) is sanitized for the terminal and wrapped like this:
 
 ```text
 <<<UNTRUSTED source=S-12 nonce=…>>>
@@ -605,6 +605,7 @@ os-int [OPTIONS] [COMMAND]
 | `audit <name> [--kind …]` | Print the append-only audit log |
 | `doctor` | Check the database, config, network, logs, and common programs |
 | `config` | Print the resolved config, data, database, and log paths |
+| `theme preview [name\|--all]` | Print cockpit role swatches, a sample strip, and colour-blind ΔE without opening the TUI |
 
 `collect` target kinds: `domain`, `ip`, `url`, `email`, `repository`, `file`, `username`, `asn`. Aliases such as `host`, `hostname`, `repo`, and `as` are accepted.
 
@@ -614,8 +615,13 @@ A commented file is written the first time os-int runs. Every key is optional. S
 
 ```toml
 [ui]
-# "default", "high-contrast", or "monochrome". Unknown values fall back to default.
-theme = "default"
+# auto | dark | light | mono | phosphor | amber. auto picks dark/light from COLORFGBG.
+# NO_COLOR forces Mono. Phosphor and Amber are opt-in; auto never selects them.
+theme = "auto"
+# auto | truecolor | 256 | 16 | none. Detection: COLORTERM, then TERM, then NO_COLOR.
+color = "auto"
+# ASCII glyphs (C X A *) instead of Unicode (● ◇ ✎ ◆).
+ascii = false
 # Redraw interval in milliseconds while jobs are running. The UI is otherwise event-driven.
 tick_rate_ms = 250
 # editor = "nvim"
@@ -671,7 +677,9 @@ max_ingest_bytes = 20971520
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `ui.theme` | `default` | `default`, `high-contrast`, or `monochrome` |
+| `ui.theme` | `auto` | `auto`, `dark`, `light`, `mono`, `phosphor`, or `amber`. `auto` picks Cockpit Dark or Light from `COLORFGBG`. `NO_COLOR` forces Mono |
+| `ui.color` | `auto` | `auto`, `truecolor`, `256`, `16`, or `none`. Overrides COLORTERM / TERM / NO_COLOR detection |
+| `ui.ascii` | `false` | ASCII glyph fallback |
 | `ui.tick_rate_ms` | `250` | Redraw interval while jobs are running |
 | `ui.editor` | unset | Long-form editor. Then `$VISUAL`, `$EDITOR`, `vi` |
 | `agent.active` | `claude` | Profile id: `claude`, `codex`, or a key under `[agents]` |
@@ -757,15 +765,17 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `Enter` | Entities | Open Object View |
 | `Enter` | Graph | Open Object View for the selected node |
 | `c` | Jobs | Cancel the selected job |
-| `?` | normal, overlays | Help |
+| `?` | normal, overlays | Help (generated from the command registry) |
 | `1` … `6` | normal | Overview, Pages, Sources, Findings, Entities, Timeline |
 | `7` `8` `9` `0` | normal | Agent, Jobs, Tools, Settings |
 | Palette | normal | **Open Audit**, **Set marking**, **Add team member** |
 | `o` | welcome | Open investigation |
 | `d` | welcome | Doctor |
-| `A` `y` `Enter` | proposals | Accept the selected proposal |
+| `Shift+A` then `y` | proposals | Arm, then accept. Any other key disarms. Enter never accepts. |
 | `R` `n` | proposals | Reject the selected proposal |
-| `Enter` | editing | Submit the form or the question |
+| `y` | confirm | Confirm a write, including a palette command that writes. Enter never writes. |
+| `Enter` | palette | Pick a command. Writes open a y-confirm and do not run until `y`. |
+| `Ctrl+S` | editing | Submit the form or the agent question. Enter never writes. |
 | `Left` `Right` | forms | Cycle a choice (page type, and similar fields) |
 
 Inside a text field, letters insert text. They are not treated as commands until you leave the field.

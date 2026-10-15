@@ -28,10 +28,10 @@ On **Entities**, mark each row with `Space`, press `m`, and confirm. The highlig
 
 | Badge | Provenance | Meaning |
 | --- | --- | --- |
-| `[COL]` | collected | A collector or external tool recorded this |
-| `[EXT]` | external | Original material you supplied |
-| `[ANL]` | analyst | You wrote this |
-| `[AI]` | agent | An agent inferred this. Accepting the proposal keeps this badge |
+| `●` / `C` `[COL]` | collected | A collector or external tool recorded this |
+| `◇` / `X` `[EXT]` | external | Original material you supplied |
+| `✎` / `A` `[ANL]` | analyst | You wrote this |
+| `◆` / `*` `[AI]` | agent | An agent inferred this. Accepting the proposal keeps this badge |
 
 ## Does os-int call an LLM API or need an API key?
 

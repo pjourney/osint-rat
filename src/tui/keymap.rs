@@ -1,7 +1,8 @@
-//! Maps terminal key events to `Action`s.
+//! Maps terminal key events to `Action`s. Documented bindings live in the command registry.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+use crate::app::commands::{map_registered_key, tab_action};
 use crate::app::{Action, Overlay, View};
 
 /// Converts a key press into an action. `Repeat` is treated like `Press` so held arrows scroll.
@@ -13,26 +14,39 @@ pub fn map_key(key: KeyEvent, overlay: &Overlay, view: View, editing: bool) -> O
     if ctrl && matches!(key.code, KeyCode::Char('c')) {
         return Some(Action::Quit);
     }
-    if matches!(overlay, Overlay::Proposals { .. }) {
-        return map_proposal_key(key);
+    if let Overlay::Proposals { armed, .. } = overlay {
+        return map_proposal_key(key, *armed);
     }
     if editing {
         return map_editing_key(key, overlay);
     }
+    if matches!(overlay, Overlay::Confirm { .. }) {
+        return map_confirm_key(key);
+    }
     if !matches!(overlay, Overlay::None) {
         return map_overlay_key(key);
     }
-    map_normal_key(key, view, ctrl)
+    if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) && !ctrl {
+        return Some(tab_action(key.modifiers));
+    }
+    map_registered_key(key.code, view, ctrl, overlay)
 }
 
-fn map_proposal_key(key: KeyEvent) -> Option<Action> {
+fn map_proposal_key(key: KeyEvent, armed: bool) -> Option<Action> {
+    if armed {
+        return match key.code {
+            KeyCode::Char('y' | 'Y') => Some(Action::Accept),
+            _ => Some(Action::Disarm),
+        };
+    }
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
     match key.code {
         KeyCode::Esc => Some(Action::Cancel),
         KeyCode::Up | KeyCode::Char('k') => Some(Action::Move(-1)),
         KeyCode::Down | KeyCode::Char('j') => Some(Action::Move(1)),
-        KeyCode::Char('A' | 'a' | 'y') => Some(Action::Accept),
+        KeyCode::Char('A') | KeyCode::Char('a') if shift => Some(Action::Arm),
+        KeyCode::Char('A') => Some(Action::Arm),
         KeyCode::Char('R' | 'r' | 'n') => Some(Action::Reject),
-        KeyCode::Enter => Some(Action::Accept),
         _ => None,
     }
 }
@@ -41,7 +55,11 @@ fn map_editing_key(key: KeyEvent, overlay: &Overlay) -> Option<Action> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
         KeyCode::Esc => Some(Action::Cancel),
-        KeyCode::Enter => Some(Action::Submit),
+        KeyCode::Enter => match overlay {
+            Overlay::Palette { .. } | Overlay::Search { .. } => Some(Action::Select),
+            _ => None,
+        },
+        KeyCode::Char('s') if ctrl => Some(Action::Submit),
         KeyCode::Tab => Some(if key.modifiers.contains(KeyModifiers::SHIFT) {
             Action::Move(-1)
         } else {
@@ -64,6 +82,18 @@ fn map_editing_key(key: KeyEvent, overlay: &Overlay) -> Option<Action> {
     }
 }
 
+fn map_confirm_key(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q' | 'n') => Some(Action::Cancel),
+        KeyCode::Char('y' | 'Y') => Some(Action::Select),
+        KeyCode::Enter => None,
+        KeyCode::Up | KeyCode::Char('k') => Some(Action::Move(-1)),
+        KeyCode::Down | KeyCode::Char('j') => Some(Action::Move(1)),
+        KeyCode::Char('?') => Some(Action::Help),
+        _ => None,
+    }
+}
+
 fn map_overlay_key(key: KeyEvent) -> Option<Action> {
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => Some(Action::Cancel),
@@ -77,151 +107,9 @@ fn map_overlay_key(key: KeyEvent) -> Option<Action> {
     }
 }
 
-fn map_normal_key(key: KeyEvent, view: View, ctrl: bool) -> Option<Action> {
-    if ctrl {
-        return match key.code {
-            KeyCode::Char('p') => Some(Action::Palette),
-            KeyCode::Char('f') => Some(Action::Search),
-            _ => None,
-        };
-    }
-    match key.code {
-        KeyCode::Char('q') => Some(Action::Quit),
-        KeyCode::Esc => Some(Action::Back),
-        KeyCode::Tab => Some(if key.modifiers.contains(KeyModifiers::SHIFT) {
-            Action::PrevPane
-        } else {
-            Action::NextPane
-        }),
-        KeyCode::BackTab => Some(Action::PrevPane),
-        KeyCode::Up | KeyCode::Char('k') => Some(Action::Move(-1)),
-        KeyCode::Down | KeyCode::Char('j') => Some(Action::Move(1)),
-        KeyCode::PageUp => Some(Action::Move(-10)),
-        KeyCode::PageDown => Some(Action::Move(10)),
-        KeyCode::Enter => Some(Action::Select),
-        KeyCode::Char('/') => Some(Action::Search),
-        KeyCode::Char('?') => Some(Action::Help),
-        KeyCode::Char('a') => Some(Action::AskAgent),
-        KeyCode::Char('p') => Some(Action::Palette),
-        KeyCode::Char('n') => Some(Action::NewItem),
-        KeyCode::Char('e') => Some(Action::Edit),
-        KeyCode::Char('r') => Some(Action::Refresh),
-        KeyCode::Char('i') => Some(Action::Command("ingest")),
-        KeyCode::Char('b') => Some(Action::Command("run_playbook")),
-        KeyCode::Char('v') => Some(Action::OpenObjectView),
-        KeyCode::Char('g') => Some(Action::OpenGraph),
-        KeyCode::Char('s') => Some(Action::SearchAround),
-        KeyCode::Char('+') | KeyCode::Char('=') if view == View::Graph => {
-            Some(Action::GraphHops(1))
-        }
-        KeyCode::Char('-') if view == View::Graph => Some(Action::GraphHops(-1)),
-        KeyCode::Char('f') if view == View::Graph => Some(Action::GraphApplyFacet),
-        KeyCode::Char('[') if view == View::Graph => Some(Action::GraphFacetMove(-1)),
-        KeyCode::Char(']') if view == View::Graph => Some(Action::GraphFacetMove(1)),
-        KeyCode::Char('x') if view == View::Graph => Some(Action::GraphClearFilters),
-        KeyCode::Char('[') if view == View::Timeline => Some(Action::TimelineFacetMove(-1)),
-        KeyCode::Char(']') if view == View::Timeline => Some(Action::TimelineFacetMove(1)),
-        KeyCode::Char('f') if view == View::Timeline => Some(Action::TimelineApplyFilter),
-        KeyCode::Char('x') if view == View::Timeline => Some(Action::TimelineClearFilter),
-        KeyCode::Char('l') if matches!(view, View::Timeline | View::Entities) => {
-            Some(Action::ToggleNearby)
-        }
-        KeyCode::Char(' ') if view == View::Entities => Some(Action::ToggleMergeMark),
-        KeyCode::Char('m') if view == View::Entities => Some(Action::ProposeMerge),
-        KeyCode::Char('u') if matches!(view, View::Entities | View::Object) => {
-            Some(Action::Unresolve)
-        }
-        KeyCode::Char('o') if view == View::Welcome => Some(Action::Command("open_investigation")),
-        KeyCode::Char('d') if view == View::Welcome => Some(Action::Command("doctor")),
-        KeyCode::Char('c') if view == View::Jobs => Some(Action::Command("cancel_job")),
-        KeyCode::Char('1') => Some(Action::OpenOverview),
-        KeyCode::Char('2') => Some(Action::OpenPages),
-        KeyCode::Char('3') => Some(Action::OpenSources),
-        KeyCode::Char('4') => Some(Action::OpenFindings),
-        KeyCode::Char('5') => Some(Action::OpenEntities),
-        KeyCode::Char('6') => Some(Action::OpenTimeline),
-        KeyCode::Char('7') => Some(Action::OpenAgent),
-        KeyCode::Char('8') => Some(Action::OpenJobs),
-        KeyCode::Char('9') => Some(Action::OpenTools),
-        KeyCode::Char('0') => Some(Action::OpenSettings),
-        _ => None,
-    }
+pub fn help_text() -> String {
+    crate::app::commands::help_text()
 }
-
-pub const HELP_TEXT: &str = "\
-os-int keyboard shortcuts
-
-  q            Quit (or close an overlay)
-  Esc          Back / close overlay
-  Ctrl+C       Quit from anywhere
-  Tab          Next pane          Shift+Tab  previous pane
-  j / k        Move selection     Enter      open / select
-  /  Ctrl+F    Search             p  Ctrl+P  command palette
-  a            Ask agent          n          new investigation, page, or finding
-  e            Edit notes in $EDITOR (Overview) or open Settings
-  r            Run default collectors for this page
-  i            Ingest STIX / MISP / CSV / JSON / Evidence Batch
-  b            Run playbook (bundled YAML or a file)
-  v            Object View for the selected entity or page
-  g            Graph (entities as nodes, relationships as edges)
-  s            Search Around from the selection (default 2 hops)
-  + / -        Graph: more / fewer hops
-  [ / ]        Graph: move facet cursor
-  f            Graph: apply (or toggle) the highlighted facet
-  x            Graph: clear facet filters
-  [ / ]        Timeline: move entity-filter cursor
-  f            Timeline: filter overlay by highlighted entity
-  x            Timeline: clear entity filter
-  l            Timeline / Entities: nearby (same country or prefix)
-  Space        Entities: mark / unmark for merge
-  m            Entities: propose merge of marked rows
-  u            Object View / Entities: unresolve the current bag
-  c            Cancel the selected job (Jobs view)
-  ?            This help
-
-  1 Overview  2 Pages  3 Sources  4 Findings  5 Entities
-  6 Timeline  7 Agent  8 Jobs     9 Tools     0 Settings
-  Graph and Audit are in the Navigate column (g or palette).
-
-Enter on Entities opens Object View (properties, catalogued
-links, sources, findings). Esc returns. Unknown link verbs
-appear under Other.
-
-Enter on Graph opens Object View for the selected node.
-Search Around merges new hops into the canvas. Caps require
-confirm before rendering a large neighborhood.
-
-Timeline overlays collection log rows and first-class Events.
-Filter by entity with [ ] then f. l lists nearby by country
-or prefix. Esc restores the previous list and selection.
-
-Mark two or more entities (Space) and press m to merge.
-Suggestions never auto-merge. Object View lists constituents;
-u unresolves. Esc cancels a confirm without applying.
-
-Overview shows the TLP marking. Palette: Set marking, Open Audit,
-Add team member. Export includes the audit slice.
-
-Notes and Artifacts are in the Navigate column. On the welcome
-screen, o opens a case and d runs doctor.
-
-Agent proposals: Enter accepts, R rejects, Esc dismisses the list.
-
-Badges: [COL] collected  [EXT] original material
-        [ANL] you wrote  [AI]  agent inference
-
-A domain page collects DNS, RDAP, HTTP, TLS, certificate
-transparency, and subdomain expansion. An IP page collects RDAP
-and IP intelligence. An email page collects DNS, CT, and the
-email identity pack. A username page collects public profiles.
-Press p and type dns, rdap, http, tls, ct, ip, email, username,
-or subdomain for one collector. i ingests a STIX/MISP/CSV file.
-Press b (or palette Run playbook) for domain-infra and other playbooks.
-Watch and Playbook prompt are palette commands. Automations propose.
-
-Collected material is untrusted evidence. Accepting an AI finding
-keeps the AI badge. os-int observes public information.
-";
 
 #[cfg(test)]
 mod tests {
@@ -358,13 +246,100 @@ mod tests {
             map_key(press(KeyCode::Esc), &overlay, View::Agent, true),
             Some(Action::Cancel)
         ));
+        assert!(map_key(press(KeyCode::Enter), &overlay, View::Agent, true).is_none());
+        let save = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
         assert!(matches!(
-            map_key(press(KeyCode::Enter), &overlay, View::Agent, true),
+            map_key(save, &overlay, View::Agent, true),
             Some(Action::Submit)
         ));
         assert!(matches!(
             map_key(press(KeyCode::Char('i')), &overlay, View::Entities, true),
             Some(Action::InsertChar('i'))
+        ));
+    }
+
+    fn proposals(armed: bool) -> Overlay {
+        Overlay::Proposals {
+            run_id: uuid::Uuid::nil(),
+            selected: 0,
+            armed,
+        }
+    }
+
+    #[test]
+    fn proposals_require_shift_a_then_y() {
+        let overlay = proposals(false);
+        assert!(map_key(press(KeyCode::Enter), &overlay, View::Agent, false).is_none());
+        assert!(map_key(press(KeyCode::Char('a')), &overlay, View::Agent, false).is_none());
+        assert!(map_key(press(KeyCode::Char('y')), &overlay, View::Agent, false).is_none());
+        let shift_a = KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT);
+        assert!(matches!(
+            map_key(shift_a, &overlay, View::Agent, false),
+            Some(Action::Arm)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('A')), &overlay, View::Agent, false),
+            Some(Action::Arm)
+        ));
+        let armed = proposals(true);
+        assert!(matches!(
+            map_key(press(KeyCode::Char('y')), &armed, View::Agent, false),
+            Some(Action::Accept)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('Y')), &armed, View::Agent, false),
+            Some(Action::Accept)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Enter), &armed, View::Agent, false),
+            Some(Action::Disarm)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('a')), &armed, View::Agent, false),
+            Some(Action::Disarm)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('j')), &armed, View::Agent, false),
+            Some(Action::Disarm)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Char('r')), &overlay, View::Agent, false),
+            Some(Action::Reject)
+        ));
+    }
+
+    #[test]
+    fn confirm_overlay_requires_y_not_enter() {
+        let overlay = Overlay::Confirm {
+            title: "Confirm".into(),
+            message: "Write?".into(),
+            command: "confirm_resolve".into(),
+        };
+        assert!(map_key(press(KeyCode::Enter), &overlay, View::Entities, false).is_none());
+        assert!(matches!(
+            map_key(press(KeyCode::Char('y')), &overlay, View::Entities, false),
+            Some(Action::Select)
+        ));
+        assert!(matches!(
+            map_key(press(KeyCode::Esc), &overlay, View::Entities, false),
+            Some(Action::Cancel)
+        ));
+    }
+
+    #[test]
+    fn palette_enter_selects_without_submitting_a_write() {
+        let overlay = Overlay::Palette {
+            query: crate::app::Input::default(),
+            selected: 0,
+        };
+        assert!(matches!(
+            map_key(press(KeyCode::Enter), &overlay, View::Overview, true),
+            Some(Action::Select)
+        ));
+        let save = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
+        assert!(matches!(
+            map_key(save, &overlay, View::Overview, true),
+            Some(Action::Submit)
         ));
     }
 
