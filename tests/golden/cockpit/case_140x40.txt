@@ -3,8 +3,8 @@
 ▌1 Case        ▌DOM acme-login.com        ✎ 1    0s ✓                                           DOM  acme-login.com
  2 Entities                                                                                     ✎ 1 facts · 1 sources
  3 Evidence    AT A GLANCE                                                                      SOURCES
- 4 Graph          2 entities   ● 1  ◇ 0  ✎ 1  ◆ 0                                                 S1 ●  dns  0s
- 5 Review 1       1 findings   ● 0  ◇ 0  ✎ 0  ◆ 1                                               NOTES  e edit
+ 4 Graph          2 entities   ● 1  ✎ 1                                                           S1 ●  dns  0s
+ 5 Review 1       1 findings   ◆ 1                                                              NOTES  e edit
  6 Jobs                                                                                           No notes yet. e edits in $EDITOR.
                NEXT
                  ◆ 1 agent proposals waiting  5 review

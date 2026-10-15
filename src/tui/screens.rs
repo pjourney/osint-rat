@@ -17,8 +17,8 @@ use super::glyphs::Glyphs;
 use super::table::{Align, Column, TableCell, provenance_cells, relative_time, render_table};
 use super::theme::Theme;
 use super::widgets::{
-    empty_state, error_panel, input_line, list_from, loading_state, pane_block, pane_title,
-    provenance_glyph, provenance_span, rule_span, truncate,
+    ellipsize, empty_state, error_panel, input_line, list_from, loading_state, pane_block,
+    pane_title, provenance_glyph, provenance_span, rule_span,
 };
 
 pub fn welcome(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
@@ -79,7 +79,10 @@ pub fn welcome(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         detected.push(Line::from(vec![
             Span::raw(format!("  {:<14} ", check.name)),
             Span::styled(check.status.symbol(), style),
-            Span::styled(format!("  {}", truncate(&check.detail, 36)), theme.muted),
+            Span::styled(
+                format!("  {}", ellipsize(&check.detail, 36, theme.glyphs.ascii)),
+                theme.muted,
+            ),
         ]));
     }
     frame.render_widget(
@@ -144,33 +147,51 @@ pub fn workspace(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) -> Rec
 }
 
 fn workspace_linear(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) -> Rect {
-    let rail_height = (app.nav_items().len() as u16).saturating_add(2).min(8);
-    let inspector_height = (area.height as u32 * 40 / 100).max(6) as u16;
+    let rail_height: u16 = 2;
+    let min_board = 10u16;
+    let preferred_inspector = ((area.height as u32 * 30) / 100).max(6) as u16;
+    let inspector_height = preferred_inspector
+        .min(
+            area.height
+                .saturating_sub(rail_height.saturating_add(min_board)),
+        )
+        .max(4)
+        .min(area.height.saturating_sub(rail_height.saturating_add(6)));
     let rows = Layout::vertical([
-        Constraint::Length(rail_height),
+        Constraint::Length(rail_height.min(area.height)),
         Constraint::Min(6),
-        Constraint::Length(inspector_height.min(area.height.saturating_sub(8))),
+        Constraint::Length(inspector_height),
     ])
     .split(area);
-    frame.render_widget(
-        Paragraph::new(Span::styled("RAIL", theme.header)),
-        Rect {
-            x: rows[0].x,
-            y: rows[0].y,
-            width: rows[0].width,
-            height: 1,
-        },
-    );
-    let rail_body = Rect {
-        x: rows[0].x,
-        y: rows[0].y.saturating_add(1),
-        width: rows[0].width,
-        height: rows[0].height.saturating_sub(1),
-    };
-    draw_rail(frame, rail_body, app, theme, area.width < 80);
+    draw_rail_linear(frame, rows[0], app, theme);
     draw_main(frame, rows[1], app, theme);
     draw_inspector(frame, rows[2], app, theme);
     rows[1]
+}
+
+fn draw_rail_linear(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    let review = app.pending_review_count();
+    let mut spans = Vec::new();
+    for (index, (label, view)) in app.nav_items().into_iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::raw("  "));
+        }
+        let current = app.rail_view_is_current(view);
+        let mut text = format!("{} {label}", index + 1);
+        if view == View::Review && review > 0 {
+            text = format!("{text} {review}");
+        }
+        if current {
+            text = format!("{}{text}", theme.glyphs.focus);
+        }
+        let style = if current { theme.selected } else { theme.fg };
+        spans.push(Span::styled(text, style));
+    }
+    let lines = vec![
+        Line::from(Span::styled("RAIL", theme.header)),
+        Line::from(spans),
+    ];
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
 }
 
 fn draw_rail(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, digits_only: bool) {
@@ -297,7 +318,10 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
             };
             lines.push(Line::from(vec![
                 Span::styled(format!("{cursor}{} ", target.kind_tag()), style),
-                Span::styled(format!("{:<22}", truncate(&target.value, 22)), style),
+                Span::styled(
+                    format!("{:<22}", ellipsize(&target.value, 22, theme.glyphs.ascii)),
+                    style,
+                ),
                 glyph,
                 Span::styled(format!(" {src:<3}  {status} {done}"), theme.muted),
             ]));
@@ -353,17 +377,20 @@ fn glance_line(
     counts: crate::app::case::GlanceCounts,
     theme: &Theme,
 ) -> Line<'static> {
-    Line::from(vec![
-        Span::raw(format!("  {:>2} {label:<9}  ", counts.total)),
-        provenance_glyph(crate::model::Provenance::Collected, theme),
-        Span::raw(format!(" {}  ", counts.collected)),
-        provenance_glyph(crate::model::Provenance::External, theme),
-        Span::raw(format!(" {}  ", counts.external)),
-        provenance_glyph(crate::model::Provenance::Analyst, theme),
-        Span::raw(format!(" {}  ", counts.analyst)),
-        provenance_glyph(crate::model::Provenance::Agent, theme),
-        Span::raw(format!(" {}", counts.agent)),
-    ])
+    let mut spans = vec![Span::raw(format!("  {:>2} {label:<9}  ", counts.total))];
+    let mut wrote = false;
+    for (provenance, count) in counts.nonzero_buckets() {
+        if wrote {
+            spans.push(Span::raw("  "));
+        }
+        wrote = true;
+        spans.push(provenance_glyph(provenance, theme));
+        spans.push(Span::raw(format!(" {count}")));
+    }
+    if !wrote {
+        spans.push(Span::styled("none", theme.muted));
+    }
+    Line::from(spans)
 }
 
 fn evidence(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
@@ -714,7 +741,7 @@ fn object_view(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused:
             lines.push(Line::from(format!(
                 "  {:<16}  {}",
                 property.label,
-                truncate(&property.value, 56)
+                ellipsize(&property.value, 56, theme.glyphs.ascii)
             )));
         }
     }
@@ -750,7 +777,7 @@ fn object_view(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused:
             "  {}  [{}]  {}",
             source.reference,
             source.provenance,
-            truncate(&source.title, 48)
+            ellipsize(&source.title, 48, theme.glyphs.ascii)
         )));
     }
     lines.push(Line::from(""));
@@ -763,7 +790,7 @@ fn object_view(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused:
             "  {}  [{}]  {}",
             finding.reference,
             finding.provenance,
-            truncate(&finding.title, 48)
+            ellipsize(&finding.title, 48, theme.glyphs.ascii)
         )));
     }
     if !view.constituents.is_empty() {
@@ -778,7 +805,7 @@ fn object_view(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused:
                 "  {}  {:<10}  {}",
                 constituent.reference,
                 constituent.kind,
-                truncate(&constituent.label, 40)
+                ellipsize(&constituent.label, 40, theme.glyphs.ascii)
             )));
         }
         lines.push(Line::from(Span::styled(
@@ -882,7 +909,8 @@ fn graph_facet_line(app: &App, chips: &[crate::model::FacetChip], theme: &Theme)
     let mut last_axis = None;
     for (index, chip) in chips.iter().enumerate() {
         if last_axis.is_some() && last_axis != Some(chip.axis) {
-            spans.push(Span::styled(" │ ", theme.muted));
+            let sep = if theme.glyphs.ascii { " | " } else { " │ " };
+            spans.push(Span::styled(sep, theme.muted));
         } else if index > 0 {
             spans.push(Span::raw("  "));
         }
@@ -1133,7 +1161,7 @@ fn graph_tree_node_line(ctx: &GraphTreeCtx<'_>, id: uuid::Uuid, seen: bool) -> L
         Span::raw(format!(
             "{} {}",
             super::glyphs::Glyphs::entity_tag(&entity.kind),
-            truncate(entity.display_name(), 28)
+            ellipsize(entity.display_name(), 28, ctx.theme.glyphs.ascii)
         )),
         Span::raw(" "),
         provenance_glyph(entity.provenance, ctx.theme),
@@ -1197,7 +1225,7 @@ fn graph_tree_edge_line(
     spans.push(Span::raw(format!(
         "{} {}",
         super::glyphs::Glyphs::entity_tag(&entity.kind),
-        truncate(entity.display_name(), 22)
+        ellipsize(entity.display_name(), 22, ctx.theme.glyphs.ascii)
     )));
     spans.push(Span::raw(" "));
     spans.push(provenance_glyph(entity.provenance, ctx.theme));
@@ -1407,7 +1435,7 @@ fn audit(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool)
             entry.kind.label(),
             entry.actor,
             entry.machine,
-            truncate(&entry.summary, 48)
+            ellipsize(&entry.summary, 48, theme.glyphs.ascii)
         ));
     }
     render_board_list(
@@ -1498,7 +1526,7 @@ fn notes(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool)
         items.push(format!(
             "{} page notes  {}",
             page.short_ref(),
-            truncate(&page.notes, 60)
+            ellipsize(&page.notes, 60, theme.glyphs.ascii)
         ));
     }
     for note in &workspace.data.notes {
@@ -1604,7 +1632,7 @@ fn agent(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool)
                 "{marker} {}  {}  {}",
                 previous.short_ref(),
                 previous.status.symbol(),
-                truncate(&previous.question, 50)
+                ellipsize(&previous.question, 50, theme.glyphs.ascii)
             )));
         }
     }
@@ -2088,7 +2116,7 @@ fn inspector_sources(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Lin
             ]));
             if !source.title.is_empty() {
                 lines.push(Line::from(Span::styled(
-                    format!("     {}", truncate(&source.title, 36)),
+                    format!("     {}", ellipsize(&source.title, 36, theme.glyphs.ascii)),
                     theme.muted,
                 )));
             }
@@ -2179,7 +2207,10 @@ fn entity_inspector_props(
         for (key, value) in entity.fields.iter().take(12) {
             let source_ref = field_footnote(entity, workspace, key, value);
             lines.push(Line::from(vec![
-                Span::raw(format!("  {key:<12}  {}  ", truncate(value, 18))),
+                Span::raw(format!(
+                    "  {key:<12}  {}  ",
+                    ellipsize(value, 18, theme.glyphs.ascii)
+                )),
                 provenance_glyph(entity.provenance, theme),
                 Span::styled(source_ref, theme.muted),
             ]));
@@ -2241,7 +2272,7 @@ fn inspector_notes(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<
         lines.push(Line::from(format!(
             "  {}  {}",
             note.short_ref(),
-            truncate(note.headline(), 36)
+            ellipsize(note.headline(), 36, theme.glyphs.ascii)
         )));
     }
     if lines.len() == 1 {
@@ -2301,7 +2332,7 @@ fn inspector_history(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Lin
         lines.push(Line::from(format!(
             "  {}  {}",
             entry.short_ref(),
-            truncate(&entry.summary, 36)
+            ellipsize(&entry.summary, 36, theme.glyphs.ascii)
         )));
         lines.push(Line::from(Span::styled(
             format!("     {}", entry.occurred_at.format("%Y-%m-%d %H:%M UTC")),
@@ -2349,7 +2380,7 @@ fn review_inspector_lines(
                 format!(
                     "  {mark} {}  {}",
                     citation.reference,
-                    truncate(&citation.label, 28)
+                    ellipsize(&citation.label, 28, theme.glyphs.ascii)
                 ),
                 style,
             )));
@@ -2367,7 +2398,10 @@ fn review_inspector_lines(
             theme.header,
         )));
         lines.push(Line::from(Span::styled(
-            format!("Q  {}", truncate(&sanitize_line(&run.question), 36)),
+            format!(
+                "Q  {}",
+                ellipsize(&sanitize_line(&run.question), 36, theme.glyphs.ascii)
+            ),
             theme.muted,
         )));
         let body = app
@@ -2679,7 +2713,10 @@ fn append_fields(lines: &mut Vec<Line<'static>>, fields: &crate::model::Fields, 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled("Fields", theme.header)));
     for (key, value) in fields.iter().take(16) {
-        lines.push(Line::from(format!("  {key}  {}", truncate(value, 60))));
+        lines.push(Line::from(format!(
+            "  {key}  {}",
+            ellipsize(value, 60, theme.glyphs.ascii)
+        )));
     }
 }
 

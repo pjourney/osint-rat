@@ -13,7 +13,7 @@ use crate::sanitize::sanitize_line;
 
 use super::keymap::help_text;
 use super::theme::Theme;
-use super::widgets::{centered, empty_state, input_line, list_from, pane_block, truncate};
+use super::widgets::{centered, ellipsize, empty_state, input_line, list_from, pane_block};
 
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     match &app.overlay {
@@ -63,7 +63,7 @@ fn doctor(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         lines.push(Line::from(vec![
             Span::raw(format!("{:<14} ", check.name)),
             Span::styled(format!("{:<8}", check.status.symbol()), style),
-            Span::raw(truncate(&check.detail, 48)),
+            Span::raw(ellipsize(&check.detail, 48, theme.glyphs.ascii)),
         ]));
     }
     let popup = centered(area, 72, 20);

@@ -226,10 +226,30 @@ impl TerminalEnv {
         Self {
             colorterm: std::env::var("COLORTERM").ok(),
             term: std::env::var("TERM").ok(),
-            no_color: std::env::var_os("NO_COLOR").is_some(),
+            no_color: std::env::var_os("NO_COLOR").is_some() || env_os_int_plain(),
             colorfgbg: std::env::var("COLORFGBG").ok(),
         }
     }
+}
+
+/// Presence-based like `NO_COLOR`: unset is off; empty/`1`/`yes`/`on`/`true` (and any other
+/// value) is on. Explicit false-y values (`0`, `false`, `no`, `off`, `n`) are off.
+pub fn env_os_int_plain() -> bool {
+    is_os_int_plain(std::env::var_os("OS_INT_PLAIN"))
+}
+
+pub fn is_os_int_plain(value: Option<impl AsRef<std::ffi::OsStr>>) -> bool {
+    let Some(raw) = value else {
+        return false;
+    };
+    !matches!(
+        raw.as_ref()
+            .to_string_lossy()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "0" | "false" | "no" | "off" | "n"
+    )
 }
 
 /// Result of walking COLORTERM, then TERM, then NO_COLOR, then `ui.color`.
@@ -1273,6 +1293,23 @@ mod tests {
         config.ui.color = color.into();
         config.ui.ascii = ascii;
         config
+    }
+
+    #[test]
+    fn os_int_plain_is_presence_based_except_falsey() {
+        assert!(!is_os_int_plain(None::<&str>));
+        for value in ["", "1", "yes", "on", "true", "TRUE", "whatever"] {
+            assert!(
+                is_os_int_plain(Some(value)),
+                "{value:?} should enable plain"
+            );
+        }
+        for value in ["false", "FALSE", "0", "no", "off", "n", "No"] {
+            assert!(
+                !is_os_int_plain(Some(value)),
+                "{value:?} should disable plain"
+            );
+        }
     }
 
     #[test]

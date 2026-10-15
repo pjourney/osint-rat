@@ -1,18 +1,21 @@
 //! Environment checks used by `os-int doctor` and the welcome screen.
 
+use serde::Serialize;
+
 use crate::config::Config;
 use crate::paths::AppPaths;
 use crate::storage::Store;
 use crate::tools::ToolRegistry;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CheckStatus {
     Ok,
     Missing,
     Warn,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Check {
     pub name: String,
     pub status: CheckStatus,
@@ -149,5 +152,23 @@ impl CheckStatus {
             CheckStatus::Missing => "missing",
             CheckStatus::Warn => "warn",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checks_serialize_for_doctor_json() {
+        let check = Check {
+            name: "Database".into(),
+            status: CheckStatus::Ok,
+            detail: "ok".into(),
+        };
+        let json = serde_json::to_value(&check).expect("json");
+        assert_eq!(json["name"], "Database");
+        assert_eq!(json["status"], "ok");
+        assert_eq!(json["detail"], "ok");
     }
 }

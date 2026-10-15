@@ -8,13 +8,15 @@ mod preview;
 mod screens;
 mod table;
 mod theme;
-mod widgets;
+pub(crate) mod widgets;
 
 pub use glyphs::Glyphs;
 pub use motion::{Animator, MotionMode, TICK, TICK_MS, TimerNeed};
 pub use preview::render_preview;
 pub use table::relative_time_from;
-pub use theme::{ColorDepth, ColorMode, TerminalEnv, Theme, ThemeName};
+pub use theme::{
+    ColorDepth, ColorMode, TerminalEnv, Theme, ThemeName, env_os_int_plain, is_os_int_plain,
+};
 
 use std::time::Duration;
 
@@ -388,8 +390,9 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
     } else {
         format!("{} jobs", theme.glyphs.done)
     };
+    let crumb = if theme.glyphs.ascii { ">" } else { "▸" };
     let title = format!(
-        " os-int ▸ {investigation} ▸ {}  {marking}",
+        " os-int {crumb} {investigation} {crumb} {}  {marking}",
         app.view.title()
     );
     let right = format!(" {review_bit}  {jobs_bit}  {agent} ");
@@ -398,7 +401,7 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
     let available = area.width as usize;
     let (title, title_width) = if title_width + right_width > available {
         let keep = available.saturating_sub(right_width.saturating_add(1));
-        let truncated = truncate_width(&title, keep);
+        let truncated = truncate_width(&title, keep, theme.glyphs.ascii);
         let width = UnicodeWidthStr::width(truncated.as_str());
         (truncated, width)
     } else {
@@ -420,26 +423,8 @@ fn draw_confirm_bar(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, t
     frame.render_widget(Paragraph::new(line).style(theme.panel), area);
 }
 
-fn truncate_width(text: &str, max_width: usize) -> String {
-    if max_width == 0 {
-        return String::new();
-    }
-    if UnicodeWidthStr::width(text) <= max_width {
-        return text.to_string();
-    }
-    let mut output = String::new();
-    let mut width = 0usize;
-    let limit = max_width.saturating_sub(1);
-    for ch in text.chars() {
-        let ch_width = UnicodeWidthStr::width(ch.encode_utf8(&mut [0; 4]));
-        if width + ch_width > limit {
-            break;
-        }
-        output.push(ch);
-        width += ch_width;
-    }
-    output.push('…');
-    output
+fn truncate_width(text: &str, max_width: usize, ascii: bool) -> String {
+    widgets::ellipsize(text, max_width, ascii)
 }
 
 fn draw_status(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme: &Theme) {
@@ -613,7 +598,7 @@ mod tests {
         assert!(text.contains("café"), "{text}");
         let title = " os-int ─ Investigation: café  [TLP:AMBER] ";
         assert!(title.len() > UnicodeWidthStr::width(title));
-        assert_eq!(truncate_width("hello", 0), "");
+        assert_eq!(truncate_width("hello", 0, false), "");
     }
 
     #[test]
@@ -1703,6 +1688,208 @@ mod tests {
             wrote.is_empty(),
             "wrote snapshots; re-run to confirm: {}",
             wrote.join(", ")
+        );
+    }
+
+    #[test]
+    fn plain_80x24_keeps_case_next_graph_edges_and_ascii_glyphs() {
+        let (_directory, mut app) = snapshot_app();
+        app.apply_plain_mode();
+        app.dispatch(Action::OpenOverview).expect("case");
+        app.pane = crate::app::Pane::Main;
+        let case = render_snapshot(&app, 80, 24);
+        assert!(case.contains("NEXT"), "Case NEXT clipped at 80x24\n{case}");
+        assert!(
+            case.contains("agent proposals") || case.contains("5 review"),
+            "NEXT body clipped at 80x24\n{case}"
+        );
+        assert!(
+            !case.contains('◇'),
+            "Findings glance must not use the hollow-diamond glyph in plain mode\n{case}"
+        );
+        assert!(
+            case.contains('*') && case.contains("findings"),
+            "agent findings must use the ASCII AI glyph\n{case}"
+        );
+        app.dispatch(Action::OpenGraph).expect("graph");
+        app.pane = crate::app::Pane::Main;
+        let graph = render_snapshot(&app, 80, 24);
+        assert!(
+            graph.contains("resolves_to"),
+            "Graph edges clipped at 80x24\n{graph}"
+        );
+        assert!(
+            graph.contains("|-") || graph.contains("`-") || graph.contains("->"),
+            "Graph tree edge missing at 80x24\n{graph}"
+        );
+        assert!(
+            !graph.contains('│'),
+            "plain-mode facet strip must not use a box-drawing bar\n{graph}"
+        );
+        assert!(graph.contains(" | ") || graph.contains("|"), "{graph}");
+    }
+
+    #[test]
+    fn apply_plain_mode_forces_no_colour() {
+        let (_directory, mut app) = snapshot_app();
+        app.config.ui.color = "truecolor".into();
+        app.config.ui.theme = "dark".into();
+        app.apply_plain_mode();
+        let theme = Theme::from_config(&app.config);
+        assert_eq!(theme.depth, ColorDepth::None);
+        assert!(theme.glyphs.ascii);
+        assert_eq!(app.config.ui.color, "none");
+    }
+
+    #[test]
+    fn cockpit_render_matrix_covers_themes_color_motion_and_sizes() {
+        let (_directory, mut app) = snapshot_app();
+        let sizes = [(80u16, 24u16), (110, 24), (140, 40), (200, 50)];
+        let env = crate::tui::TerminalEnv {
+            colorterm: Some("truecolor".into()),
+            term: Some("xterm-256color".into()),
+            no_color: false,
+            colorfgbg: None,
+        };
+        for theme in ["dark", "light", "mono", "phosphor", "amber"] {
+            for color in ["truecolor", "256", "16"] {
+                for motion in ["full", "reduced", "off"] {
+                    app.config.ui.theme = theme.into();
+                    app.config.ui.color = color.into();
+                    app.config.ui.motion = motion.into();
+                    app.config.ui.ascii = false;
+                    app.plain = false;
+                    app.motion = crate::tui::Animator::from_config(&app.config, &env, false);
+                    let views = [
+                        Action::OpenOverview,
+                        Action::OpenEntities,
+                        Action::OpenEvidence,
+                        Action::OpenGraph,
+                        Action::OpenReview,
+                        Action::OpenJobs,
+                        Action::OpenTools,
+                        Action::OpenObjectView,
+                    ];
+                    for action in views {
+                        app.dispatch(action).expect("view");
+                        app.pane = crate::app::Pane::Main;
+                        for (width, height) in sizes {
+                            let screen = render_snapshot(&app, width, height);
+                            assert!(
+                                !screen.trim().is_empty(),
+                                "{theme} {color} {motion} {width}x{height} blank"
+                            );
+                            let max_width = screen
+                                .lines()
+                                .map(|line| line.chars().count())
+                                .max()
+                                .unwrap_or(0);
+                            assert!(
+                                max_width <= width as usize,
+                                "{theme} {color} {motion} {width}x{height} overflow {max_width}"
+                            );
+                            match app.view {
+                                View::Overview => {
+                                    assert!(
+                                        screen.contains("NEXT"),
+                                        "{theme} {color} {motion} {width}x{height} missing NEXT\n{screen}"
+                                    );
+                                }
+                                View::Graph => {
+                                    let has_edge = screen.contains("resolves_to")
+                                        && (screen.contains("─▶")
+                                            || screen.contains("->")
+                                            || screen.contains("|-")
+                                            || screen.contains("`-"));
+                                    assert!(
+                                        has_edge,
+                                        "{theme} {color} {motion} {width}x{height} missing graph edges\n{screen}"
+                                    );
+                                }
+                                View::Tools => {
+                                    assert!(
+                                        screen.contains("TOOLS") || screen.contains("Tools"),
+                                        "{theme} {color} {motion} {width}x{height} missing Tools\n{screen}"
+                                    );
+                                }
+                                View::Object => {
+                                    assert!(
+                                        screen.contains("Object")
+                                            || screen.contains("Properties")
+                                            || screen.contains("Linked"),
+                                        "{theme} {color} {motion} {width}x{height} missing Object View\n{screen}"
+                                    );
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    app.view = View::Welcome;
+                    app.pane = crate::app::Pane::Main;
+                    for (width, height) in sizes {
+                        let screen = render_snapshot(&app, width, height);
+                        assert!(
+                            screen.contains("Welcome")
+                                || screen.contains("New investigation")
+                                || screen.contains("os-int"),
+                            "{theme} {color} {motion} {width}x{height} missing Welcome\n{screen}"
+                        );
+                    }
+                }
+            }
+        }
+        app.apply_plain_mode();
+        app.dispatch(Action::OpenOverview).expect("case");
+        let plain = render_snapshot(&app, 80, 24);
+        assert!(plain.contains("NEXT"), "{plain}");
+        assert!(!plain.contains('◇'), "{plain}");
+        assert!(!plain.contains('│'), "{plain}");
+        assert!(!plain.contains('…'), "{plain}");
+    }
+
+    #[test]
+    fn large_workspace_renders_without_panic() {
+        let (_directory, mut app) = snapshot_app();
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let mut batch = crate::model::EvidenceBatch::new();
+        let source =
+            crate::model::NewSource::collected(crate::model::SourceKind::Dns, "dns", "bulk dns");
+        let key = batch.add_source(source);
+        for index in 0..250 {
+            let host = format!("host-{index}.example.com");
+            let domain = crate::model::EntityKey::new(crate::model::EntityKind::Hostname, &host);
+            let ip = crate::model::EntityKey::new(
+                crate::model::EntityKind::Ip,
+                &format!("203.0.113.{}", index % 200 + 1),
+            );
+            batch.relate(&domain, "resolves_to", &ip, Some(key));
+        }
+        app.store
+            .apply_batch(
+                crate::storage::ApplyContext {
+                    investigation_id,
+                    page_id: None,
+                    job_id: None,
+                },
+                &batch,
+            )
+            .expect("bulk apply");
+        app.open_investigation(investigation_id)
+            .expect("reload large");
+        app.dispatch(Action::OpenEntities).expect("entities");
+        let entities = render_snapshot(&app, 80, 24);
+        assert!(
+            entities.contains("ENTITIES") || entities.contains("DOM"),
+            "{entities}"
+        );
+        app.dispatch(Action::OpenGraph).expect("graph");
+        let graph = render_snapshot(&app, 200, 50);
+        assert!(graph.contains("Graph") || graph.contains("KIND"), "{graph}");
+        app.dispatch(Action::OpenOverview).expect("case");
+        let home = render_snapshot(&app, 110, 24);
+        assert!(
+            home.contains("AT A GLANCE") || home.contains("TARGETS"),
+            "{home}"
         );
     }
 

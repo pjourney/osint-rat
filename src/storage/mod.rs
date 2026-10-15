@@ -35,8 +35,34 @@ use rows::{RowExt, id, json, ts};
 use crate::model::{CataloguedLink, Identity, Investigation, InvestigationSummary, Marking, now};
 use graph::{backfill_link_catalog, list_link_types};
 
-const BUSY_TIMEOUT_MS: u64 = 5_000;
+const BUSY_TIMEOUT_MS: u64 = 30_000;
+const BUSY_RETRY_ATTEMPTS: u32 = 8;
 const MIN_ID_PREFIX_LENGTH: usize = 4;
+
+fn is_sqlite_busy(error: &rusqlite::Error) -> bool {
+    matches!(
+        error.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
+    )
+}
+
+fn with_busy_retry<T>(mut op: impl FnMut() -> rusqlite::Result<T>) -> rusqlite::Result<T> {
+    let mut delay = std::time::Duration::from_millis(20);
+    let mut last = None;
+    for attempt in 0..BUSY_RETRY_ATTEMPTS {
+        match op() {
+            Ok(value) => return Ok(value),
+            Err(error) if is_sqlite_busy(&error) && attempt + 1 < BUSY_RETRY_ATTEMPTS => {
+                std::thread::sleep(delay);
+                delay = delay.saturating_mul(2);
+                last = Some(error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last.expect("busy retry exhausted"))
+}
+
 pub const GLOBAL_SCOPE: &str = "global";
 
 /// Tables that carry a per-investigation sequence number.
@@ -164,7 +190,8 @@ impl Store {
             )
             .wrap_err("could not configure database")?;
         migrations::migrate(&mut connection).wrap_err("database migration failed")?;
-        backfill_link_catalog(&connection).wrap_err("could not catalogue existing link types")?;
+        with_busy_retry(|| backfill_link_catalog(&mut connection))
+            .wrap_err("could not catalogue existing link types")?;
         Ok(Store {
             connection,
             path,

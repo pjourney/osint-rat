@@ -1434,7 +1434,7 @@ pub fn resolve_motion(configured: &str, env: &TerminalEnv, plain: bool) -> Motio
         .map(str::trim)
         .unwrap_or("")
         .to_ascii_lowercase();
-    let screen_reader = std::env::var_os("OS_INT_PLAIN").is_some();
+    let screen_reader = super::theme::env_os_int_plain();
     if plain || screen_reader || env.no_color || term == "dumb" || term == "unknown" {
         return MotionMode::Off;
     }
@@ -1858,6 +1858,15 @@ mod tests {
         dumb.term = Some("dumb".into());
         assert_eq!(resolve_motion("reduced", &dumb, false), MotionMode::Off);
         assert_eq!(resolve_motion("off", &env, false), MotionMode::Off);
+    }
+
+    #[test]
+    fn os_int_plain_false_does_not_force_motion_off() {
+        assert!(!crate::tui::is_os_int_plain(Some("false")));
+        assert!(crate::tui::is_os_int_plain(Some("1")));
+        assert!(crate::tui::is_os_int_plain(Some("")));
+        assert!(crate::tui::is_os_int_plain(Some("yes")));
+        assert!(crate::tui::is_os_int_plain(Some("on")));
     }
 
     #[test]

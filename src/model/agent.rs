@@ -133,6 +133,13 @@ impl AgentAction {
 
     /// A one-line human description used in proposal lists.
     pub fn summary(&self) -> String {
+        self.summary_with(false)
+    }
+
+    /// Same as [`Self::summary`], with ASCII glyphs when `ascii` is set.
+    pub fn summary_with(&self, ascii: bool) -> String {
+        let run = if ascii { ">" } else { "▶" };
+        let propose = if ascii { "*" } else { "◇" };
         match self {
             AgentAction::AddFinding { title, .. } => format!("+ Finding: {title}"),
             AgentAction::AddNote { body } => {
@@ -151,33 +158,33 @@ impl AgentAction {
                 format!("+ Link: {from} --{relation}--> {to}")
             }
             AgentAction::RunCollector { collector, target } => {
-                format!("▶ Run collector {collector} on {target}")
+                format!("{run} Run collector {collector} on {target}")
             }
             AgentAction::GenerateReport { format } => {
                 format!(
-                    "▶ Generate {} report",
+                    "{run} Generate {} report",
                     format.as_deref().unwrap_or("markdown")
                 )
             }
             AgentAction::ProposeResolve { entities, reason } => {
                 if entities.is_empty() {
                     if reason.is_empty() {
-                        "◇ Propose resolve (pending collect)".into()
+                        format!("{propose} Propose resolve (pending collect)")
                     } else {
-                        format!("◇ Propose resolve (pending collect): {reason}")
+                        format!("{propose} Propose resolve (pending collect): {reason}")
                     }
                 } else {
-                    format!("◇ Propose resolve {}", entities.join(", "))
+                    format!("{propose} Propose resolve {}", entities.join(", "))
                 }
             }
             AgentAction::ProposeUnresolve { entity, .. } => {
-                format!("◇ Propose unresolve {entity}")
+                format!("{propose} Propose unresolve {entity}")
             }
             AgentAction::RunPlaybook { playbook } => {
-                format!("◇ Run playbook {playbook}")
+                format!("{propose} Run playbook {playbook}")
             }
             AgentAction::AssertFindingTemplate { title, .. } => {
-                format!("◇ Finding template: {title}")
+                format!("{propose} Finding template: {title}")
             }
         }
     }
@@ -271,5 +278,28 @@ pub struct Proposal {
 impl Proposal {
     pub fn short_ref(&self) -> ShortRef {
         ShortRef::new(RefKind::Proposal, self.seq)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AgentAction;
+
+    #[test]
+    fn summary_glyphs_render_at_display_time() {
+        let action = AgentAction::ProposeResolve {
+            entities: vec!["E-1".into()],
+            reason: String::new(),
+        };
+        assert!(action.summary().contains('◇'));
+        assert!(action.summary_with(true).starts_with("* "));
+        assert!(!action.summary_with(true).contains('◇'));
+        let run = AgentAction::RunCollector {
+            collector: "dns".into(),
+            target: "example.com".into(),
+        };
+        assert!(run.summary().contains('▶'));
+        assert!(run.summary_with(true).starts_with("> "));
+        assert!(!run.summary_with(true).contains('▶'));
     }
 }

@@ -3,8 +3,8 @@
 ▌1 Case        ▌DOM acme-login.com        ✎ 1    0s ✓
  2 Entities
  3 Evidence    AT A GLANCE
- 4 Graph          2 entities   ● 1  ◇ 0  ✎ 1  ◆ 0
- 5 Review 1       1 findings   ● 0  ◇ 0  ✎ 0  ◆ 1
+ 4 Graph          2 entities   ● 1  ✎ 1
+ 5 Review 1       1 findings   ◆ 1
  6 Jobs
                NEXT
                  ◆ 1 agent proposals waiting  5 review
