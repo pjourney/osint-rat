@@ -62,6 +62,10 @@ pub struct UiConfig {
     pub color: String,
     /// Use ASCII glyphs instead of Unicode (`●◇✎◆` become `C X A *`).
     pub ascii: bool,
+    /// `full`, `reduced`, or `off`. Plain mode, `NO_COLOR`, and `TERM=dumb` force `off`.
+    pub motion: String,
+    /// Phosphor CRT scanline (alternate rows). Off by default; never used for data.
+    pub scanline: bool,
     /// Redraw interval while background jobs are running.
     pub tick_rate_ms: u64,
     /// Command used for long-form editing (falls back to `$VISUAL`, `$EDITOR`, then `vi`).
@@ -74,6 +78,8 @@ impl Default for UiConfig {
             theme: "auto".into(),
             color: "auto".into(),
             ascii: false,
+            motion: "full".into(),
+            scanline: false,
             tick_rate_ms: DEFAULT_TICK_RATE_MS,
             editor: None,
         }
@@ -371,7 +377,12 @@ theme = "auto"
 color = "auto"
 # ASCII glyphs (C X A *) instead of Unicode (● ◇ ✎ ◆).
 ascii = false
-# Redraw interval (ms) while background jobs are running. The UI is otherwise event-driven.
+# full | reduced | off. Motion only tells you about state. Idle is still.
+# --plain, screen-reader, NO_COLOR, and TERM=dumb force off.
+motion = "full"
+# Phosphor only: faint CRT scanline on alternate rows. Off by default. Never encodes data.
+scanline = false
+# Legacy redraw hint while jobs run. Motion uses a 60 ms tick only while animations are active.
 tick_rate_ms = 250
 # Editor for long-form notes (falls back to $VISUAL, $EDITOR, then vi).
 # editor = "nvim"

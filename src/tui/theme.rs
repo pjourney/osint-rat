@@ -458,6 +458,45 @@ impl Theme {
             ansi16_name: ansi16_name(spec.ansi16),
         }
     }
+
+    pub fn role_rgb(&self, role: Role) -> Option<Rgb> {
+        self.palette.roles[idx(role)].rgb
+    }
+
+    /// Heat gradient stop. Heat encodes source support, never risk.
+    pub fn heat_lerp(&self, t: f64) -> Style {
+        heat_style(self, t.clamp(0.0, 1.0))
+    }
+
+    /// Graph-edge colour from how many sources back the edge. Heat is corroboration, never risk.
+    pub fn corroboration_style(&self, source_count: usize) -> Style {
+        match source_count {
+            0 | 1 => self.heat0,
+            2 | 3 => self.heat1,
+            4..=6 => self.heat2,
+            _ => self.heat3,
+        }
+    }
+
+    /// Phosphor scanline: alternate rows 3% darker. Off by default; never used for data.
+    pub fn scanline_style(&self) -> Style {
+        match self.role_rgb(Role::Panel) {
+            Some(rgb) => {
+                let dim = scale_rgb(rgb, 0.97);
+                self.panel.bg(color_from_rgb(dim, self.depth))
+            }
+            None => self.panel,
+        }
+    }
+
+    pub fn scale_fg(&self, role: Role, factor: f64) -> Style {
+        match self.role_rgb(role) {
+            Some(rgb) => self
+                .style(role)
+                .fg(color_from_rgb(scale_rgb(rgb, factor), self.depth)),
+            None => self.style(role),
+        }
+    }
 }
 
 /// One row of `os-int theme preview`.
@@ -1046,6 +1085,120 @@ pub fn palette_rgb(name: ThemeName, role: Role) -> Option<Rgb> {
     palette_for(name).roles[idx(role)].rgb
 }
 
+fn color_from_rgb(rgb: Rgb, depth: ColorDepth) -> Color {
+    match depth {
+        ColorDepth::TrueColor => Color::Rgb(rgb.r, rgb.g, rgb.b),
+        ColorDepth::Ansi256 => Color::Indexed(nearest_256_rgb(rgb)),
+        ColorDepth::Ansi16 | ColorDepth::None => Color::Reset,
+    }
+}
+
+fn scale_rgb(rgb: Rgb, factor: f64) -> Rgb {
+    let channel = |value: u8| ((f64::from(value) * factor).round()).clamp(0.0, 255.0) as u8;
+    Rgb::new(channel(rgb.r), channel(rgb.g), channel(rgb.b))
+}
+
+struct Oklab {
+    l: f64,
+    a: f64,
+    b: f64,
+}
+
+fn srgb_to_oklab(rgb: Rgb) -> Oklab {
+    let lin = srgb_to_linear(rgb);
+    let l = 0.412_221_470_8 * lin[0] + 0.536_332_536_3 * lin[1] + 0.051_445_992_9 * lin[2];
+    let m = 0.211_903_498_2 * lin[0] + 0.680_699_545_1 * lin[1] + 0.107_396_956_6 * lin[2];
+    let s = 0.088_302_461_9 * lin[0] + 0.281_718_837_6 * lin[1] + 0.629_978_700_5 * lin[2];
+    let l_ = l.cbrt();
+    let m_ = m.cbrt();
+    let s_ = s.cbrt();
+    Oklab {
+        l: 0.210_454_255_3 * l_ + 0.793_617_785_0 * m_ - 0.004_072_046_8 * s_,
+        a: 1.977_998_495_1 * l_ - 2.428_592_205_0 * m_ + 0.450_593_709_9 * s_,
+        b: 0.025_904_037_1 * l_ + 0.782_771_766_2 * m_ - 0.808_675_766_0 * s_,
+    }
+}
+
+fn oklab_to_srgb(lab: Oklab) -> Rgb {
+    let l_ = lab.l + 0.396_337_777_4 * lab.a + 0.215_803_757_3 * lab.b;
+    let m_ = lab.l - 0.105_561_345_8 * lab.a - 0.063_854_172_8 * lab.b;
+    let s_ = lab.l - 0.089_484_177_5 * lab.a - 1.291_485_548_0 * lab.b;
+    let l = l_ * l_ * l_;
+    let m = m_ * m_ * m_;
+    let s = s_ * s_ * s_;
+    linear_to_srgb([
+        4.076_741_662_1 * l - 3.307_711_591_3 * m + 0.230_969_929_2 * s,
+        -1.268_438_004_6 * l + 2.609_757_401_1 * m - 0.341_319_396_5 * s,
+        -0.004_196_086_3 * l - 0.703_418_614_7 * m + 1.707_614_701_0 * s,
+    ])
+}
+
+fn lerp_oklab(a: Oklab, b: Oklab, t: f64) -> Oklab {
+    Oklab {
+        l: a.l + (b.l - a.l) * t,
+        a: a.a + (b.a - a.a) * t,
+        b: a.b + (b.b - a.b) * t,
+    }
+}
+
+fn heat_stops(theme: &Theme) -> [Rgb; 4] {
+    [
+        theme.role_rgb(Role::Heat0).unwrap_or(Rgb::new(44, 74, 90)),
+        theme
+            .role_rgb(Role::Heat1)
+            .unwrap_or(Rgb::new(79, 179, 217)),
+        theme
+            .role_rgb(Role::Heat2)
+            .unwrap_or(Rgb::new(229, 181, 103)),
+        theme
+            .role_rgb(Role::Heat3)
+            .unwrap_or(Rgb::new(224, 96, 126)),
+    ]
+}
+
+/// OKLab heat, quantised: 16 truecolour steps; 256 nearest-index deduped; 16/none none.
+pub fn heat_steps(theme: &Theme) -> Vec<Rgb> {
+    match theme.depth {
+        ColorDepth::TrueColor => (0..16)
+            .map(|i| heat_rgb(theme, f64::from(i) / 15.0))
+            .collect(),
+        ColorDepth::Ansi256 => {
+            let mut steps = Vec::new();
+            let mut last = None;
+            for i in 0..16 {
+                let rgb = heat_rgb(theme, f64::from(i) / 15.0);
+                let index = nearest_256_rgb(rgb);
+                if last != Some(index) {
+                    steps.push(rgb);
+                    last = Some(index);
+                }
+            }
+            steps
+        }
+        ColorDepth::Ansi16 | ColorDepth::None => Vec::new(),
+    }
+}
+
+fn heat_rgb(theme: &Theme, t: f64) -> Rgb {
+    let stops = heat_stops(theme);
+    let scaled = t * 3.0;
+    let idx = scaled.floor() as usize;
+    let frac = scaled - scaled.floor();
+    let left = stops[idx.min(3)];
+    let right = stops[(idx + 1).min(3)];
+    oklab_to_srgb(lerp_oklab(srgb_to_oklab(left), srgb_to_oklab(right), frac))
+}
+
+fn heat_style(theme: &Theme, t: f64) -> Style {
+    let steps = heat_steps(theme);
+    if steps.is_empty() {
+        return theme.muted;
+    }
+    let last = steps.len().saturating_sub(1) as f64;
+    let idx = (t.clamp(0.0, 1.0) * last).round() as usize;
+    Style::default().fg(color_from_rgb(steps[idx.min(steps.len() - 1)], theme.depth))
+}
+
 #[cfg(test)]
 pub fn palette_index256(name: ThemeName, role: Role) -> u8 {
     palette_for(name).roles[idx(role)].index256
@@ -1263,6 +1416,64 @@ mod tests {
         assert_eq!(phosphor_256.name, ThemeName::Phosphor);
         assert!(phosphor_256.paints_background);
         assert!(phosphor_256.degrade_hint.is_none());
+        assert!(
+            phosphor_256.scanline_style() != Style::default() || phosphor_256.paints_background
+        );
+    }
+
+    #[test]
+    fn heat_gradient_quantises_and_never_means_risk() {
+        let dark = Theme::build(ThemeName::Dark, truecolor(), false);
+        let steps = heat_steps(&dark);
+        assert_eq!(steps.len(), 16);
+        let two_fifty_six = Theme::build(
+            ThemeName::Dark,
+            DetectedDepth {
+                depth: ColorDepth::Ansi256,
+                reason: "TERM=xterm-256color".into(),
+            },
+            false,
+        );
+        let indexed = heat_steps(&two_fifty_six);
+        assert!(!indexed.is_empty());
+        assert!(indexed.len() <= 16);
+        let sixteen = Theme::build(
+            ThemeName::Dark,
+            DetectedDepth {
+                depth: ColorDepth::Ansi16,
+                reason: "TERM=xterm".into(),
+            },
+            false,
+        );
+        assert!(heat_steps(&sixteen).is_empty());
+        assert_eq!(dark.corroboration_style(1), dark.heat0);
+        assert_eq!(dark.corroboration_style(3), dark.heat1);
+        assert_eq!(dark.corroboration_style(5), dark.heat2);
+        assert_eq!(dark.corroboration_style(9), dark.heat3);
+        let phosphor = Theme::build(
+            ThemeName::Phosphor,
+            DetectedDepth {
+                depth: ColorDepth::TrueColor,
+                reason: "COLORTERM=truecolor".into(),
+            },
+            false,
+        );
+        assert_eq!(
+            phosphor.role_rgb(Role::Fg).map(|rgb| rgb.hex()),
+            Some(0x7CFF9B)
+        );
+        let amber = Theme::build(
+            ThemeName::Amber,
+            DetectedDepth {
+                depth: ColorDepth::TrueColor,
+                reason: "COLORTERM=truecolor".into(),
+            },
+            false,
+        );
+        assert_eq!(
+            amber.role_rgb(Role::Fg).map(|rgb| rgb.hex()),
+            Some(0xFFB000)
+        );
     }
 
     #[test]

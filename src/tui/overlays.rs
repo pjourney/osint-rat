@@ -31,6 +31,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         Overlay::Form(form) => form_modal(frame, area, form, theme),
         Overlay::Confirm { title, message, .. } => confirm(frame, area, title, message, theme),
         Overlay::TableFilter { .. } => {}
+        Overlay::ThemeCycle { original, index } => {
+            theme_cycle(frame, area, original, *index, theme)
+        }
     }
 }
 
@@ -217,6 +220,40 @@ fn form_modal(frame: &mut Frame, area: Rect, form: &crate::app::FormState, theme
     };
     frame.render_widget(
         Paragraph::new(lines).block(pane_block(title, true, theme)),
+        popup,
+    );
+}
+
+fn theme_cycle(frame: &mut Frame, area: Rect, original: &str, index: usize, theme: &Theme) {
+    const NAMES: [&str; 5] = ["dark", "light", "mono", "phosphor", "amber"];
+    let popup = centered(area, 48, 12);
+    frame.render_widget(Clear, popup);
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Palette :theme — live preview. Enter saves, Esc reverts.",
+            theme.muted,
+        )),
+        Line::from(""),
+    ];
+    for (i, name) in NAMES.iter().enumerate() {
+        let cursor = if i == index % NAMES.len() {
+            theme.glyphs.focus
+        } else {
+            " "
+        };
+        let mark = if *name == original { " (current)" } else { "" };
+        let style = if i == index % NAMES.len() {
+            theme.selected
+        } else {
+            theme.fg
+        };
+        lines.push(Line::from(Span::styled(
+            format!("{cursor} {name}{mark}"),
+            style,
+        )));
+    }
+    frame.render_widget(
+        Paragraph::new(lines).block(pane_block("Theme", true, theme)),
         popup,
     );
 }

@@ -23,6 +23,8 @@ pub struct GraphState {
     pub return_view: Option<View>,
     pub node_cap: usize,
     pub edge_cap: usize,
+    /// Nodes added by the last Search Around / hop change. Shown with `+` until the next key.
+    pub plus_ids: Vec<uuid::Uuid>,
 }
 
 impl Default for GraphState {
@@ -38,6 +40,7 @@ impl Default for GraphState {
             return_view: None,
             node_cap: DEFAULT_NODE_CAP,
             edge_cap: DEFAULT_EDGE_CAP,
+            plus_ids: Vec::new(),
         }
     }
 }
@@ -334,7 +337,25 @@ impl App {
         if replace_seeds {
             self.graph.seed_ids = result.seed_ids.clone();
         }
+        let previous: std::collections::HashSet<uuid::Uuid> =
+            self.graph.result.nodes.iter().map(|node| node.id).collect();
         self.graph.result = result;
+        if previous.is_empty() {
+            self.graph.plus_ids.clear();
+        } else {
+            self.graph.plus_ids = self
+                .graph
+                .result
+                .nodes
+                .iter()
+                .filter(|node| !previous.contains(&node.id))
+                .map(|node| node.id)
+                .collect();
+            if !self.graph.plus_ids.is_empty() && !self.graph.result.truncated {
+                self.motion
+                    .start_graph_expand(self.graph.result.hops_used.min(3) as u16);
+            }
+        }
         self.graph.hops = self.graph.result.hops_used;
         self.graph.pending = None;
         self.view = View::Graph;

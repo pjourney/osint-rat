@@ -151,12 +151,14 @@ impl App {
         }
         self.review_armed = true;
         self.status = confirm_status(&items);
+        self.motion.arm_confirm();
     }
 
     pub(crate) fn disarm_review(&mut self) {
         if self.review_armed {
             self.review_armed = false;
             self.status = "Disarmed. Nothing written.".into();
+            self.motion.disarm_confirm();
         }
     }
 

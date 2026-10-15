@@ -2,6 +2,7 @@
 
 mod glyphs;
 mod keymap;
+pub mod motion;
 mod overlays;
 mod preview;
 mod screens;
@@ -9,6 +10,7 @@ mod table;
 mod theme;
 mod widgets;
 
+pub use motion::{Animator, MotionMode, TICK, TICK_MS};
 pub use preview::render_preview;
 pub use theme::{ColorDepth, ColorMode, TerminalEnv, Theme, ThemeName};
 
@@ -25,6 +27,8 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::app::{Action, App, View};
 use crate::sanitize::sanitize_line;
+
+use self::motion::{ConfirmPhase, confirm_rise_line, toast_line};
 
 /// Runs the TUI until the user quits. Always restores the terminal, including on error.
 pub async fn run(app: &mut App) -> Result<()> {
@@ -45,13 +49,12 @@ async fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()>
         .jobs
         .take_receiver()
         .expect("job event receiver is taken once");
-    let tick_rate = Duration::from_millis(app.config.ui.tick_rate_ms.max(50));
-    let mut ticker = tokio::time::interval(tick_rate);
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut ticker: Option<tokio::time::Interval> = None;
     let shutdown = wait_for_shutdown();
     tokio::pin!(shutdown);
     app.mark_dirty();
     while !app.should_quit {
+        sync_motion_timer(&mut ticker, app.motion.wants_timer());
         if app.dirty {
             terminal
                 .draw(|frame| draw(frame, app))
@@ -62,6 +65,11 @@ async fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()>
             event = events.next() => {
                 match event {
                     Some(Ok(Event::Key(key))) => {
+                        if app.motion.showing_splash() {
+                            app.motion.skip_splash();
+                            app.mark_dirty();
+                            continue;
+                        }
                         if let Some(action) = keymap::map_key(
                             key,
                             &app.overlay,
@@ -77,7 +85,10 @@ async fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()>
                             }
                         }
                     }
-                    Some(Ok(Event::Resize(_, _))) => app.mark_dirty(),
+                    Some(Ok(Event::Resize(_, _))) => {
+                        app.motion.start_drawer();
+                        app.mark_dirty();
+                    }
                     Some(Ok(Event::Paste(text))) => {
                         for ch in text.chars() {
                             dispatch(app, Action::InsertChar(ch));
@@ -96,7 +107,7 @@ async fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()>
                     dispatch(app, Action::Job(event));
                 }
             }
-            _ = ticker.tick(), if app.has_active_jobs() => {
+            _ = tick_optional(&mut ticker) => {
                 dispatch(app, Action::Tick);
             }
             _ = &mut shutdown => {
@@ -106,6 +117,29 @@ async fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()>
     }
     app.jobs.shutdown(Duration::from_secs(4)).await;
     Ok(())
+}
+
+/// Create the 60 ms interval when the first animation starts; drop it when the last one finishes.
+fn sync_motion_timer(ticker: &mut Option<tokio::time::Interval>, wants_timer: bool) {
+    if wants_timer {
+        if ticker.is_none() {
+            let mut interval = tokio::time::interval(TICK);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            interval.reset();
+            *ticker = Some(interval);
+        }
+    } else {
+        *ticker = None;
+    }
+}
+
+async fn tick_optional(ticker: &mut Option<tokio::time::Interval>) {
+    match ticker.as_mut() {
+        Some(interval) => {
+            interval.tick().await;
+        }
+        None => std::future::pending::<()>().await,
+    }
 }
 
 async fn wait_for_shutdown() {
@@ -140,12 +174,16 @@ async fn wait_for_shutdown() {
 }
 
 fn dispatch(app: &mut App, action: Action) {
+    if !matches!(action, Action::Tick) {
+        app.clear_graph_plus();
+    }
     if let Err(error) = app.dispatch(action) {
         let message = error.to_string();
         app.last_error = Some(message.clone());
         app.status = message;
         app.mark_dirty();
     }
+    app.sync_motion();
 }
 
 fn run_external_editor(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
@@ -181,8 +219,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if theme.paints_background {
         frame.render_widget(Block::default().style(theme.bg), area);
     }
+    if theme.name == ThemeName::Phosphor && app.motion.scanline_enabled() {
+        paint_scanline(frame, area, &theme);
+    }
+    if app.motion.showing_splash() {
+        draw_splash(frame, area, app, &theme);
+        return;
+    }
+    let armed = app.review_armed || !matches!(app.motion.confirm_phase(), ConfirmPhase::Idle);
     let mut constraints = vec![Constraint::Length(1), Constraint::Min(5)];
-    if app.review_armed {
+    if armed {
         constraints.push(Constraint::Length(1));
     }
     if theme.degrade_hint.is_some() {
@@ -197,8 +243,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
     } else {
         screens::workspace(frame, rows[1], app, &theme);
     }
+    draw_toasts(frame, rows[1], app, &theme);
     let mut row = 2;
-    if app.review_armed {
+    if armed {
         draw_confirm_bar(frame, rows[row], app, &theme);
         row += 1;
     }
@@ -215,6 +262,62 @@ pub fn draw(frame: &mut Frame, app: &App) {
         rows[row + 1],
     );
     overlays::draw(frame, area, app, &theme);
+}
+
+fn paint_scanline(frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
+    let style = theme.scanline_style();
+    for y in area.y..area.bottom() {
+        if y % 2 == 1 {
+            let row = ratatui::layout::Rect::new(area.x, y, area.width, 1);
+            frame.render_widget(Block::default().style(style), row);
+        }
+    }
+}
+
+fn draw_splash(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme: &Theme) {
+    let view = app
+        .motion
+        .frame_kind(motion::AnimKind::Splash)
+        .unwrap_or_else(|| motion::FrameView::last(10));
+    let lines = motion::splash_lines(
+        view,
+        app.motion.splash_case(),
+        app.motion.splash_marking(),
+        theme,
+    );
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn draw_toasts(frame: &mut Frame, board: ratatui::layout::Rect, app: &App, theme: &Theme) {
+    let toasts = app.motion.toasts();
+    if toasts.is_empty() {
+        return;
+    }
+    let width = motion::TOAST_COLS.min(board.width.saturating_sub(1)).max(8);
+    let extra = app.motion.collapsed_toast_count();
+    for (index, toast) in toasts.iter().take(motion::TOAST_STACK).enumerate() {
+        let pad = app.motion.toast_slide(toast);
+        let y = board.y + index as u16;
+        if y >= board.bottom() {
+            break;
+        }
+        let x = board.x + board.width.saturating_sub(width);
+        let area = ratatui::layout::Rect::new(x, y, width, 1);
+        frame.render_widget(
+            Paragraph::new(toast_line(toast, theme, &theme.glyphs, pad)),
+            area,
+        );
+    }
+    if extra > 0 {
+        let y = board.y + toasts.len().min(motion::TOAST_STACK) as u16;
+        if y < board.bottom() {
+            let x = board.x + board.width.saturating_sub(width);
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(format!("+{extra}"), theme.muted))),
+                ratatui::layout::Rect::new(x, y, width, 1),
+            );
+        }
+    }
 }
 
 fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme: &Theme) {
@@ -248,7 +351,12 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
         format!("{} 0 to review", theme.glyphs.ai)
     };
     let jobs_bit = if jobs_active > 0 {
-        format!("{} {jobs_active} jobs", theme.glyphs.spinner[0])
+        let spin = if app.agent_job_running() {
+            app.motion.agent_glyph(&theme.glyphs)
+        } else {
+            app.motion.job_spinner_glyph(&theme.glyphs)
+        };
+        format!("{spin} {jobs_active} jobs")
     } else {
         format!("{} jobs", theme.glyphs.done)
     };
@@ -279,10 +387,9 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
 
 fn draw_confirm_bar(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme: &Theme) {
     let text = app.confirm_bar_text();
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(text, theme.fg))).style(theme.panel),
-        area,
-    );
+    let pulsing = app.motion.confirm_phase() == ConfirmPhase::Pulse;
+    let line = confirm_rise_line(app.motion.confirm_rise_frame(), &text, theme, pulsing);
+    frame.render_widget(Paragraph::new(line).style(theme.panel), area);
 }
 
 fn truncate_width(text: &str, max_width: usize) -> String {
@@ -589,6 +696,8 @@ mod tests {
         let (directory, mut app) = test_app();
         app.config.ui.theme = "mono".into();
         app.config.ui.color = "none".into();
+        app.config.ui.motion = "off".into();
+        app.motion = crate::tui::Animator::new(crate::tui::MotionMode::Off);
         app.dispatch(Action::Command("new_investigation"))
             .expect("form");
         if let crate::app::Overlay::Form(form) = &mut app.overlay {
@@ -1065,6 +1174,26 @@ mod tests {
         app.board_filter = "kind:ip".into();
         app.dispatch(Action::OpenJobs).expect("jobs");
         assert!(app.board_filter.is_empty());
+    }
+
+    #[test]
+    fn motion_off_review_confirm_has_no_countdown_or_rise() {
+        let (_directory, mut app) = snapshot_app();
+        app.open_review_lane();
+        app.dispatch(Action::Arm).expect("arm");
+        assert!(app.review_armed);
+        let screen = render_snapshot(&app, 80, 24);
+        assert!(
+            screen.contains("y confirm") || screen.contains("y confirm"),
+            "armed bar must be readable with motion off\n{screen}"
+        );
+        assert!(!screen.contains('▁') && !screen.contains('▄'), "{screen}");
+        assert!(
+            !screen.to_ascii_lowercase().contains("countdown")
+                && !screen.contains("auto")
+                && !screen.contains("sec left"),
+            "{screen}"
+        );
     }
 
     #[test]

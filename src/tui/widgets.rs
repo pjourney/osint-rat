@@ -33,10 +33,19 @@ pub fn pane_block<'a>(title: &'a str, focused: bool, theme: &Theme) -> Block<'a>
 /// Title row for a cockpit pane. Unfocused panes have no box; the focused pane
 /// gets a ▌ accent and a bold title.
 pub fn pane_title(title: &str, focused: bool, theme: &Theme) -> Line<'static> {
+    pane_title_pulse(title, focused, theme, None)
+}
+
+pub fn pane_title_pulse(
+    title: &str,
+    focused: bool,
+    theme: &Theme,
+    pulse: Option<crate::tui::motion::FrameView>,
+) -> Line<'static> {
     if focused {
         Line::from(Span::styled(
             format!("{}{title}", theme.glyphs.focus),
-            theme.accent.add_modifier(Modifier::BOLD),
+            crate::tui::motion::focus_style(pulse, theme),
         ))
     } else {
         Line::from(Span::styled(format!(" {title}"), theme.muted))
@@ -144,9 +153,18 @@ pub fn empty_state(title: &str, body: &str, actions: &str, theme: &Theme) -> Vec
 
 /// Skeleton rows while a job is running. Not selectable.
 pub fn loading_state(job_ref: &str, label: &str, theme: &Theme) -> Vec<Line<'static>> {
+    loading_state_spin(job_ref, label, theme, theme.glyphs.spinner[0])
+}
+
+pub fn loading_state_spin(
+    job_ref: &str,
+    label: &str,
+    theme: &Theme,
+    spin: &str,
+) -> Vec<Line<'static>> {
     vec![
         Line::from(Span::styled(
-            format!("  {} {job_ref}  {label}", theme.glyphs.spinner[0]),
+            format!("  {spin} {job_ref}  {label}"),
             theme.muted,
         )),
         Line::from(Span::styled("  ░░░░░░░░░░░░░░░░░░░░", theme.muted)),

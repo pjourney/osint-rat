@@ -248,6 +248,8 @@ pub enum Overlay {
     Doctor,
     /// Inline `/` filter for the current table. Typing updates the board live.
     TableFilter { query: Input },
+    /// Palette `:theme` live cycle. Enter saves, Esc reverts.
+    ThemeCycle { original: String, index: usize },
 }
 
 /// Which form [`Overlay::Form`] is editing. The field list is built to match the kind.
@@ -371,6 +373,8 @@ pub struct App {
     /// Bumped on workspace content changes so BoardListCache cannot outlive the case.
     workspace_rev: u64,
     board_list_cache: RefCell<Option<BoardListCache>>,
+    /// Motion engine. Idle holds no timer. Ticks never write.
+    pub motion: crate::tui::Animator,
 }
 
 struct BoardListCache {
@@ -396,6 +400,11 @@ impl App {
         let net = NetContext::new(&config.network).map(Arc::new);
         let max_jobs = config.collectors.max_concurrent_jobs.max(1);
         let collectors = CollectorRegistry::from_config(&config);
+        let motion = crate::tui::Animator::from_config(
+            &config,
+            &crate::tui::TerminalEnv::from_process(),
+            false,
+        );
         let app = Self {
             config,
             paths,
@@ -442,13 +451,120 @@ impl App {
             board_anchor_id: None,
             workspace_rev: 0,
             board_list_cache: RefCell::new(None),
+            motion,
         };
         let _ = app.store.mark_interrupted_jobs();
         app
     }
 
+    pub fn apply_plain_mode(&mut self) {
+        self.config.ui.ascii = true;
+        self.motion = crate::tui::Animator::from_config(
+            &self.config,
+            &crate::tui::TerminalEnv::from_process(),
+            true,
+        );
+    }
+
     pub fn mark_dirty(&mut self) {
         self.dirty = true;
+    }
+
+    pub fn agent_job_running(&self) -> bool {
+        self.job_records
+            .values()
+            .any(|job| job.status.is_active() && job.kind == "agent")
+    }
+
+    pub fn sync_motion(&mut self) {
+        let mut collector = false;
+        let mut agent = false;
+        let mut observing = false;
+        let jobs: Vec<(uuid::Uuid, String, bool, Option<String>)> = self
+            .job_records
+            .values()
+            .filter(|job| job.status.is_active())
+            .map(|job| {
+                (
+                    job.id,
+                    job.kind.clone(),
+                    job.kind == "agent",
+                    job.progress.clone(),
+                )
+            })
+            .collect();
+        for (id, kind, is_agent, progress) in jobs {
+            if is_agent {
+                agent = true;
+                continue;
+            }
+            collector = true;
+            if kind.starts_with("collector:") {
+                observing = true;
+            }
+            self.motion.ensure_spinner(format!("spin:{id}"));
+            if progress
+                .as_deref()
+                .and_then(crate::tui::motion::parse_known_progress)
+                .is_some()
+            {
+                self.motion.sync_progress(&format!("prog:{id}"), true);
+            }
+        }
+        self.motion.sync_agent(agent);
+        self.motion.sync_radar(observing);
+        if !collector {
+            self.motion.stop_prefix("spin:");
+            self.motion
+                .stop_kind(crate::tui::motion::AnimKind::JobSpinner);
+            self.motion.stop_prefix("prog:");
+        }
+    }
+
+    pub fn clear_graph_plus(&mut self) {
+        self.graph.plus_ids.clear();
+    }
+
+    const THEME_CYCLE: [&'static str; 5] = ["dark", "light", "mono", "phosphor", "amber"];
+
+    fn open_theme_cycle(&mut self) {
+        let original = self.config.ui.theme.clone();
+        let current = crate::tui::ThemeName::parse(&original)
+            .map(|name| name.as_str())
+            .unwrap_or("dark");
+        let index = Self::THEME_CYCLE
+            .iter()
+            .position(|name| *name == current)
+            .unwrap_or(0);
+        self.overlay = Overlay::ThemeCycle { original, index };
+        self.apply_theme_preview(index);
+    }
+
+    fn apply_theme_preview(&mut self, index: usize) {
+        let name = Self::THEME_CYCLE[index % Self::THEME_CYCLE.len()];
+        self.config.ui.theme = name.into();
+        self.status = format!("Theme {name} — Enter saves, Esc reverts.");
+        self.mark_dirty();
+    }
+
+    fn save_theme_cycle(&mut self) -> Result<()> {
+        if let Overlay::ThemeCycle { index, .. } = self.overlay {
+            let name = Self::THEME_CYCLE[index % Self::THEME_CYCLE.len()];
+            self.config.ui.theme = name.into();
+            self.config.save(&self.paths.config_file)?;
+            self.status = format!("Saved theme {name}.");
+        }
+        self.overlay = Overlay::None;
+        Ok(())
+    }
+
+    fn revert_theme_cycle(&mut self) {
+        if let Overlay::ThemeCycle { original, .. } = &self.overlay {
+            self.config.ui.theme = original.clone();
+        }
+        self.overlay = Overlay::None;
+        self.status = "Theme unchanged.".into();
+        self.mark_dirty();
     }
 
     pub fn investigations(&self) -> Vec<crate::model::InvestigationSummary> {
@@ -733,7 +849,13 @@ impl App {
         match action {
             Action::Quit => self.quit_or_close(),
             Action::Cancel => self.cancel(),
-            Action::Tick => self.mark_dirty(),
+            Action::Tick => {
+                let effects = self.motion.advance();
+                debug_assert!(effects.iter().all(|effect| !effect.writes()));
+                if self.motion.needs_redraw() {
+                    self.mark_dirty();
+                }
+            }
             Action::NextPane => self.cycle_pane(1),
             Action::PrevPane => self.cycle_pane(-1),
             Action::Move(delta) => self.move_selection(delta),
@@ -792,11 +914,13 @@ impl App {
                 self.status = if self.board_zoomed {
                     "Board zoomed. Any key returns.".into()
                 } else {
+                    self.motion.start_drawer();
                     "Board restored.".into()
                 };
             }
             Action::Unzoom => {
                 self.board_zoomed = false;
+                self.motion.start_drawer();
             }
             Action::OpenObjectView => self.open_object_view(),
             Action::OpenGraph => {
@@ -882,6 +1006,7 @@ impl App {
                 }
                 self.overlay = Overlay::None;
             }
+            Overlay::ThemeCycle { .. } => self.revert_theme_cycle(),
             Overlay::Form(_)
             | Overlay::Palette { .. }
             | Overlay::Search { .. }
@@ -896,6 +1021,7 @@ impl App {
     }
 
     fn cycle_pane(&mut self, delta: i32) {
+        let previous = self.pane;
         self.pane = match (self.pane, delta.signum()) {
             (Pane::Nav, 1) | (Pane::Detail, -1) => Pane::Main,
             (Pane::Main, 1) => Pane::Detail,
@@ -904,6 +1030,9 @@ impl App {
             (Pane::Detail, 1) => Pane::Nav,
             _ => self.pane,
         };
+        if self.pane != previous {
+            self.motion.start_focus();
+        }
         if self.pane == Pane::Detail && matches!(self.view, View::Entities | View::Evidence) {
             self.inspector_tab = InspectorTab::Sources;
         }
@@ -973,6 +1102,7 @@ impl App {
         } else if self.is_time_lens() {
             self.clear_timeline_filter();
         }
+        self.motion.dismiss_failed_toasts();
         if had_error.is_some() {
             self.status = "Error dismissed.".into();
         } else if had_filter {
@@ -1028,6 +1158,10 @@ impl App {
                 "{mark} {name}  {}  refused: {reason}",
                 entry.definition.activity.as_str()
             ));
+            self.motion.push_toast(
+                crate::tui::motion::ToastKind::Refused,
+                format!("active tool refused: {name} — {reason}"),
+            );
             return;
         }
         self.overlay = Overlay::Confirm {
@@ -1137,6 +1271,12 @@ impl App {
             None
         };
         match &mut self.overlay {
+            Overlay::ThemeCycle { index, .. } => {
+                let count = Self::THEME_CYCLE.len() as i32;
+                *index = (*index as i32 + delta).rem_euclid(count) as usize;
+                let preview = *index;
+                self.apply_theme_preview(preview);
+            }
             Overlay::Palette { selected, query } => {
                 let count = filtered(&query.value).len().max(1);
                 *selected = (*selected as i32 + delta).rem_euclid(count as i32) as usize;
@@ -1313,6 +1453,9 @@ impl App {
 
     fn select(&mut self) -> Result<()> {
         match &self.overlay {
+            Overlay::ThemeCycle { .. } => {
+                self.save_theme_cycle()?;
+            }
             Overlay::Palette { query, selected } => {
                 let items = filtered(&query.value);
                 if let Some(command) = items.get(*selected).copied() {
@@ -2118,6 +2261,7 @@ impl App {
             "open_tools" => self.switch_view(View::Tools),
             "open_agent" => self.open_agent_history(),
             "open_settings" => self.switch_view(View::Settings),
+            "theme" => self.open_theme_cycle(),
             "open_artifacts" => self.switch_view(View::Artifacts),
             "open_notes" => {
                 self.inspector_tab = InspectorTab::Notes;
@@ -2673,7 +2817,26 @@ impl App {
             self.store.update_job(job)?;
         }
         if let Some(error) = error_text {
-            self.status = error;
+            self.status = error.clone();
+            let label = self
+                .job_records
+                .get(&job_id)
+                .map(|job| job.label.clone())
+                .unwrap_or_else(|| "job".into());
+            let kind = if error.contains("refused") {
+                crate::tui::motion::ToastKind::Refused
+            } else {
+                crate::tui::motion::ToastKind::Err
+            };
+            self.motion.push_toast(kind, format!("{label} — {error}"));
+        } else if status == JobStatus::Succeeded {
+            let job = self.job_records.get(&job_id);
+            let label = job.map(|job| job.label.as_str()).unwrap_or("job");
+            let detail = job.and_then(|job| job.result.as_deref()).unwrap_or("done");
+            self.motion.push_toast(
+                crate::tui::motion::ToastKind::Ok,
+                format!("{label} done · {detail}"),
+            );
         }
         if patched_in_place {
             if let Some(job) = self.job_records.get(&job_id).cloned() {
@@ -2853,6 +3016,12 @@ impl App {
             self.selected = remaining - 1;
         }
         if status == ProposalStatus::Accepted {
+            self.motion.pulse_confirm();
+            let glyph = if self.config.ui.ascii { "*" } else { "◆" };
+            self.motion.push_toast(
+                crate::tui::motion::ToastKind::Ok,
+                format!("written · {glyph} AI"),
+            );
             self.status = if accepted_ai {
                 "Accepted. AI items keep ◆ agent provenance.".into()
             } else {
@@ -4682,6 +4851,53 @@ mod tests {
             .expect("loads");
         assert_eq!(data.findings[0].provenance, Provenance::Agent);
         assert_eq!(data.proposals[0].status, ProposalStatus::Accepted);
+    }
+
+    #[test]
+    fn review_tick_never_accepts_or_disarms() {
+        let (_directory, mut app) = test_app();
+        app.motion = crate::tui::Animator::new(crate::tui::MotionMode::Full);
+        create_named_investigation(&mut app, "Tick Cannot Write");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let mut run = sample_run(investigation_id, Uuid::new_v4(), Uuid::new_v4(), "Find?");
+        app.store.insert_agent_run(&mut run).expect("run");
+        app.store
+            .insert_proposals(
+                investigation_id,
+                run.id,
+                vec![(
+                    AgentAction::AddFinding {
+                        title: "must stay pending across ticks".into(),
+                        details: String::new(),
+                        confidence: None,
+                        sources: Vec::new(),
+                    },
+                    ProposalStatus::Pending,
+                    None,
+                )],
+            )
+            .expect("proposals");
+        app.reload().expect("reload");
+        app.open_review_lane();
+        app.dispatch(Action::Arm).expect("arm");
+        assert!(app.review_armed);
+        for _ in 0..200 {
+            app.dispatch(Action::Tick).expect("tick");
+            assert!(
+                app.review_armed,
+                "the 60 ms tick must not disarm or auto-confirm"
+            );
+            assert_ne!(
+                app.motion.confirm_phase(),
+                crate::tui::motion::ConfirmPhase::Idle
+            );
+        }
+        let data = app
+            .store
+            .load_investigation(investigation_id)
+            .expect("loads");
+        assert_eq!(data.proposals[0].status, ProposalStatus::Pending);
+        assert!(data.findings.is_empty());
     }
 
     #[test]

@@ -505,7 +505,7 @@ Use `Table` for Entities/Evidence with the `/` filter grammar. Add Inspector sou
 
 **P4 · Motion & signature themes (M, ~800 LOC)**
 Add `src/tui/motion.rs` (Animator, 60 ms on-demand tick, a region-gated redraw), animations M1–M10, the gradient engine (OKLab, depth-quantised), and graph-edge corroboration heat. Add `ui.motion = full|reduced|off` and the automatic `off` in plain/`NO_COLOR`/`TERM=dumb`. Add palette `:theme` live cycling, and finalise the Phosphor/Amber visual polish (optional scanline).
-*Done when:* idle CPU is 0 timer wakeups (unit test); a bench shows ≤ 2% of one core and ≤ 1 ms p99 render with 3 jobs + the agent at 120×40, and ≤ 400 bytes/tick; snapshot first/mid/last frames for M1–M10 plus `motion=off`; in `reduced`/`off` no frame contains travel (slide or sweep); the Review confirm bar has no timer path that could auto-confirm (code review + test); the splash is skippable with any key and never blocks for more than 600 ms.
+*Done when:* idle CPU is 0 timer wakeups (unit test); a bench shows ≤ 2% of one core and ≤ 1 ms p99 render with 3 jobs + the agent at 120×40, and ≤ 400 bytes/tick; snapshot first/mid/last frames for M1–M10 plus `motion=off`; in `reduced`/`off` no frame contains travel (slide or sweep); the Review confirm bar has no timer path that could auto-confirm (code review + test); the splash is skippable with any key and never blocks for more than 600 ms. Implemented in this phase.
 
 **P5 · Graph tree, Case home, CLI parity, a11y sign-off (M, ~800 LOC)**
 Build the edge-labelled graph tree using M7 and edge heat, the Case dashboard with NEXT actions and M10 sweeps, CLI glyph/`--json` parity (the CLI respects the theme's 16-colour mapping and never animates when stdout isn't a TTY), and an 80×24 audit.

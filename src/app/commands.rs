@@ -513,6 +513,15 @@ pub const COMMANDS: &[Command] = &[
         false,
     ),
     cmd(
+        "theme",
+        "Theme",
+        "",
+        "Cycle cockpit themes live. Enter saves, Esc reverts.",
+        true,
+        false,
+        false,
+    ),
+    cmd(
         "open_notes",
         "Open Notes",
         "",
@@ -907,6 +916,7 @@ fn action_for_command(id: &str, view: View) -> Option<Action> {
         "open_jobs" => Action::OpenJobs,
         "open_tools" => Action::OpenTools,
         "open_settings" => Action::OpenSettings,
+        "theme" => Action::Command("theme"),
         "toggle_nearby" => Action::ToggleNearby,
         "open_object" => Action::OpenObjectView,
         "open_graph" | "search_around_graph" => Action::OpenGraph,

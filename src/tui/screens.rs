@@ -9,9 +9,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 use crate::app::filter::{SortKey, entity_provenances, entity_seen_at};
 use crate::app::{App, EvidenceRow, InspectorTab, Overlay, Pane, View};
 use crate::doctor::CheckStatus;
-use crate::model::{
-    Entity, FacetAxis, GraphFilters, LinkDirection, Workspace, layout_columns, now,
-};
+use crate::model::{Entity, FacetAxis, GraphEdge, GraphFilters, LinkDirection, Workspace, now};
 use crate::sanitize::{sanitize_line, sanitize_text};
 use crate::tools::Activity;
 
@@ -109,7 +107,8 @@ pub fn workspace(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         return;
     }
     if area.width < INSPECTOR_BREAK {
-        let drawer = (area.height as u32 * 40 / 100).max(6) as u16;
+        let target = (area.height as u32 * 40 / 100).max(6) as u16;
+        let drawer = app.motion.drawer_height(target);
         let rows = Layout::vertical([Constraint::Min(6), Constraint::Length(drawer)]).split(area);
         let rail_width = if area.width < 80 { 3 } else { RAIL_WIDTH };
         let columns = Layout::horizontal([
@@ -147,7 +146,14 @@ fn draw_rail(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, digits_onl
         .values()
         .filter(|job| job.status.is_active())
         .count();
-    let mut lines = vec![pane_title("Rail", focused, theme)];
+    let pulse = if focused {
+        app.motion.frame_kind(super::motion::AnimKind::Focus)
+    } else {
+        None
+    };
+    let mut lines = vec![super::widgets::pane_title_pulse(
+        "Rail", focused, theme, pulse,
+    )];
     for (index, (label, view)) in app.nav_items().into_iter().enumerate() {
         let current = app.rail_view_is_current(view);
         let mut text = if digits_only {
@@ -159,7 +165,7 @@ fn draw_rail(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, digits_onl
             text = format!("{text} {review}");
         }
         if view == View::Jobs && jobs > 0 {
-            text = format!("{text} {}", theme.glyphs.spinner[0]);
+            text = format!("{text} {}", app.motion.job_spinner_glyph(&theme.glyphs));
         }
         let style = if current {
             theme.accent.add_modifier(ratatui::style::Modifier::BOLD)
@@ -299,17 +305,39 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
     if app.has_active_jobs() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("Running", theme.warning)));
+        if app.motion.playing(super::motion::AnimKind::Radar) {
+            lines.extend(super::motion::radar_lines(
+                app.motion
+                    .frame_kind(super::motion::AnimKind::Radar)
+                    .unwrap_or_else(|| super::motion::FrameView::first(8)),
+                theme,
+                theme.glyphs.ascii,
+                app.motion.mode(),
+            ));
+        }
         for job in app
             .job_records
             .values()
             .filter(|job| job.status.is_active())
         {
-            lines.push(Line::from(format!(
-                "  {} {}  {}",
-                job.status.symbol(),
-                job.label,
-                job.progress.as_deref().unwrap_or(job.description.as_str())
-            )));
+            let spin = if job.kind == "agent" {
+                app.motion.agent_glyph(&theme.glyphs)
+            } else {
+                app.motion.job_spinner_glyph(&theme.glyphs)
+            };
+            let progress = job.progress.as_deref().unwrap_or(job.description.as_str());
+            if let Some((current, total)) = super::motion::parse_known_progress(progress) {
+                lines.push(Line::from(format!("  {spin} {}", job.label)));
+                lines.push(super::motion::progress_bar(
+                    current,
+                    total,
+                    theme,
+                    app.motion.mode(),
+                    super::motion::ProgressFill::Running,
+                ));
+            } else {
+                lines.push(Line::from(format!("  {spin} {}  {progress}", job.label)));
+            }
         }
     }
     lines.push(Line::from(""));
@@ -583,10 +611,17 @@ fn draw_table_board(
     frame.render_widget(Paragraph::new(lines), split[0]);
     if rows.is_empty() {
         if let Some((job_ref, label)) = loading_job(app) {
-            frame.render_widget(
-                Paragraph::new(loading_state(&job_ref, &label, theme)),
-                split[1],
-            );
+            let lines = if app.motion.mode() == super::motion::MotionMode::Off {
+                loading_state(&job_ref, &label, theme)
+            } else {
+                super::widgets::loading_state_spin(
+                    &job_ref,
+                    &label,
+                    theme,
+                    app.motion.job_spinner_glyph(&theme.glyphs),
+                )
+            };
+            frame.render_widget(Paragraph::new(lines), split[1]);
         } else {
             frame.render_widget(Paragraph::new(empty), split[1]);
         }
@@ -858,63 +893,274 @@ fn graph_canvas_lines(
     visible: &crate::model::VisibleGraph,
     theme: &Theme,
 ) -> Vec<Line<'static>> {
-    let _ = theme;
     if visible.nodes.is_empty() {
         return vec![Line::from(
             "No nodes. Collect on a domain page, then press g or s.".to_string(),
         )];
     }
+    graph_tree_lines(app, visible, theme)
+}
+
+struct GraphTreeCtx<'a> {
+    workspace: &'a Workspace,
+    theme: &'a Theme,
+    hop_of: &'a std::collections::HashMap<uuid::Uuid, u32>,
+    adjacency: &'a std::collections::HashMap<uuid::Uuid, Vec<&'a GraphEdge>>,
+    plus: &'a std::collections::HashSet<uuid::Uuid>,
+    selected: Option<uuid::Uuid>,
+    revealed: u32,
+    edges_only: bool,
+}
+
+fn graph_tree_lines(
+    app: &App,
+    visible: &crate::model::VisibleGraph,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
     let Some(workspace) = app.workspace.as_ref() else {
         return vec![Line::from("No investigation.".to_string())];
     };
+    let plus: std::collections::HashSet<uuid::Uuid> = app.graph.plus_ids.iter().copied().collect();
+    let hop_of: std::collections::HashMap<uuid::Uuid, u32> = visible
+        .nodes
+        .iter()
+        .map(|node| (node.id, node.hop))
+        .collect();
     let selected = visible.nodes.get(app.graph.selected).map(|node| node.id);
-    let columns = layout_columns(&visible.nodes);
-    let mut lines = Vec::new();
-    let header: String = columns
-        .iter()
-        .map(|(hop, _)| format!("Hop {hop:<12}"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    lines.push(Line::from(header));
-    let height = columns
-        .iter()
-        .map(|(_, ids)| ids.len())
-        .max()
-        .unwrap_or(0)
-        .min(12);
-    for row in 0..height {
-        let mut cells = Vec::new();
-        for (_, ids) in &columns {
-            let cell = ids
-                .get(row)
-                .and_then(|id| workspace.entity(*id))
-                .map(|entity| {
-                    let mark = if selected == Some(entity.id) {
-                        "*"
-                    } else {
-                        " "
-                    };
-                    format!(
-                        "{mark}{:<14}",
-                        truncate(
-                            &format!("{} {}", entity.short_ref(), entity.display_name()),
-                            14
-                        )
-                    )
-                })
-                .unwrap_or_else(|| " ".repeat(16));
-            cells.push(cell);
-        }
-        lines.push(Line::from(cells.join(" ")));
+    let mut adjacency: std::collections::HashMap<uuid::Uuid, Vec<&GraphEdge>> =
+        std::collections::HashMap::new();
+    for edge in &visible.edges {
+        adjacency.entry(edge.from_id).or_default().push(edge);
+        adjacency.entry(edge.to_id).or_default().push(edge);
     }
-    let extra = columns
+    let ctx = GraphTreeCtx {
+        workspace,
+        theme,
+        hop_of: &hop_of,
+        adjacency: &adjacency,
+        plus: &plus,
+        selected,
+        revealed: u32::from(app.motion.graph_revealed_hop()),
+        edges_only: app.motion.graph_edges_only(),
+    };
+    let mut roots: Vec<uuid::Uuid> = app
+        .graph
+        .result
+        .seed_ids
         .iter()
-        .map(|(_, ids)| ids.len().saturating_sub(height))
-        .sum::<usize>();
-    if extra > 0 {
-        lines.push(Line::from(format!("  +{extra} more in the node list")));
+        .copied()
+        .filter(|id| hop_of.contains_key(id))
+        .collect();
+    if roots.is_empty() {
+        roots = visible
+            .nodes
+            .iter()
+            .filter(|node| node.hop == 0)
+            .map(|node| node.id)
+            .collect();
+    }
+    if roots.is_empty()
+        && let Some(id) = selected
+    {
+        roots.push(id);
+    }
+    let mut lines = Vec::new();
+    let mut drawn = std::collections::HashSet::new();
+    for root in &roots {
+        push_graph_tree_node(&mut lines, &ctx, &mut drawn, *root, None, "", true);
+    }
+    let hidden = visible
+        .nodes
+        .iter()
+        .filter(|node| node.hop > ctx.revealed || !drawn.contains(&node.id))
+        .count();
+    if hidden > 0 {
+        lines.push(Line::from(Span::styled(
+            format!(" +{hidden} more · + expand"),
+            theme.muted,
+        )));
     }
     lines
+}
+
+fn push_graph_tree_node(
+    lines: &mut Vec<Line<'static>>,
+    ctx: &GraphTreeCtx<'_>,
+    drawn: &mut std::collections::HashSet<uuid::Uuid>,
+    id: uuid::Uuid,
+    parent: Option<uuid::Uuid>,
+    prefix: &str,
+    is_root: bool,
+) {
+    let hop = ctx.hop_of.get(&id).copied().unwrap_or(0);
+    if hop > ctx.revealed {
+        return;
+    }
+    let already = !drawn.insert(id);
+    if is_root {
+        lines.push(graph_tree_node_line(ctx, id, already));
+    }
+    if already && !is_root {
+        return;
+    }
+    let mut children: Vec<(uuid::Uuid, &GraphEdge, u32)> = ctx
+        .adjacency
+        .get(&id)
+        .into_iter()
+        .flatten()
+        .filter_map(|edge| {
+            let other = if edge.from_id == id {
+                edge.to_id
+            } else {
+                edge.from_id
+            };
+            if other == id || Some(other) == parent {
+                return None;
+            }
+            let child_hop = ctx
+                .hop_of
+                .get(&other)
+                .copied()
+                .unwrap_or(hop.saturating_add(1));
+            if child_hop > ctx.revealed {
+                return None;
+            }
+            Some((other, *edge, child_hop))
+        })
+        .collect();
+    children.sort_by(|left, right| {
+        left.2
+            .cmp(&right.2)
+            .then(left.1.kind.cmp(&right.1.kind))
+            .then(left.0.cmp(&right.0))
+    });
+    children.dedup_by(|left, right| left.0 == right.0);
+    let count = children.len();
+    for (index, (child, edge, child_hop)) in children.into_iter().enumerate() {
+        let last = index + 1 == count;
+        let branch = graph_tree_branch(ctx.theme.glyphs.ascii, last);
+        let next_prefix = format!("{prefix}{}", graph_tree_pad(ctx.theme.glyphs.ascii, last));
+        let seen = drawn.contains(&child);
+        let hide_label = ctx.edges_only && child_hop == ctx.revealed && child_hop > hop && !seen;
+        lines.push(graph_tree_edge_line(
+            ctx, prefix, branch, edge, child, seen, hide_label,
+        ));
+        if seen || hide_label {
+            continue;
+        }
+        push_graph_tree_node(lines, ctx, drawn, child, Some(id), &next_prefix, false);
+    }
+}
+
+fn graph_tree_branch(ascii: bool, last: bool) -> &'static str {
+    if ascii {
+        if last { "`- " } else { "|- " }
+    } else if last {
+        "└─ "
+    } else {
+        "├─ "
+    }
+}
+
+fn graph_tree_pad(ascii: bool, last_child: bool) -> &'static str {
+    if last_child {
+        "   "
+    } else if ascii {
+        "|  "
+    } else {
+        "│  "
+    }
+}
+
+fn graph_tree_node_line(ctx: &GraphTreeCtx<'_>, id: uuid::Uuid, seen: bool) -> Line<'static> {
+    let Some(entity) = ctx.workspace.entity(id) else {
+        return Line::from("(missing entity)".to_string());
+    };
+    let cursor = if ctx.selected == Some(id) {
+        ctx.theme.glyphs.focus
+    } else {
+        " "
+    };
+    let plus_mark = if ctx.plus.contains(&id) { " +" } else { "" };
+    let seen_mark = if seen { " (↑ seen)" } else { "" };
+    Line::from(vec![
+        Span::styled(cursor.to_string(), ctx.theme.accent),
+        Span::raw(format!(
+            "{} {}",
+            super::glyphs::Glyphs::entity_tag(&entity.kind),
+            truncate(entity.display_name(), 28)
+        )),
+        Span::raw(" "),
+        provenance_glyph(entity.provenance, ctx.theme),
+        Span::styled(format!("{plus_mark}{seen_mark}"), ctx.theme.accent),
+    ])
+}
+
+fn graph_tree_edge_line(
+    ctx: &GraphTreeCtx<'_>,
+    prefix: &str,
+    branch: &str,
+    edge: &GraphEdge,
+    child: uuid::Uuid,
+    seen: bool,
+    hide_label: bool,
+) -> Line<'static> {
+    let sources = ctx
+        .workspace
+        .data
+        .relationships
+        .iter()
+        .find(|relationship| relationship.id == edge.id)
+        .map(|relationship| relationship.source_ids.len().max(1))
+        .unwrap_or(1);
+    let stroke = super::motion::corroboration_stroke(sources, ctx.theme.glyphs.ascii);
+    let arrow = if hide_label {
+        String::new()
+    } else {
+        ctx.theme.glyphs.edge_out.to_string()
+    };
+    let mut spans = vec![
+        Span::raw(format!("{prefix}{branch}")),
+        Span::styled(
+            format!("{} {stroke}{arrow} ", edge.kind),
+            ctx.theme.corroboration_style(sources),
+        ),
+    ];
+    if hide_label {
+        return Line::from(spans);
+    }
+    let Some(entity) = ctx.workspace.entity(child) else {
+        spans.push(Span::raw("(missing)".to_string()));
+        return Line::from(spans);
+    };
+    let cursor = if ctx.selected == Some(child) {
+        ctx.theme.glyphs.focus
+    } else {
+        ""
+    };
+    let plus_mark = if ctx.plus.contains(&child) { " +" } else { "" };
+    let seen_mark = if seen {
+        if ctx.theme.glyphs.ascii {
+            " (^ seen)"
+        } else {
+            " (↑ seen)"
+        }
+    } else {
+        ""
+    };
+    spans.push(Span::styled(cursor.to_string(), ctx.theme.accent));
+    spans.push(Span::raw(format!(
+        "{} {}",
+        super::glyphs::Glyphs::entity_tag(&entity.kind),
+        truncate(entity.display_name(), 22)
+    )));
+    spans.push(Span::raw(" "));
+    spans.push(provenance_glyph(entity.provenance, ctx.theme));
+    spans.push(Span::styled(
+        format!("{plus_mark}{seen_mark}"),
+        ctx.theme.accent,
+    ));
+    Line::from(spans)
 }
 
 fn graph_node_row(app: &App, id: uuid::Uuid, hop: u32) -> String {
@@ -1378,7 +1624,11 @@ fn jobs(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) 
             .unwrap_or(crate::model::JobStatus::Queued);
         let glyph = match status {
             crate::model::JobStatus::Running | crate::model::JobStatus::Queued => {
-                theme.glyphs.spinner[0]
+                if live.is_some_and(|job| job.kind == "agent") {
+                    app.motion.agent_glyph(&theme.glyphs)
+                } else {
+                    app.motion.job_spinner_glyph(&theme.glyphs)
+                }
             }
             crate::model::JobStatus::Succeeded => theme.glyphs.done,
             crate::model::JobStatus::Failed => theme.glyphs.failed,
@@ -1662,7 +1912,12 @@ fn inspector_heading(
     } else {
         workspace.investigation().name.clone()
     };
-    pane_title(&format!("Inspector · {name}"), focused, theme)
+    let pulse = if focused {
+        app.motion.frame_kind(super::motion::AnimKind::Focus)
+    } else {
+        None
+    };
+    super::widgets::pane_title_pulse(&format!("Inspector · {name}"), focused, theme, pulse)
 }
 
 fn tab_bar(app: &App, theme: &Theme) -> Vec<Line<'static>> {
