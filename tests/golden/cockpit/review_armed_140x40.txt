@@ -1,0 +1,40 @@
+ os-int ▸ acme-phish ▸ Review  unmarked                                                          ◆ 1 to review  ✓ jobs  agent ◇ Claude Code
+ Rail         │▌AI PROPOSES ONLY                                                               │ Inspector · Will write
+ 1 Case        nothing is written until you accept                                              + Finding  ◆ AI
+ 2 Entities    X-1 Q-1 · codex                                                                    mail.acme-login.com uses the same MX
+ 3 Evidence    ▌◆? + Finding: mail.acme-login.com uses the same MX                                confidence  medium
+ 4 Graph                                                                                          provenance agent (kept forever)
+▌5 Review 1                                                                                       Registered 3 days before the campaign
+ 6 Jobs
+                                                                                                CITED EVIDENCE
+                                                                                                  ✓ S-1  DNS records for acme-login.com
+
+                                                                                                RATIONALE ◆
+                                                                                                  ┊ Registered 3 days before the campaign
+
+                                                                                                TRANSCRIPT  Q-1
+                                                                                                Q  Is this phishing?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ Accept 1 AI item? It keeps ◆ agent provenance.   y confirm   any other key cancels
+ Armed — accept 1 AI item. It keeps ◆ agent provenance. y confirm. Any other key cancels.    0 jobs
+/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search around  A arm  x reject

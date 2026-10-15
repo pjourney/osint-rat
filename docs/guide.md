@@ -140,57 +140,71 @@ With no subcommand, os-int opens the terminal interface on your last investigati
 ┌ Welcome ──────────────────────┐  ┌ Environment ──────────────┐
 │ os-int                        │  │ Database        OK        │
 │                               │  │ Claude Code     missing   │
-│ [N] New Investigation         │  │ dig             OK        │
-│ [O] Open Investigation        │  │ …                         │
-│ [D] Doctor                    │  └───────────────────────────┘
-│ [?] Help                      │
+│ New investigation             │  │ dig             OK        │
+│ Open investigation            │  │ …                         │
+│ Doctor                        │  └───────────────────────────┘
+│ Help                          │
 │                               │
 │ Recent investigations         │
 └───────────────────────────────┘
 ```
 
-A wide investigation screen has three columns: **Navigate**, the current section, and a detail pane. Below 96 columns the detail pane is hidden. Below 72 columns the navigation labels tighten. 120×40 is a comfortable size.
-
-The footer is always:
+An investigation screen is always three panes: **Rail**, **Board**, and **Inspector**. The Rail has six destinations on keys `1`–`6`: Case, Entities, Evidence, Graph, Review, Jobs. The Inspector is a 44-column side pane; below 110 columns it becomes a bottom drawer (40% height). It is never hidden. Below 80 columns the Rail collapses to digits. The minimum comfortable size is 80×24. `z` zooms the Board; any key returns.
 
 ```text
-[a] Ask   [/] Search   [p] Palette   [r] Collect   [g] Graph   [s] Around   [?] Help
+┌ os-int ▸ Example Corp ▸ Case   TLP:AMBER            ◆ 0 to review  agent ● ──┐
+│ Rail         │ Board                              │ Inspector              │
+│ 1 Case       │ TARGETS                            │ Props  Sources  Notes  │
+│ 2 Entities   │ DOM example.com          ● 3       │ DOM example.com        │
+│ 3 Evidence   │                                    │ ● 3 facts from 2 srcs  │
+│ 4 Graph      │                                    │                        │
+│ 5 Review     │                                    │ SOURCES                │
+│ 6 Jobs       │                                    │  S-1 ● dns             │
+├──────────────┴────────────────────────────────────┴────────────────────────┤
+│ c collect  n new target  a ask agent  s search around  Ctrl+K commands  ?  │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Background work (HTTP, DNS, TLS, subprocesses, agent calls, report rendering) runs on a job queue. The interface never waits on that I/O. Open **Jobs** (`8`) to watch or cancel a job. Open **Tools** (`9`) to see which external programs were found. Open **Settings** (`0`) or press `e` there to change the active agent, an optional program override, the agent timeout, and the theme (`auto`, `dark`, `light`, `mono`, `phosphor`, `amber`). Press `?` for help generated from the command registry. Preview palettes with `os-int theme preview --all` without opening the workbench.
+The footer is a context bar generated from the command registry for the focused pane. Press `?` for help generated from the same registry.
+
+Background work (HTTP, DNS, TLS, subprocesses, agent calls, report rendering) runs on a job queue. The interface never waits on that I/O. Open **Jobs** (`6`) to watch a job. Cancel a job, open **Tools** or **Settings**, ingest a file, or run a playbook from the palette (`Ctrl+K` or `:`). Palette **Configure Agent** changes the active agent, an optional program override, the agent timeout, and the theme (`auto`, `dark`, `light`, `mono`, `phosphor`, `amber`). Preview palettes with `os-int theme preview --all` without opening the workbench.
 
 os-int remembers the last view, page, and agent thread for each investigation.
 
+**Review** (`5`) is the only place AI, playbook, and merge proposals wait. Each row previews exactly what it will write and lists cited sources. `Shift+A` then `y` accepts. Enter never writes. A citation that points at a missing source blocks accept. Accepted AI items keep the ◆ glyph permanently.
+
 ### Command palette
 
-Press `p` or `Ctrl+P`, then type to filter.
+Press `Ctrl+K` or `:`, then type to filter. Ingest, playbooks, tools, settings, audit, artifacts, marking, team, nearby, and unresolve live here only.
 
 | Command | What it does |
 | --- | --- |
 | New Investigation | Create a case |
 | Open Investigation | Switch case |
 | New Page | Add a subject |
-| Run Collectors | Default collectors for the current page |
+| Run Collectors | Default collectors for the current page (`c`) |
 | Run DNS / RDAP / HTTP / TLS / Certificate Transparency / IP Intelligence | One collector |
 | Run Email Identity Pack / Username Pack / Subdomain Expansion | One collector |
-| Ingest file | STIX, MISP, CSV/JSON, or Evidence Batch (`i`) |
-| Run playbook | Bundled YAML or a file (`b`). Mode `run` / `dry-run` |
+| Ingest file | STIX, MISP, CSV/JSON, or Evidence Batch |
+| Run playbook | Bundled YAML or a file. Mode `run` / `dry-run` |
 | Playbook prompt | Seed the agent question with suggested Actions |
 | Watch playbook | Re-run collect steps; mode `dry-run` / `once` |
-| Ask Agent | Question the active agent |
+| Ask Agent | Question the active agent. Results land in Review |
 | Generate Report | Markdown or JSON |
 | Add Finding / Add Note | Analyst-authored records |
-| Open Entities, Sources, Findings, Timeline, Audit, Jobs, Tools, Artifacts, Agent History | Jump to that screen |
+| Open Entities, Evidence, Graph, Review, Jobs | Jump to a Rail destination |
+| Open Sources, Findings, Timeline, Notes, Audit, Tools, Artifacts, Agent History | Cut views: Inspector tabs or palette destinations |
 | Set marking | Investigation TLP (`unmarked` or `TLP:*`) |
 | Add team member | `owner` / `analyst` / `reader` |
-| Nearby (country / prefix) | Timeline / Entities: list co-located entities (`l`) |
-| Object View | Typed properties, catalogued links, sources, and findings for the selected entity or page (`v`) |
+| Nearby (country / prefix) | List co-located entities |
+| Object View | Typed properties, catalogued links, sources, and findings (`Enter` also opens) |
 | Graph | Link-analysis canvas of entities and relationships (`g`) |
 | Search Around | Expand 1–N hops from the selection and merge into Graph (`s`) |
 | Configure Agent | Agent profile and theme |
 | Doctor | Environment checks |
 | Help | Keyboard overlay |
 | Cancel Running Job | Cancel the selected job |
+| Unresolve entity | Propose unresolving the current bag. Opens a y-confirm overlay. Enter never writes. |
 
 ## Building a case
 
@@ -198,9 +212,9 @@ Press `p` or `Ctrl+P`, then type to filter.
 
 1. `n` on the welcome screen. Enter a name and an optional description. The description is used as the executive summary of a Markdown report.
 2. `n` again. Pick a page type with `Left` / `Right` and enter the target. The form shows an example for that type (`example.com`, `192.0.2.15`, `AS13335`, …).
-3. `r` on that page to collect.
-4. Move through Sources, Findings, and Entities. The detail pane shows the selected record. Press `Enter` on an entity (or `v` from Pages) to open **Object View**. Press `g` to open **Graph**, then `s` to Search Around.
-5. `e` on Overview edits the current page's notes in your editor (`ui.editor`, then `$VISUAL`, then `$EDITOR`, then `vi`). os-int suspends the terminal UI, runs the editor, and reloads the note when the editor exits.
+3. `c` on Case to collect on the selected target (passive collectors only).
+4. Open **Entities** (`2`) or **Evidence** (`3`). The Inspector shows the selected record (Props, Sources, Notes, History). Press `Enter` on an entity to open **Object View**. Press `g` to open **Graph**, then `s` to Search Around.
+5. `e` on Case edits the current page's notes in your editor (`ui.editor`, then `$VISUAL`, then `$EDITOR`, then `vi`). os-int suspends the terminal UI, runs the editor, and reloads the note when the editor exits. Notes also live on the Inspector Notes tab.
 6. Add a finding from the palette when you want to record a conclusion. Cite sources by short id (`S-1, S-4`). A finding you add this way is provenance `analyst`.
 
 ### From the shell
@@ -219,8 +233,8 @@ Search (`/` or `Ctrl+F`) matches pages (title, target, notes), entities, finding
 
 Object View is the typed reading of one entity or page: property groups from the [ontology](ontology.md), linked objects grouped by catalog verb, supporting sources, and findings.
 
-- From **Entities**, press `Enter` or `v` to open the highlighted row.
-- From **Pages** or Overview, press `v` to open the current page (its primary entity when it has one).
+- From **Entities**, press `Enter` to open the highlighted row.
+- From **Case**, press `Enter` to open the current page (its primary entity when it has one).
 - Palette: **Object View** uses the same rules; a leftover entity is never reused.
 - `Esc` returns to the screen you came from.
 
@@ -230,12 +244,12 @@ When the object is a resolved canonical, Object View lists **Constituents** (the
 
 ## Graph and Search Around
 
-Graph is a terminal link-analysis canvas (TUI-first; there is no embedded webview). Nodes are entities. Edges are relationships. The detail pane reuses Object View data for the selected node.
+Graph is a terminal link-analysis canvas (TUI-first; there is no embedded webview). Nodes are entities. Edges are relationships. The Inspector reuses Object View data for the selected node.
 
-- Press `g`, pick **Graph** in Navigate, or run the palette command **Graph**. The seed is the current entity (Entities highlight, Object View, or the page's primary entity). If none is focused, the first entity is used. Opening Graph expands **1 hop**.
+- Press `g`, pick **Graph** on the Rail (`4`), or run the palette command **Graph**. The seed is the current entity (Entities highlight, Object View, or the page's primary entity). If none is focused, the first entity is used. Opening Graph expands **1 hop**.
 - Press `s` or the palette command **Search Around** to expand **2 hops** from the current selection. On an open Graph, those hops **merge** into the canvas. From any other screen, Search Around opens Graph at 2 hops.
 - `+` / `-` change hop depth and re-query from the original seed (0–8). `hops` follows the last result's `hops_used`.
-- The **facet strip** counts the unfiltered set by entity kind, top link types, and provenance. `[` / `]` move the cursor. `f` applies (or toggles) that facet; the visible set updates immediately. `x` clears filters.
+- Press `t` to toggle the **time lens** on Graph or Evidence. The facet strip counts the unfiltered set by entity kind, top link types, and provenance. Palette **Previous facet** / **Next facet** / **Apply facet** move and apply a facet; `x` clears filters.
 - Render caps are **200 nodes** and **400 edges**. Crossing either threshold warns and asks for confirm before the first 200 / 400 are drawn. A capped result is labelled in the status line.
 - `Enter` opens Object View for the selected node. `Esc` returns to the screen that opened Graph. The Entities table is unchanged: `Enter` there still opens Object View.
 
@@ -245,12 +259,12 @@ Resolved constituents are hidden: the graph shows **one node** for the canonical
 
 ## Timeline and geospatial
 
-Time and place are first-class. The Timeline screen overlays **collection log rows** (`T-n`) and **Event objects** (`C-n`). An Event is an instant when `ended_at` is absent, otherwise an interval. STIX `first_observed` / `last_observed` and Evidence Batch `events` import as Events. Observation-hash changes and diagnostic flips also promote Events (`change_intelligence` on the field bag). Agent-suggested findings still require accept.
+Time and place are first-class. The time lens overlays **collection log rows** (`T-n`) and **Event objects** (`C-n`) on Evidence and Graph. An Event is an instant when `ended_at` is absent, otherwise an interval. STIX `first_observed` / `last_observed` and Evidence Batch `events` import as Events. Observation-hash changes and diagnostic flips also promote Events (`change_intelligence` on the field bag). Agent-suggested findings still require accept.
 
-- Press `6` or the palette command **Open Timeline**.
-- `[` / `]` move the entity-filter cursor. `f` filters the overlay to that entity (resolution bags included). `x` clears the filter.
-- `Enter` on a row with a linked entity opens Object View. `Esc` returns to the same Timeline selection.
-- `l` on Timeline or Entities lists **nearby** entities that share a `country` or `prefix`. `Esc` restores the previous list and selection. Empty data does not crash.
+- Press `t` on Evidence or Graph, or the palette command **Open Timeline**.
+- Palette **Previous facet** / **Next facet** / **Apply facet** filter the overlay by entity (resolution bags included). `x` clears the filter.
+- `Enter` on a row with a linked entity opens Object View. `Esc` returns to the same selection.
+- Palette **Nearby** lists entities that share a `country` or `prefix`. `Esc` restores the previous list and selection. Empty data does not crash.
 
 Co-occurrence (`os-int cooccur`) prints pairs that share an Event, a cited source, or a time window (default 24 hours).
 
@@ -270,7 +284,7 @@ Merge records that are the same real-world thing without destroying history. Unr
 
 ## Markings, audit, and team
 
-Overview and the title bar show the investigation marking (`unmarked` or `TLP:CLEAR` / `GREEN` / `AMBER` / `AMBER+STRICT` / `RED`). Palette **Set marking** cycles the investigation label. Object markings are CLI-only (`os-int marking set … --entity E-1`). The **Audit** screen lists append-only governance events (merges, accepted Actions, playbook runs, exports, marking and membership changes). That log is not the investigative Timeline. Deleting a case is owner-only (it removes the audit log with the investigation). `[identity] user_id` matching is case-insensitive.
+Case and the title bar show the investigation marking (`unmarked` or `TLP:CLEAR` / `GREEN` / `AMBER` / `AMBER+STRICT` / `RED`). Palette **Set marking** cycles the investigation label. Object markings are CLI-only (`os-int marking set … --entity E-1`). The **Audit** screen lists append-only governance events (merges, accepted Actions, playbook runs, exports, marking and membership changes). That log is not the investigative Timeline. Deleting a case is owner-only (it removes the audit log with the investigation). `[identity] user_id` matching is case-insensitive.
 
 ```bash
 os-int marking set "Example Corp" TLP:AMBER
@@ -286,15 +300,14 @@ A shared `--data-dir` plus roles is optional. Empty membership is single-user ow
 - Prefer the more specific or already-cited object as the winner (the highlighted marked row). The winner keeps its kind and value.
 - Read the confirm text. Esc cancels. Nothing merges until you confirm.
 - After merge, open Object View and check constituents, sources, and links. Both sides' citations must still be there.
-- Unresolve (`u` on the canonical) if the bag was wrong. Constituents return; property writes from that bag are undone. SQLite rows are not deleted, so `os-int doctor` should stay clean.
+- Unresolve (palette **Unresolve entity**, then `y`) if the bag was wrong. Constituents return; property writes from that bag are undone. SQLite rows are not deleted, so `os-int doctor` should stay clean.
 - Do not accept an agent `PROPOSE_RESOLVE` without checking the entity ids. AI only proposes.
 - Suggestions (palette **Resolution suggestions**) are scored hints: same canonical email/domain/IP/repo URL, username↔profile URL, certificate SAN clusters. They never auto-merge.
 
 ### Keys
 
-- **Entities:** `Space` marks or unmarks. `m` proposes a merge of the marked set (the highlighted marked row is the canonical). `y` confirms; Esc cancels.
-- **Object View / Entities:** `u` proposes unresolve of the active bag on the canonical.
-- Palette: **Merge selected entities**, **Unresolve entity**, **Resolution suggestions**.
+- **Entities:** `Space` marks or unmarks. `m` proposes a merge of the marked set (the highlighted marked row is the canonical). The proposal lands in **Review**. `Shift+A` then `y` writes; Enter never writes.
+- Palette: **Merge selected entities**, **Unresolve entity**, **Resolution suggestions**. Unresolve opens a y-confirm overlay. Scored suggestions land in Review.
 
 Timeline events `entities_resolved` and `entities_unresolved` record the actor and constituent ids.
 
@@ -302,7 +315,7 @@ Timeline events `entities_resolved` and `entities_unresolved` record the actor a
 
 A collector takes one target and returns sources, entities, relationships, timeline events, and artifacts. It does not write the database itself. The workbench or the `collect` command applies the batch in one transaction.
 
-Press `r` or run `os-int collect` without `--collector` to run the **default** set. Ask for one collector by id when you want a narrower pass.
+Press `c` or run `os-int collect` without `--collector` to run the **default** set. Ask for one collector by id from the palette when you want a narrower pass.
 
 | Id | Accepts | In the default set | What it records |
 | --- | --- | --- | --- |
@@ -356,7 +369,7 @@ Sidecars that print Evidence Batch JSON are `[[collectors.external]]`. Optional 
 
 ## Ingest
 
-`os-int ingest` (workbench: `i`) parses a STIX 2.1 bundle, a MISP event, a CSV/JSON observable list, or an Evidence Batch file and applies it through the same transaction as a collector. Every imported source and finding is provenance `external`. A batch cannot claim `agent` provenance or clear collected diagnostics with `resolved_findings`. Identical re-ingest is idempotent.
+`os-int ingest` (workbench: palette **Ingest file**) parses a STIX 2.1 bundle, a MISP event, a CSV/JSON observable list, or an Evidence Batch file and applies it through the same transaction as a collector. Every imported source and finding is provenance `external`. A batch cannot claim `agent` provenance or clear collected diagnostics with `resolved_findings`. Identical re-ingest is idempotent.
 
 ```bash
 os-int ingest tests/fixtures/ingest/stix-bundle.json --format stix --investigation "Example Corp"
@@ -373,7 +386,7 @@ The in-repo sidecar example is [`examples/connectors/hello-batch/`](../examples/
 
 A playbook is a YAML document: a seed object type plus ordered steps (`collect`, `search_around`, `run_tool`, `assert_finding_template`, `propose_resolve`). Collect and tool steps run; Search Around is a graph query; finding templates and merges become **pending proposals**. Nothing from a template is written until you accept it.
 
-From the workbench, press `b` (or palette **Run playbook**). Left/Right cycles bundled ids (`domain-infra`, `mail-policy`, `cert-estate`, `repo-surface`). Mode `run` / `dry-run`. Esc closes the form and leaves the entity selection in place. Ctrl+S on dry-run shows the plan as text; Ctrl+S on run queues a job you can cancel from Jobs with `c`. Palette **Playbook prompt** seeds the agent question with suggested Actions — the agent still only proposes. Palette **Watch playbook** re-runs collect steps (`dry-run` / `once`) and opens proposals on changes.
+From the workbench, open the palette and run **Run playbook**. Left/Right cycles bundled ids (`domain-infra`, `mail-policy`, `cert-estate`, `repo-surface`). Mode `run` / `dry-run`. Esc closes the form and leaves the entity selection in place. Ctrl+S on dry-run shows the plan as text; Ctrl+S on run queues a job you can cancel from the palette (**Cancel Running Job**). Palette **Playbook prompt** seeds the agent question with suggested Actions — the agent still only proposes. Palette **Watch playbook** re-runs collect steps (`dry-run` / `once`) and opens proposals in Review on changes.
 
 From the shell:
 
@@ -483,7 +496,7 @@ The nonce is random per request, and fence-like text inside the material is neut
 
 Earlier turns of the same thread are included, up to `agent.history_turns` (default 4). The pack is truncated to `agent.max_context_bytes` (default 200 KiB).
 
-If the agent wants os-int to change the case, it appends a fenced JSON block. os-int stores those as proposals and shows them to you. Nothing is written until you accept.
+If the agent wants os-int to change the case, it appends a fenced JSON block. os-int stores those as proposals and opens them in **Review** (`5`). Nothing is written until you accept with `Shift+A` then `y`. Enter, `a`, and `y` alone never write. A citation that points at a missing source blocks accept.
 
 ````text
 ```os-int-actions
@@ -500,9 +513,9 @@ If the agent wants os-int to change the case, it appends a fenced JSON block. os
 ```
 ````
 
-Accepted findings keep provenance `agent` and the `AI` badge.
+Accepted findings keep provenance `agent` and the ◆ glyph permanently.
 
-Switch profiles in Settings, or in `config.toml`:
+Switch profiles from the palette (**Configure Agent**), or in `config.toml`:
 
 ```toml
 [agent]
@@ -520,7 +533,7 @@ working_directory = "investigation"
 
 Placeholders inside agent arguments: `{prompt}`, `{prompt_file}`, `{instructions}`, `{question}`, `{workdir}`. They are substituted inside individual arguments and are never re-split through a shell.
 
-If the program is missing, the Agent screen explains that, and collection continues to work. Point `active` at a program that is installed, or set `program` under `[agent]` to override the selected profile.
+If the program is missing, palette **Agent History** / **Configure Agent** explains that, and collection continues to work. Point `active` at a program that is installed, or set `program` under `[agent]` to override the selected profile.
 
 ## Reports, export, and import
 
@@ -735,44 +748,31 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `q` | normal, overlays | Quit, or close the overlay |
 | `Ctrl+C` | anywhere | Quit |
 | `Esc` | normal | Back |
-| `Esc` | overlays, editing, proposals | Close or cancel |
-| `Tab` / `Shift+Tab` | normal | Next / previous pane |
-| `j` `k` or arrows | normal, lists | Move the selection |
+| `Esc` | overlays, editing, Review confirm | Close, cancel, or disarm |
+| `Tab` / `Shift+Tab` / `h` `l` / arrows | normal | Move focus Rail ◀▶ Board ◀▶ Inspector |
+| `j` `k` or `↑` `↓` | normal, lists | Move the selection |
 | `PgUp` `PgDn` | normal | Move by 10 |
-| `Enter` | normal | Open or select |
-| `/` `Ctrl+F` | normal | Search |
-| `p` `Ctrl+P` | normal | Command palette |
-| `a` | normal | Ask the agent |
-| `n` | normal | New investigation, page, or finding |
-| `e` | normal | Edit notes, or open settings |
-| `r` | normal | Run collectors for this page |
-| `i` | normal | Ingest a STIX / MISP / CSV / JSON / Evidence Batch file |
-| `b` | normal | Run playbook (bundled YAML or a file) |
-| `v` | normal | Object View: highlighted entity, or the current page |
-| `g` | normal | Graph for the current entity (1 hop) |
+| `Enter` | normal | Open or drill in. **Never writes.** |
+| `/` `Ctrl+F` | normal | Filter the current table, or search the case |
+| `Ctrl+K` `:` | normal | Command palette |
+| `a` | normal | Ask the agent. Results land in Review |
+| `n` | normal | New investigation, target, or finding |
+| `e` | normal | Edit notes in `$EDITOR` |
+| `c` | normal | Collect on the selected target (passive collectors only) |
+| `g` | normal | Open the selection in Graph (1 hop) |
 | `s` | normal | Search Around (default 2 hops; merges on Graph) |
-| `+` `-` | Graph | More / fewer hops |
-| `[` `]` | Graph | Move the facet cursor |
-| `f` | Graph | Apply or toggle the highlighted facet |
-| `x` | Graph | Clear facet filters |
-| `[` `]` | Timeline | Move the entity-filter cursor |
-| `f` | Timeline | Filter overlay by the highlighted entity |
-| `x` | Timeline | Clear the entity filter |
-| `l` | Timeline, Entities | Nearby (same country or prefix) |
-| `Space` | Entities | Mark or unmark for merge |
-| `m` | Entities | Propose merge of marked entities |
-| `u` | Object View, Entities | Propose unresolve |
-| `Enter` | Entities | Open Object View |
-| `Enter` | Graph | Open Object View for the selected node |
-| `c` | Jobs | Cancel the selected job |
+| `t` | Evidence, Graph | Toggle the time lens |
+| `+` `-` | Graph / time lens | More / fewer hops, or time bucket |
+| `x` | Review | Reject the highlighted item |
+| `x` | Graph, Evidence | Clear filters or the time lens |
+| `Space` | Entities, Review | Mark a row |
+| `m` | Entities | Propose merge of marked rows → Review |
+| `z` | normal | Zoom the Board. Any key returns |
+| `Enter` | Entities, Graph | Open Object View |
 | `?` | normal, overlays | Help (generated from the command registry) |
-| `1` … `6` | normal | Overview, Pages, Sources, Findings, Entities, Timeline |
-| `7` `8` `9` `0` | normal | Agent, Jobs, Tools, Settings |
-| Palette | normal | **Open Audit**, **Set marking**, **Add team member** |
-| `o` | welcome | Open investigation |
-| `d` | welcome | Doctor |
-| `Shift+A` then `y` | proposals | Arm, then accept. Any other key disarms. Enter never accepts. |
-| `R` `n` | proposals | Reject the selected proposal |
+| `1` … `6` | normal | Case, Entities, Evidence, Graph, Review, Jobs |
+| Palette | normal | Ingest, playbook, tools, settings, audit, artifacts, nearby, unresolve, cancel job, doctor, open investigation |
+| `Shift+A` then `y` | Review | Arm, then accept. Any other key disarms. Enter never accepts. A missing citation blocks accept. |
 | `y` | confirm | Confirm a write, including a palette command that writes. Enter never writes. |
 | `Enter` | palette | Pick a command. Writes open a y-confirm and do not run until `y`. |
 | `Ctrl+S` | editing | Submit the form or the agent question. Enter never writes. |
@@ -793,8 +793,8 @@ Inside a text field, letters insert text. They are not treated as commands until
 | `unknown collector` | Use `dns`, `rdap`, `http`, `tls`, `ct`, `ip`, `repository`, `file`, `email`, `username`, `subdomain`, or a configured external id. |
 | Repository collection is unavailable | Install `git`. `gh` is optional and only adds GitHub metadata. |
 | The agent runs but proposes nothing | You can still use the answer as reading. Proposals appear only when the reply contains an `os-int-actions` block. Accepting is a separate step. |
-| A custom tool never runs | On the Tools screen, read the problem line. Typical causes: the program is not on `PATH`, `accepts` lists no known target kind, the argument template is invalid, or `activity` is `active`. |
-| The interface looks cramped | Widen the terminal. The detail pane appears at 96 columns or more. |
+| A custom tool never runs | Palette **Show Tools** and read the problem line. Typical causes: the program is not on `PATH`, `accepts` lists no known target kind, the argument template is invalid, or `activity` is `active`. Active tools show `⊘` refused with no enable option. |
+| The interface looks cramped | Widen the terminal. The Inspector is a side pane at 110 columns or more, and a bottom drawer below that. The minimum size is 80×24. |
 
 Logs are daily files under the data directory. Redact anything sensitive before you attach a log to a bug report. The [bug report template](../.github/ISSUE_TEMPLATE/bug_report.md) asks for `os-int doctor` output.
 

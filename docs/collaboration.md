@@ -6,7 +6,7 @@ Threat model: the trust boundary is the people who can read the data directory (
 
 ## Markings
 
-Each investigation has a Traffic Light Protocol marking: `unmarked`, `TLP:CLEAR`, `TLP:GREEN`, `TLP:AMBER`, `TLP:AMBER+STRICT`, or `TLP:RED`. It is shown on Overview, in the title bar, in `os-int list`, and on `investigation` inside `investigation.osint.json`.
+Each investigation has a Traffic Light Protocol marking: `unmarked`, `TLP:CLEAR`, `TLP:GREEN`, `TLP:AMBER`, `TLP:AMBER+STRICT`, or `TLP:RED`. It is shown on Case, in the title bar, in `os-int list`, and on `investigation` inside `investigation.osint.json`.
 
 Objects may carry an optional marking in `entities.fields.marking` (`os-int marking set … --entity E-1`). Missing means unmarked. Palette **Set marking** changes the investigation label only; object markings are CLI-only on purpose.
 

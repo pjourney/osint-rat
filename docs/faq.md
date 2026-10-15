@@ -18,11 +18,11 @@ A **page** is a subject you chose to work on: "look at example.com". An **entity
 | Finding | A claim. It should cite sources by short id (`S-1`). A finding with no sources is a hypothesis. |
 | Note | Your writing, or text you accepted from an agent. Page notes live on the page. Standalone notes have their own id (`N-1`). |
 
-Press `e` on Overview to edit the current page's notes in your editor. Add a finding from the command palette (`p`, then "finding").
+Press `e` on Case to edit the current page's notes in your editor. Add a finding from the command palette (`Ctrl+K`, then "finding").
 
 ## How do I merge two entities that are the same thing?
 
-On **Entities**, mark each row with `Space`, press `m`, and confirm. The highlighted marked row is the canonical. Object View lists constituents. Graph shows one node. `u` on the canonical unresolves. Suggestions never auto-merge. See [Entity resolution](guide.md#entity-resolution).
+On **Entities**, mark each row with `Space`, press `m`. The merge lands in **Review**. `Shift+A` then `y` writes. The highlighted marked row is the canonical. Object View lists constituents. Graph shows one node. Palette **Unresolve entity** proposes unresolve. Suggestions never auto-merge. See [Entity resolution](guide.md#entity-resolution).
 
 ## What do the badges mean?
 
@@ -69,9 +69,9 @@ os-int --data-dir /tmp/os-int-fresh --config /tmp/os-int-fresh/config.toml
 
 Deleting the platform data directory deletes every investigation stored there. Export first if you want a copy.
 
-## Why did `r` not run IP intelligence?
+## Why did `c` not run IP intelligence?
 
-`r` runs the default collectors for the **current page's** kind. A domain runs `dns`, `rdap`, `http`, `tls`, `ct`, and `subdomain`. An email page runs `dns`, `ct`, and `email`. A username page runs `username`. IP intelligence runs on an IP page, or with `os-int collect ip 192.0.2.15`. The full matrix is in the [user guide](guide.md#collectors).
+`c` runs the default collectors for the **current page's** kind. A domain runs `dns`, `rdap`, `http`, `tls`, `ct`, and `subdomain`. An email page runs `dns`, `ct`, and `email`. A username page runs `username`. IP intelligence runs on an IP page, or with `os-int collect ip 192.0.2.15`. The full matrix is in the [user guide](guide.md#collectors).
 
 ## Why was my custom tool refused?
 
@@ -96,7 +96,7 @@ The same content hash is treated as the same observation: the source is marked s
 
 ## How do Timeline, nearby, and GeoJSON work?
 
-Timeline overlays collection log rows (`T-n`) and Event objects (`C-n`). Filter with `[` `]` `f`. `l` lists entities that share a country or prefix. `os-int geojson` / `export --format geojson` writes Points and envelope Polygons. Coordinates come from RDAP, Team Cymru, an optional local JSON/MMDB (`collectors.geo_db_path`), or a country centroid (`geo_source` records which). Missing geo databases skip lookups; they do not fail `doctor`. Built-ins never fetch a geo service.
+Timeline overlays collection log rows (`T-n`) and Event objects (`C-n`). Press `t` on Evidence or Graph for the time lens. Nearby (country / prefix) is a palette command. `os-int geojson` / `export --format geojson` writes Points and envelope Polygons. Coordinates come from RDAP, Team Cymru, an optional local JSON/MMDB (`collectors.geo_db_path`), or a country centroid (`geo_source` records which). Missing geo databases skip lookups; they do not fail `doctor`. Built-ins never fetch a geo service.
 
 ## Does a playbook write findings by itself?
 

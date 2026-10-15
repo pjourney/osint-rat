@@ -6,13 +6,13 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 
-use crate::app::{App, Pane, View};
+use crate::app::{App, EvidenceRow, InspectorTab, Pane, View};
 use crate::doctor::CheckStatus;
 use crate::model::{FacetAxis, GraphFilters, LinkDirection, Workspace, layout_columns, now};
 use crate::sanitize::{sanitize_line, sanitize_text};
 
 use super::theme::Theme;
-use super::widgets::{list_from, pane_block, provenance_span, truncate};
+use super::widgets::{list_from, pane_block, pane_title, provenance_span, rule_span, truncate};
 
 pub fn welcome(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let columns =
@@ -27,10 +27,10 @@ pub fn welcome(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         Line::from("Create an investigation, collect public evidence, take notes,"),
         Line::from("and ask a local agent CLI (Claude Code, Codex, or your own)."),
         Line::from(""),
-        welcome_item(0, app.selected, "[N] New Investigation", theme),
-        welcome_item(1, app.selected, "[O] Open Investigation", theme),
-        welcome_item(2, app.selected, "[D] Doctor", theme),
-        welcome_item(3, app.selected, "[?] Help", theme),
+        welcome_item(0, app.selected, "New investigation", theme),
+        welcome_item(1, app.selected, "Open investigation", theme),
+        welcome_item(2, app.selected, "Doctor", theme),
+        welcome_item(3, app.selected, "Help", theme),
         Line::from(""),
         Line::from(Span::styled("Recent investigations", theme.header)),
     ];
@@ -88,34 +88,77 @@ fn welcome_item<'a>(index: usize, selected: usize, label: &'a str, theme: &Theme
     Line::from(Span::styled(label, style))
 }
 
+const RAIL_WIDTH: u16 = 14;
+const INSPECTOR_WIDTH: u16 = 44;
+const INSPECTOR_BREAK: u16 = 110;
+
 pub fn workspace(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let narrow = area.width < 72;
-    let hide_detail = area.width < 96;
-    let nav_width = if narrow { 12 } else { 16 };
-    let mut constraints = vec![Constraint::Length(nav_width), Constraint::Min(24)];
-    if !hide_detail {
-        constraints.push(Constraint::Length(area.width / 3));
+    if app.board_zoomed {
+        draw_main(frame, area, app, theme);
+        return;
     }
-    let columns = Layout::horizontal(constraints).split(area);
-    draw_nav(frame, columns[0], app, theme);
-    draw_main(frame, columns[1], app, theme);
-    if !hide_detail {
-        draw_detail(frame, columns[2], app, theme);
+    if area.width < INSPECTOR_BREAK {
+        let drawer = (area.height as u32 * 40 / 100).max(6) as u16;
+        let rows = Layout::vertical([Constraint::Min(6), Constraint::Length(drawer)]).split(area);
+        let rail_width = if area.width < 80 { 3 } else { RAIL_WIDTH };
+        let columns = Layout::horizontal([
+            Constraint::Length(rail_width),
+            Constraint::Length(1),
+            Constraint::Min(8),
+        ])
+        .split(rows[0]);
+        draw_rail(frame, columns[0], app, theme, area.width < 80);
+        frame.render_widget(Paragraph::new(rule_span(theme)), columns[1]);
+        draw_main(frame, columns[2], app, theme);
+        draw_inspector(frame, rows[1], app, theme);
+        return;
     }
+    let columns = Layout::horizontal([
+        Constraint::Length(RAIL_WIDTH),
+        Constraint::Length(1),
+        Constraint::Min(20),
+        Constraint::Length(1),
+        Constraint::Length(INSPECTOR_WIDTH),
+    ])
+    .split(area);
+    draw_rail(frame, columns[0], app, theme, false);
+    frame.render_widget(Paragraph::new(rule_span(theme)), columns[1]);
+    draw_main(frame, columns[2], app, theme);
+    frame.render_widget(Paragraph::new(rule_span(theme)), columns[3]);
+    draw_inspector(frame, columns[4], app, theme);
 }
 
-fn draw_nav(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let items: Vec<String> = app
-        .nav_items()
-        .into_iter()
-        .map(|(label, _)| label.to_string())
-        .collect();
-    let list = list_from(items, app.nav_index, theme).block(pane_block(
-        "Navigate",
-        app.pane == Pane::Nav,
-        theme,
-    ));
-    frame.render_widget(list, area);
+fn draw_rail(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, digits_only: bool) {
+    let focused = app.pane == Pane::Nav;
+    let review = app.pending_review_count();
+    let jobs = app
+        .job_records
+        .values()
+        .filter(|job| job.status.is_active())
+        .count();
+    let mut lines = vec![pane_title("Rail", focused, theme)];
+    for (index, (label, view)) in app.nav_items().into_iter().enumerate() {
+        let current = app.rail_view_is_current(view);
+        let mut text = if digits_only {
+            format!("{}", index + 1)
+        } else {
+            format!("{} {label}", index + 1)
+        };
+        if view == View::Review && review > 0 {
+            text = format!("{text} {review}");
+        }
+        if view == View::Jobs && jobs > 0 {
+            text = format!("{text} {}", theme.glyphs.spinner[0]);
+        }
+        let style = if current {
+            theme.accent.add_modifier(ratatui::style::Modifier::BOLD)
+        } else {
+            theme.fg
+        };
+        let prefix = if current { theme.glyphs.focus } else { " " };
+        lines.push(Line::from(Span::styled(format!("{prefix}{text}"), style)));
+    }
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 fn draw_main(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
@@ -123,6 +166,8 @@ fn draw_main(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     match app.view {
         View::Welcome => {}
         View::Overview => overview(frame, area, app, theme, focused),
+        View::Evidence => evidence(frame, area, app, theme, focused),
+        View::Review => review(frame, area, app, theme, focused),
         View::Pages => pages(frame, area, app, theme, focused),
         View::Sources => sources(frame, area, app, theme, focused),
         View::Findings => findings(frame, area, app, theme, focused),
@@ -257,25 +302,153 @@ fn overview(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
         }
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "r run collectors   a ask agent   n new page   p commands",
-        theme.muted,
-    )));
+    lines.insert(0, pane_title("TARGETS", focused, theme));
     frame.render_widget(
         Paragraph::new(lines)
-            .block(pane_block("Overview", focused, theme))
             .wrap(Wrap { trim: false })
             .scroll((app.scroll, 0)),
         area,
     );
 }
 
+fn evidence(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
+    if app.time_lens {
+        timeline(frame, area, app, theme, focused);
+        return;
+    }
+    let Some(workspace) = app.workspace.as_ref() else {
+        return;
+    };
+    let mut items: Vec<String> = Vec::new();
+    for row in app.listed_evidence() {
+        match row {
+            EvidenceRow::Finding(id) => {
+                if let Some(finding) = workspace.finding(id) {
+                    items.push(format!(
+                        "F  {}  {}  {}  {}",
+                        finding.short_ref(),
+                        finding.provenance.badge(),
+                        workspace.format_source_refs(&finding.source_ids),
+                        finding.title
+                    ));
+                }
+            }
+            EvidenceRow::Source(id) => {
+                if let Some(source) = workspace.source(id) {
+                    items.push(format!(
+                        "S  {}  {}  {}",
+                        source.short_ref(),
+                        source.provenance.badge(),
+                        source.title
+                    ));
+                }
+            }
+        }
+    }
+    if items.is_empty() {
+        items.push("No evidence yet. Collect on a target.".into());
+    }
+    let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).split(area);
+    frame.render_widget(
+        Paragraph::new(pane_title("EVIDENCE", focused, theme)),
+        rows[0],
+    );
+    frame.render_widget(list_from(items, app.selected, theme), rows[1]);
+}
+
+fn review(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
+    let items = app.listed_review_items();
+    let mut lines = vec![
+        pane_title("AI PROPOSES ONLY", focused, theme),
+        Line::from(Span::styled(
+            "nothing is written until you accept",
+            theme.muted,
+        )),
+    ];
+    if items.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No pending AI, playbook, or merge proposals.",
+            theme.muted,
+        )));
+    }
+    let mut last_group = String::new();
+    for (index, item) in items.iter().enumerate() {
+        if item.group != last_group {
+            lines.push(Line::from(Span::styled(item.group.clone(), theme.header)));
+            last_group = item.group.clone();
+        }
+        let mark = if index == app.selected {
+            theme.glyphs.focus
+        } else if app.review_marks.contains(&index) {
+            "x"
+        } else {
+            " "
+        };
+        let glyph = if item.is_ai() {
+            theme.glyphs.ai_pending
+        } else {
+            theme.glyphs.analyst
+        };
+        let style = if index == app.selected {
+            theme.selected
+        } else {
+            theme.fg
+        };
+        lines.push(Line::from(Span::styled(
+            format!("{mark}{glyph} {}", item.title),
+            style,
+        )));
+    }
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .scroll((app.scroll, 0)),
+        area,
+    );
+}
+
+fn render_board_list(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    items: Vec<String>,
+    selected: usize,
+    focused: bool,
+    theme: &Theme,
+) {
+    let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
+    frame.render_widget(Paragraph::new(pane_title(title, focused, theme)), rows[0]);
+    frame.render_widget(list_from(items, selected, theme), rows[1]);
+}
+
+fn render_board_lines(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    mut lines: Vec<Line<'static>>,
+    focused: bool,
+    theme: &Theme,
+    scroll: u16,
+) {
+    lines.insert(0, pane_title(title, focused, theme));
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0)),
+        area,
+    );
+}
+
 fn object_view(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
     let Some(view) = app.current_object_view() else {
-        frame.render_widget(
-            Paragraph::new("Select an entity or page, then press v or Enter.")
-                .block(pane_block("Object", focused, theme)),
+        render_board_lines(
+            frame,
             area,
+            "Object",
+            vec![Line::from("Select an entity or page, then press Enter.")],
+            focused,
+            theme,
+            0,
         );
         return;
     };
@@ -365,20 +538,18 @@ fn object_view(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused:
             )));
         }
         lines.push(Line::from(Span::styled(
-            "  u unresolve this bag",
+            "  palette: Unresolve entity",
             theme.muted,
         )));
     }
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(pane_block("Object", focused, theme))
-            .wrap(Wrap { trim: false })
-            .scroll((app.scroll, 0)),
-        area,
-    );
+    render_board_lines(frame, area, "Object", lines, focused, theme, app.scroll);
 }
 
 fn graph(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
+    if app.time_lens {
+        timeline(frame, area, app, theme, focused);
+        return;
+    }
     let rows = Layout::vertical([
         Constraint::Length(4),
         Constraint::Min(8),
@@ -393,18 +564,14 @@ fn graph(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool)
         graph_filter_line(&app.graph.filters),
         theme.muted,
     )));
+    facet_lines.insert(0, pane_title("Facets", focused, theme));
     frame.render_widget(
-        Paragraph::new(facet_lines)
-            .block(pane_block("Facets", focused, theme))
-            .wrap(Wrap { trim: false }),
+        Paragraph::new(facet_lines).wrap(Wrap { trim: false }),
         rows[0],
     );
-    frame.render_widget(
-        Paragraph::new(graph_canvas_lines(app, &visible, theme))
-            .block(pane_block("Neighborhood", focused, theme))
-            .wrap(Wrap { trim: false }),
-        rows[1],
-    );
+    let mut canvas = vec![pane_title("Neighborhood", focused, theme)];
+    canvas.extend(graph_canvas_lines(app, &visible, theme));
+    frame.render_widget(Paragraph::new(canvas).wrap(Wrap { trim: false }), rows[1]);
     let items: Vec<String> = visible
         .nodes
         .iter()
@@ -417,10 +584,7 @@ fn graph(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool)
             .selected
             .min(visible.nodes.len().saturating_sub(1))
     };
-    frame.render_widget(
-        list_from(items, selected, theme).block(pane_block("Nodes", focused, theme)),
-        rows[2],
-    );
+    render_board_list(frame, rows[2], "Nodes", items, selected, focused, theme);
 }
 
 fn graph_title(app: &App) -> String {
@@ -474,7 +638,7 @@ fn graph_facet_line(app: &App, chips: &[crate::model::FacetChip], theme: &Theme)
 
 fn graph_filter_line(filters: &GraphFilters) -> String {
     if filters.is_empty() {
-        return "[ ]/] facet   f apply   x clear   +/- hops   s Search Around".into();
+        return "x clear   +/- hops   s Search Around   t time lens".into();
     }
     let mut parts = Vec::new();
     if let Some(kind) = &filters.kind {
@@ -592,10 +756,7 @@ fn pages(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool)
                 .collect()
         })
         .unwrap_or_default();
-    frame.render_widget(
-        list_from(items, app.selected, theme).block(pane_block("Pages", focused, theme)),
-        area,
-    );
+    render_board_list(frame, area, "Pages", items, app.selected, focused, theme);
 }
 
 fn sources(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
@@ -619,10 +780,7 @@ fn sources(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: boo
                 .collect()
         })
         .unwrap_or_default();
-    frame.render_widget(
-        list_from(items, app.selected, theme).block(pane_block("Sources", focused, theme)),
-        area,
-    );
+    render_board_list(frame, area, "Sources", items, app.selected, focused, theme);
 }
 
 fn findings(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
@@ -644,10 +802,7 @@ fn findings(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
             )
         })
         .collect();
-    frame.render_widget(
-        list_from(items, app.selected, theme).block(pane_block("Findings", focused, theme)),
-        area,
-    );
+    render_board_list(frame, area, "Findings", items, app.selected, focused, theme);
 }
 
 fn entities(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
@@ -674,10 +829,7 @@ fn entities(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
     } else {
         items
     };
-    frame.render_widget(
-        list_from(items, app.selected, theme).block(pane_block("Entities", focused, theme)),
-        area,
-    );
+    render_board_list(frame, area, "Entities", items, app.selected, focused, theme);
 }
 
 fn audit(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
@@ -698,10 +850,7 @@ fn audit(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool)
     if items.is_empty() {
         items.push("(no audit events yet)".into());
     }
-    frame.render_widget(
-        list_from(items, app.selected, theme).block(pane_block("Audit", focused, theme)),
-        area,
-    );
+    render_board_list(frame, area, "Audit", items, app.selected, focused, theme);
 }
 
 fn timeline(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
@@ -721,8 +870,9 @@ fn timeline(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
         "overlay"
     };
     let header = vec![
+        pane_title("Timeline", focused, theme),
         Line::from(Span::styled(
-            format!("Timeline {mode} · {filter} · [ ] f filter · l nearby · x clear"),
+            format!("Time lens {mode} · {filter} · x clear"),
             theme.header,
         )),
         Line::from(Span::styled(
@@ -730,10 +880,7 @@ fn timeline(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
             theme.muted,
         )),
     ];
-    frame.render_widget(
-        Paragraph::new(header).block(pane_block("Timeline", focused, theme)),
-        rows[0],
-    );
+    frame.render_widget(Paragraph::new(header), rows[0]);
     let items: Vec<String> = if app.timeline.nearby {
         let nearby = app.listed_nearby();
         if nearby.is_empty() {
@@ -780,10 +927,7 @@ fn timeline(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
     } else {
         app.selected.min(items.len().saturating_sub(1))
     };
-    frame.render_widget(
-        list_from(items, selected, theme).block(pane_block("Events", focused, theme)),
-        rows[1],
-    );
+    render_board_list(frame, rows[1], "Events", items, selected, focused, theme);
 }
 
 fn notes(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
@@ -811,10 +955,7 @@ fn notes(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool)
     if items.is_empty() {
         items.push("(no notes — press n)".into());
     }
-    frame.render_widget(
-        list_from(items, app.selected, theme).block(pane_block("Notes", focused, theme)),
-        area,
-    );
+    render_board_list(frame, area, "Notes", items, app.selected, focused, theme);
 }
 
 fn agent(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
@@ -904,13 +1045,7 @@ fn agent(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool)
             )));
         }
     }
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(pane_block("Agent", focused, theme))
-            .wrap(Wrap { trim: false })
-            .scroll((app.scroll, 0)),
-        area,
-    );
+    render_board_lines(frame, area, "Agent", lines, focused, theme, app.scroll);
 }
 
 fn jobs(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
@@ -952,12 +1087,9 @@ fn jobs(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) 
         ));
     }
     if items.is_empty() {
-        items.push("(no jobs yet — press r on a Domain page)".into());
+        items.push("(no jobs yet — press c on a target)".into());
     }
-    frame.render_widget(
-        list_from(items, app.selected, theme).block(pane_block("Jobs", focused, theme)),
-        area,
-    );
+    render_board_list(frame, area, "Jobs", items, app.selected, focused, theme);
 }
 
 fn artifacts(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
@@ -986,9 +1118,14 @@ fn artifacts(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: b
     } else {
         items
     };
-    frame.render_widget(
-        list_from(items, app.selected, theme).block(pane_block("Artifacts", focused, theme)),
+    render_board_list(
+        frame,
         area,
+        "Artifacts",
+        items,
+        app.selected,
+        focused,
+        theme,
     );
 }
 
@@ -998,19 +1135,37 @@ fn tools(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool)
         .tools()
         .iter()
         .map(|entry| {
-            let mark = if entry.is_available() { "✓" } else { "·" };
-            format!(
-                "{mark}  {:<12}  {:<8}  {}",
-                entry.definition.name,
-                entry.definition.activity.as_str(),
-                entry.definition.description
-            )
+            if entry.definition.activity == crate::tools::Activity::Active
+                || entry
+                    .problem
+                    .as_deref()
+                    .is_some_and(|problem| problem.contains("refused"))
+            {
+                format!(
+                    "{} {:<12}  active  refused: {}",
+                    theme.glyphs.refused,
+                    entry.definition.name,
+                    entry
+                        .problem
+                        .as_deref()
+                        .unwrap_or("os-int observes public information only")
+                )
+            } else {
+                let mark = if entry.is_available() {
+                    theme.glyphs.done
+                } else {
+                    "·"
+                };
+                format!(
+                    "{mark}  {:<12}  {:<8}  {}",
+                    entry.definition.name,
+                    entry.definition.activity.as_str(),
+                    entry.definition.description
+                )
+            }
         })
         .collect();
-    frame.render_widget(
-        list_from(items, app.selected, theme).block(pane_block("Tools", focused, theme)),
-        area,
-    );
+    render_board_list(frame, area, "Tools", items, app.selected, focused, theme);
 }
 
 fn settings(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bool) {
@@ -1068,29 +1223,262 @@ fn settings(frame: &mut Frame, area: Rect, app: &App, theme: &Theme, focused: bo
             theme.muted,
         )),
     ];
-    frame.render_widget(
-        Paragraph::new(lines).block(pane_block("Settings", focused, theme)),
-        area,
-    );
+    render_board_lines(frame, area, "Settings", lines, focused, theme, 0);
 }
 
-fn draw_detail(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+fn draw_inspector(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let focused = app.pane == Pane::Detail;
     let Some(workspace) = app.workspace.as_ref() else {
         frame.render_widget(
-            Paragraph::new("").block(pane_block("Detail", focused, theme)),
+            Paragraph::new(pane_title("Inspector", focused, theme)),
             area,
         );
         return;
     };
-    let lines = detail_lines(app, workspace, theme);
+    let mut lines = vec![inspector_heading(app, workspace, theme, focused)];
+    if app.view == View::Review {
+        lines.extend(review_inspector_lines(app, workspace, theme));
+    } else {
+        lines.extend(tab_bar(app, theme));
+        lines.extend(inspector_tab_lines(app, workspace, theme));
+    }
     frame.render_widget(
         Paragraph::new(lines)
-            .block(pane_block("Detail", focused, theme))
             .wrap(Wrap { trim: false })
             .scroll((app.scroll / 2, 0)),
         area,
     );
+}
+
+fn inspector_heading(
+    app: &App,
+    workspace: &Workspace,
+    theme: &Theme,
+    focused: bool,
+) -> Line<'static> {
+    let name = if app.view == View::Review {
+        if let Some(item) = app.selected_review_item() {
+            if item.written_as.is_some() {
+                "Will write".to_string()
+            } else {
+                item.group.clone()
+            }
+        } else if let Some(run) = app.agent_run_id.and_then(|id| workspace.agent_run(id)) {
+            run.short_ref().to_string()
+        } else {
+            "Will write".to_string()
+        }
+    } else if app.view == View::Evidence {
+        match app.listed_evidence().get(app.selected) {
+            Some(EvidenceRow::Finding(id)) => workspace
+                .finding(*id)
+                .map(|finding| finding.title.clone())
+                .unwrap_or_else(|| "Evidence".into()),
+            Some(EvidenceRow::Source(id)) => workspace
+                .source(*id)
+                .map(|source| source.title.clone())
+                .unwrap_or_else(|| "Evidence".into()),
+            None => "Evidence".into(),
+        }
+    } else if let Some(entity) = app
+        .entity_id
+        .and_then(|id| workspace.entity(workspace.canonical_id(id)))
+    {
+        entity.display_name().to_string()
+    } else if let Some(page) = app.page_id.and_then(|id| workspace.page(id)) {
+        page.title.clone()
+    } else {
+        workspace.investigation().name.clone()
+    };
+    pane_title(&format!("Inspector · {name}"), focused, theme)
+}
+
+fn tab_bar(app: &App, theme: &Theme) -> Vec<Line<'static>> {
+    let tabs = InspectorTab::ALL
+        .iter()
+        .map(|tab| {
+            if *tab == app.inspector_tab {
+                format!("·{}·", tab.label())
+            } else {
+                tab.label().to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("  ");
+    vec![Line::from(Span::styled(
+        format!("TABS  {tabs}"),
+        theme.muted,
+    ))]
+}
+
+fn inspector_tab_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'static>> {
+    match app.inspector_tab {
+        InspectorTab::Props => {
+            let mut lines = detail_lines(app, workspace, theme);
+            if lines.is_empty() {
+                lines.push(Line::from(Span::styled("Nothing selected.", theme.muted)));
+            }
+            lines
+        }
+        InspectorTab::Sources => inspector_sources(app, workspace, theme),
+        InspectorTab::Notes => inspector_notes(app, workspace, theme),
+        InspectorTab::History => inspector_history(workspace, theme),
+    }
+}
+
+fn inspector_sources(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(Span::styled("SOURCES", theme.header))];
+    let ids = inspector_source_ids(app, workspace);
+    if ids.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  No sources on this object.",
+            theme.muted,
+        )));
+        return lines;
+    }
+    for (index, id) in ids.iter().enumerate() {
+        if let Some(source) = workspace.source(*id) {
+            lines.push(Line::from(vec![
+                Span::styled(format!("  S{} ", index + 1), theme.muted),
+                provenance_span(source.provenance, theme),
+                Span::raw(format!("  {}  {}", source.kind.label(), source.title)),
+            ]));
+        }
+    }
+    lines
+}
+
+fn inspector_source_ids(app: &App, workspace: &Workspace) -> Vec<uuid::Uuid> {
+    if app.view == View::Evidence {
+        match app.listed_evidence().get(app.selected) {
+            Some(EvidenceRow::Finding(id)) => {
+                return workspace
+                    .finding(*id)
+                    .map(|finding| finding.source_ids.clone())
+                    .unwrap_or_default();
+            }
+            Some(EvidenceRow::Source(id)) => return vec![*id],
+            None => {}
+        }
+    }
+    if let Some(entity) = app
+        .entity_id
+        .and_then(|id| workspace.entity(workspace.canonical_id(id)))
+    {
+        return entity.source_ids.clone();
+    }
+    if let Some(finding) = app.finding_id.and_then(|id| workspace.finding(id)) {
+        return finding.source_ids.clone();
+    }
+    workspace
+        .data
+        .sources
+        .iter()
+        .map(|source| source.id)
+        .collect()
+}
+
+fn inspector_notes(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(Span::styled("NOTES  e edit", theme.header))];
+    if let Some(page) = app.page_id.and_then(|id| workspace.page(id))
+        && !page.notes.trim().is_empty()
+    {
+        for line in page.notes.lines().take(8) {
+            lines.push(Line::from(sanitize_line(line).into_owned()));
+        }
+    }
+    for note in workspace.data.notes.iter().take(6) {
+        lines.push(Line::from(format!(
+            "  {}  {}",
+            note.short_ref(),
+            truncate(note.headline(), 36)
+        )));
+    }
+    if lines.len() == 1 {
+        lines.push(Line::from(Span::styled("  No notes yet.", theme.muted)));
+    }
+    lines
+}
+
+fn inspector_history(workspace: &Workspace, theme: &Theme) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(Span::styled("HISTORY", theme.header))];
+    if workspace.data.audit.is_empty() {
+        lines.push(Line::from(Span::styled("  No audit events.", theme.muted)));
+        return lines;
+    }
+    for entry in workspace.data.audit.iter().rev().take(8) {
+        lines.push(Line::from(format!(
+            "  {}  {}",
+            entry.short_ref(),
+            truncate(&entry.summary, 36)
+        )));
+    }
+    lines
+}
+
+fn review_inspector_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'static>> {
+    let item = app.selected_review_item();
+    let run_id = item
+        .as_ref()
+        .and_then(|item| item.run_id)
+        .or(app.agent_run_id);
+    let mut lines = Vec::new();
+    if let Some(item) = &item {
+        for line in &item.preview {
+            lines.push(Line::from(line.clone()));
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("CITED EVIDENCE", theme.header)));
+        if item.citations.is_empty() {
+            lines.push(Line::from(Span::styled("  (none cited)", theme.muted)));
+        }
+        for citation in &item.citations {
+            let mark = if citation.present {
+                theme.glyphs.done
+            } else {
+                theme.glyphs.failed
+            };
+            let style = if citation.present {
+                theme.fg
+            } else {
+                theme.err
+            };
+            lines.push(Line::from(Span::styled(
+                format!("  {mark} {}  {}", citation.reference, citation.label),
+                style,
+            )));
+        }
+        if !item.rationale.is_empty() {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled("RATIONALE ◆", theme.ai)));
+            for line in item.rationale.lines().take(6) {
+                lines.push(Line::from(format!("  ┊ {}", sanitize_line(line))));
+            }
+        }
+    }
+    if let Some(run) = run_id.and_then(|id| workspace.agent_run(id)) {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("TRANSCRIPT  {}", run.short_ref()),
+            theme.header,
+        )));
+        lines.push(Line::from(Span::styled(
+            format!("Q  {}", sanitize_line(&run.question)),
+            theme.muted,
+        )));
+        let body = app
+            .streaming
+            .get(&run.job_id.unwrap_or(run.id))
+            .cloned()
+            .filter(|text| !text.is_empty())
+            .unwrap_or_else(|| run.response.clone());
+        for line in sanitize_text(&body).lines().take(12) {
+            lines.push(Line::from(line.to_string()));
+        }
+    } else if item.is_none() {
+        lines.push(Line::from(Span::styled("Nothing selected.", theme.muted)));
+    }
+    lines
 }
 
 fn detail_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'static>> {
@@ -1178,6 +1566,44 @@ fn detail_lines(app: &App, workspace: &Workspace, theme: &Theme) -> Vec<Line<'st
                 return lines;
             }
         }
+        View::Evidence => match app.listed_evidence().get(app.selected).cloned() {
+            Some(EvidenceRow::Finding(id)) => {
+                if let Some(finding) = workspace.finding(id) {
+                    return vec![
+                        Line::from(format!("{}  {}", finding.short_ref(), finding.title)),
+                        Line::from(vec![
+                            provenance_span(finding.provenance, theme),
+                            Span::raw(format!(
+                                "  {}  [{}]",
+                                finding.confidence.as_str(),
+                                workspace.format_source_refs(&finding.source_ids)
+                            )),
+                        ]),
+                        Line::from(""),
+                        Line::from(sanitize_text(&finding.details).into_owned()),
+                    ];
+                }
+            }
+            Some(EvidenceRow::Source(id)) => {
+                if let Some(source) = workspace.source(id) {
+                    return vec![
+                        Line::from(format!("{}  {}", source.short_ref(), source.title)),
+                        Line::from(vec![
+                            Span::raw(format!("{}  ", source.kind.label())),
+                            provenance_span(source.provenance, theme),
+                        ]),
+                        Line::from(
+                            sanitize_text(&source.content)
+                                .lines()
+                                .next()
+                                .unwrap_or("")
+                                .to_string(),
+                        ),
+                    ];
+                }
+            }
+            None => {}
+        },
         View::Findings => {
             let finding = app
                 .finding_id

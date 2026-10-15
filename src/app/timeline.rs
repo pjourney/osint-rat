@@ -61,7 +61,7 @@ impl App {
     }
 
     pub(crate) fn move_timeline_facet(&mut self, delta: i32) {
-        if self.view != View::Timeline {
+        if !self.is_time_lens() {
             return;
         }
         let count = self.timeline_filter_candidates().len().max(1);
@@ -71,7 +71,7 @@ impl App {
     }
 
     pub(crate) fn apply_timeline_filter(&mut self) {
-        if self.view != View::Timeline {
+        if !self.is_time_lens() {
             return;
         }
         let candidates = self.timeline_filter_candidates();
@@ -94,7 +94,7 @@ impl App {
     }
 
     pub(crate) fn clear_timeline_filter(&mut self) {
-        if self.view != View::Timeline {
+        if !self.is_time_lens() {
             return;
         }
         self.timeline.filter_entity_id = None;
@@ -108,7 +108,7 @@ impl App {
     }
 
     pub(crate) fn toggle_nearby(&mut self) {
-        if !matches!(self.view, View::Timeline | View::Entities) {
+        if !matches!(self.view, View::Timeline | View::Entities | View::Evidence) {
             return;
         }
         if self.timeline.nearby {
@@ -167,7 +167,7 @@ impl App {
     }
 
     pub(crate) fn restore_timeline_selection(&mut self) {
-        if self.view != View::Timeline {
+        if !self.is_time_lens() {
             return;
         }
         if self.timeline.nearby {
@@ -245,7 +245,7 @@ impl App {
                 };
                 workspace.visible_entities().get(index).copied()
             }
-            View::Timeline => {
+            View::Timeline | View::Evidence => {
                 let rows = self.listed_timeline_rows();
                 let row = rows.get(self.selected)?;
                 let id = row.entity_ids.first().copied()?;
@@ -266,13 +266,13 @@ impl App {
                 .and_then(|workspace| workspace.entity(id))
                 .map(|entity| entity.display_name().to_string())
         }) {
-            Some(name) => format!("Timeline filter: {name} ({rows} row(s)). x clears."),
-            None => format!("Timeline overlay: {rows} row(s). [ ] f filter, l nearby."),
+            Some(name) => format!("Time lens: {name} ({rows} row(s)). x clears."),
+            None => format!("Time lens: {rows} row(s). t toggles. x clears."),
         }
     }
 
     pub(crate) fn cancel_timeline_mode(&mut self) -> bool {
-        if self.view != View::Timeline && !(self.view == View::Entities && self.timeline.nearby) {
+        if !self.is_time_lens() && !(self.view == View::Entities && self.timeline.nearby) {
             return false;
         }
         if self.overlay != Overlay::None {
@@ -282,7 +282,7 @@ impl App {
             self.toggle_nearby();
             return true;
         }
-        if self.view == View::Timeline && self.timeline.filter_entity_id.is_some() {
+        if self.is_time_lens() && self.timeline.filter_entity_id.is_some() {
             self.clear_timeline_filter();
             return true;
         }

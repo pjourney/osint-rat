@@ -1002,7 +1002,7 @@
         "investigation_id": "01234567-89ab-4cde-8000-000000000001",
         "seq": 1,
         "page_id": "01234567-89ab-4cde-8000-000000000002",
-        "body": "Import path: open Graph (`g`) on example.com, Search Around (`s`) two hops, then open Object View (`v`) on the canonical domain. Constituent hostname example.com is merged. Playbook domain-infra is on the timeline as T-2.",
+        "body": "Import path: open Graph (`g`) on example.com, Search Around (`s`) two hops, then press Enter on the canonical domain to open Object View. Constituent hostname example.com is merged. Playbook domain-infra is on the timeline as T-2.",
         "provenance": "analyst",
         "created_at": "2024-06-15T12:00:00Z",
         "updated_at": "2024-06-15T12:00:00Z"

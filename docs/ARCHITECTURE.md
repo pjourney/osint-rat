@@ -66,8 +66,8 @@ A useful order:
 | `report/` | Markdown and JSON report generation. Renderers implement a small trait so HTML or PDF can be added later. |
 | `exchange/` | Versioned, path-independent import and export of investigations. |
 | `demo/` | Bundled Example Corp investigation snapshot (`examples/demo-case/`). |
-| `app/` | `App` owns config, store, workspace, job manager, and all UI state (including `GraphState` and `TimelineState`). Keys map to `Action`s; `App::dispatch` performs state transitions and side effects. Per-investigation `ui_state` restores the last view, page, and agent thread after restart. Long notes open `$EDITOR` / `$VISUAL` without a shell. |
-| `tui/` | Terminal setup and restore, the async event loop, cockpit themes (roles in `theme.rs` only), glyphs, keymap, widgets, screens, and overlays. Rendering is a pure function of `App`. `os-int theme preview` lives here. |
+| `app/` | `App` owns config, store, workspace, job manager, and all UI state (including `GraphState`, `TimelineState`, and Review items in `app/review.rs`). Keys map to `Action`s through the command registry in `app/commands.rs`; `App::dispatch` performs state transitions and side effects. The Rail is six destinations (Case, Entities, Evidence, Graph, Review, Jobs). Per-investigation `ui_state` restores the last view, page, and agent thread after restart. Long notes open `$EDITOR` / `$VISUAL` without a shell. |
+| `tui/` | Terminal setup and restore, the async event loop, cockpit themes (roles in `theme.rs` only), glyphs, keymap, widgets, screens, and overlays. Rendering is a pure function of `App`. The workspace is Rail \| Board \| Inspector (Inspector is a bottom drawer below 110 columns; minimum 80×24). `os-int theme preview` lives here. |
 | `cli/` | Clap definitions and non-TUI commands (`list`, `new`, `open`, `export`, `import`, `collect`, `ingest`, `playbook`, `watch`, `report`, `geojson`, `cooccur`, `marking`, `team`, `audit`, `get`, `objects`, `search-around`, `resolve`, `serve`, `bench`, `theme preview`, `doctor`, `config`). |
 | `api/` | Localhost ontology HTTP API (`os-int serve`). Token auth. Read + Action propose. OpenAPI at `/openapi.json`. |
 | `query/` | Scriptable list/get/search-around/resolve helpers shared by the CLI and the API. |
@@ -78,8 +78,8 @@ A useful order:
 | --- | --- |
 | Add a field to a record | `model/`, then a migration in `storage/migrations.rs`, then the row mapping in `storage/` |
 | Add a passive collector | Implement `Collector`, register it in `CollectorRegistry::builtin`, and document it in [guide.md](guide.md#collectors) |
-| Add a file ingest format | `src/ingest/`, CLI `os-int ingest`, TUI `i` / FormKind::Ingest, [connectors.md](connectors.md) |
-| Add or change a playbook | YAML under `playbooks/`, parser/executor in `src/playbook/`, palette `b` / `os-int playbook`, [playbooks.md](playbooks.md) |
+| Add a file ingest format | `src/ingest/`, CLI `os-int ingest`, palette **Ingest file** / FormKind::Ingest, [connectors.md](connectors.md) |
+| Add or change a playbook | YAML under `playbooks/`, parser/executor in `src/playbook/`, palette **Run playbook** / `os-int playbook`, [playbooks.md](playbooks.md) |
 | Add an external sidecar | `[[collectors.external]]` emitting Evidence Batch JSON; example under `examples/connectors/` |
 | Add a diagnostic reading | `collectors/diagnose.rs`. Record gaps with `record_findings` so a later good reading clears them |
 | Add a built-in external tool | `tools/registry.rs` (`builtin_tools`). Keep `activity` passive |
@@ -89,8 +89,8 @@ A useful order:
 | Change a key binding | `app/commands.rs` (the registry that drives the keymap, hint bar, palette, and generated help), then `tui/keymap.rs` for overlay/editing, and the keyboard tables in the user guide |
 | Change a screen | `tui/screens.rs`. Put the state change in `app/`, not in the widget. Object View is `View::Object`. Graph is `View::Graph` |
 | Change Search Around or graph caps | `model/graph.rs` (pure query), then `storage/graph.rs` (`Store::search_around`), then `app/graph.rs` and `tui/screens.rs` |
-| Change Events, overlay timeline, or co-occurrence | `model/event.rs`, `model/timeline.rs`, `model/cooccur.rs`, `storage/events.rs`, then Timeline screen / `os-int cooccur` |
-| Change markings, audit, or roles | `model/marking.rs`, `model/audit.rs`, `model/collaboration.rs`, `storage/audit.rs`, `storage/collaboration.rs`, then Overview / Audit / `os-int marking` / `os-int team` / [collaboration.md](collaboration.md) |
+| Change Events, overlay timeline, or co-occurrence | `model/event.rs`, `model/timeline.rs`, `model/cooccur.rs`, `storage/events.rs`, then the Evidence/Graph time lens (`t`) / `os-int cooccur` |
+| Change markings, audit, or roles | `model/marking.rs`, `model/audit.rs`, `model/collaboration.rs`, `storage/audit.rs`, `storage/collaboration.rs`, then Case / palette **Open Audit** / `os-int marking` / `os-int team` / [collaboration.md](collaboration.md) |
 | Change the HTTP API or scriptable get/search-around/resolve | `src/api/`, `src/query.rs`, `os-int serve` / `os-int get`, [api.md](api.md) |
 | Change STIX export or the Object/Link mapping | `src/ingest/stix.rs`, `src/ingest/stix_export.rs`, [connectors.md](connectors.md#stix-21) |
 | Change incremental reload or scale benches | `model/workspace.rs` (`WorkspaceDelta`), `storage/delta.rs`, `storage/scale.rs`, [scale.md](scale.md) |
@@ -178,7 +178,8 @@ Database rows store **relative** paths inside the investigation directory, so an
 | Search Around | Hop expansion from a seed entity along relationships, with optional kind / link / provenance / time filters and render caps. |
 | Resolution bag | Canonical entity plus absorbed constituents. Property and source writes are recorded so unresolve can restore them. |
 | Finding | A claim. Collected diagnostics, analyst conclusions, and accepted agent inferences are all findings, distinguished by provenance. |
-| Proposal | A structured agent action waiting for the analyst to accept or reject it. |
+| Review | The lane where AI, playbook, and merge proposals wait. `Shift+A` then `y` accepts. Enter never writes. |
+| Proposal | A structured agent action waiting for the analyst to accept or reject it in Review. |
 | Playbook | A YAML document of collect / Search Around / tool / template steps. Templates become pending proposals. |
 | Automation | A watch set that re-runs collect steps and proposes Actions on changes. It does not silently write findings. |
 | Marking | Traffic Light Protocol label on an investigation (or optionally an object). |

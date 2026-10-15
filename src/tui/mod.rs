@@ -61,7 +61,14 @@ async fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()>
             event = events.next() => {
                 match event {
                     Some(Ok(Event::Key(key))) => {
-                        if let Some(action) = keymap::map_key(key, &app.overlay, app.view, app.is_editing()) {
+                        if let Some(action) = keymap::map_key(
+                            key,
+                            &app.overlay,
+                            app.view,
+                            app.is_editing(),
+                            app.review_armed,
+                            app.board_zoomed,
+                        ) {
                             dispatch(app, action);
                             if let Err(error) = run_external_editor(terminal, app) {
                                 app.status = error.to_string();
@@ -173,21 +180,39 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if theme.paints_background {
         frame.render_widget(Block::default().style(theme.bg), area);
     }
-    let rows = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(5),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .split(area);
+    let mut constraints = vec![Constraint::Length(1), Constraint::Min(5)];
+    if app.review_armed {
+        constraints.push(Constraint::Length(1));
+    }
+    if theme.degrade_hint.is_some() {
+        constraints.push(Constraint::Length(1));
+    }
+    constraints.push(Constraint::Length(1));
+    constraints.push(Constraint::Length(1));
+    let rows = Layout::vertical(constraints).split(area);
     draw_header(frame, rows[0], app, &theme);
     if app.view == View::Welcome {
         screens::welcome(frame, rows[1], app, &theme);
     } else {
         screens::workspace(frame, rows[1], app, &theme);
     }
-    draw_status(frame, rows[2], app, &theme);
-    frame.render_widget(Paragraph::new(widgets::hint_line(&theme)), rows[3]);
+    let mut row = 2;
+    if app.review_armed {
+        draw_confirm_bar(frame, rows[row], app, &theme);
+        row += 1;
+    }
+    if let Some(hint) = theme.degrade_hint {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(format!(" {hint}"), theme.warn))),
+            rows[row],
+        );
+        row += 1;
+    }
+    draw_status(frame, rows[row], app, &theme);
+    frame.render_widget(
+        Paragraph::new(widgets::context_line(app.view, app.pane, &theme)),
+        rows[row + 1],
+    );
     overlays::draw(frame, area, app, &theme);
 }
 
@@ -197,18 +222,40 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
         .as_ref()
         .map(|workspace| workspace.investigation().name.as_str())
         .unwrap_or("no investigation");
-    let agent = if app.agent.available {
-        format!("{} ●", app.agent.profile.name)
-    } else {
-        format!("{} ○", app.agent.profile.name)
-    };
     let marking = app
         .workspace
         .as_ref()
         .map(|workspace| workspace.investigation().marking.label())
         .unwrap_or("unmarked");
-    let title = format!(" os-int ─ Investigation: {investigation}  [{marking}] ");
-    let right = format!(" {agent} ");
+    let review = app.pending_review_count();
+    let jobs_active = app
+        .job_records
+        .values()
+        .filter(|job| job.status.is_active())
+        .count();
+    let agent = if app.agent.available {
+        format!(
+            "agent {} {}",
+            theme.glyphs.collected, app.agent.profile.name
+        )
+    } else {
+        format!("agent {} {}", theme.glyphs.external, app.agent.profile.name)
+    };
+    let review_bit = if review > 0 {
+        format!("{} {review} to review", theme.glyphs.ai)
+    } else {
+        format!("{} 0 to review", theme.glyphs.ai)
+    };
+    let jobs_bit = if jobs_active > 0 {
+        format!("{} {jobs_active} jobs", theme.glyphs.spinner[0])
+    } else {
+        format!("{} jobs", theme.glyphs.done)
+    };
+    let title = format!(
+        " os-int ▸ {investigation} ▸ {}  {marking}",
+        app.view.title()
+    );
+    let right = format!(" {review_bit}  {jobs_bit}  {agent} ");
     let title_width = UnicodeWidthStr::width(title.as_str());
     let right_width = UnicodeWidthStr::width(right.as_str());
     let available = area.width as usize;
@@ -224,16 +271,17 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
     let line = Line::from(vec![
         Span::styled(title, theme.title),
         Span::raw(spacer),
-        Span::styled(
-            right,
-            if app.agent.available {
-                theme.ai
-            } else {
-                theme.muted
-            },
-        ),
+        Span::styled(right, theme.muted),
     ]);
     frame.render_widget(Paragraph::new(line), area);
+}
+
+fn draw_confirm_bar(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme: &Theme) {
+    let text = app.confirm_bar_text();
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(text, theme.fg))).style(theme.panel),
+        area,
+    );
 }
 
 fn truncate_width(text: &str, max_width: usize) -> String {
@@ -265,12 +313,7 @@ fn draw_status(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme:
     } else {
         theme.fg
     };
-    let hint = theme.degrade_hint.unwrap_or("");
-    let text = if hint.is_empty() {
-        format!(" {}    {jobs}", sanitize_line(&app.status))
-    } else {
-        format!(" {}    {jobs}    {hint}", sanitize_line(&app.status))
-    };
+    let text = format!(" {}    {jobs}", sanitize_line(&app.status));
     frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), area);
 }
 
@@ -450,13 +493,36 @@ mod tests {
         assert!(text.contains("phosphor needs 256 colours"), "{text}");
     }
 
+    #[test]
+    fn degrade_hint_stays_readable_at_minimum_size() {
+        let (_directory, mut app) = test_app();
+        app.config.ui.theme = "phosphor".into();
+        app.config.ui.color = "16".into();
+        app.status = "ready".into();
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal.draw(|frame| draw(frame, &app)).expect("draw");
+        let text = visible_text(&terminal);
+        assert!(
+            text.contains("phosphor needs 256 colours"),
+            "hint must not be truncated at 80x24\n{text}"
+        );
+    }
+
     fn press(code: crossterm::event::KeyCode) -> crossterm::event::KeyEvent {
         crossterm::event::KeyEvent::new(code, crossterm::event::KeyModifiers::NONE)
     }
 
     fn dispatch_key(app: &mut App, key: crossterm::event::KeyEvent) {
-        let action =
-            keymap::map_key(key, &app.overlay, app.view, app.is_editing()).expect("key should map");
+        let action = keymap::map_key(
+            key,
+            &app.overlay,
+            app.view,
+            app.is_editing(),
+            app.review_armed,
+            app.board_zoomed,
+        )
+        .expect("key should map");
         app.dispatch(action).expect("dispatch");
     }
 
@@ -500,7 +566,9 @@ mod tests {
                 press(crossterm::event::KeyCode::Enter),
                 &app.overlay,
                 app.view,
-                app.is_editing()
+                app.is_editing(),
+                app.review_armed,
+                app.board_zoomed,
             )
             .is_none()
         );
@@ -513,6 +581,185 @@ mod tests {
                 .artifacts
                 .iter()
                 .any(|artifact| artifact.kind == crate::model::ArtifactKind::Report)
+        );
+    }
+
+    fn snapshot_app() -> (tempfile::TempDir, App) {
+        let (directory, mut app) = test_app();
+        app.config.ui.theme = "mono".into();
+        app.config.ui.color = "none".into();
+        app.dispatch(Action::Command("new_investigation"))
+            .expect("form");
+        if let crate::app::Overlay::Form(form) = &mut app.overlay {
+            form.fields[0].value.set("acme-phish");
+        }
+        app.dispatch(Action::Submit).expect("create");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let page = app
+            .store
+            .create_page(NewPage::new(
+                investigation_id,
+                "",
+                PageKind::Domain,
+                Some("acme-login.com"),
+            ))
+            .expect("page");
+        let mut batch = crate::model::EvidenceBatch::new();
+        let source = crate::model::NewSource::collected(
+            crate::model::SourceKind::Dns,
+            "dns",
+            "DNS records for acme-login.com",
+        );
+        let key = batch.add_source(source);
+        let domain =
+            crate::model::EntityKey::new(crate::model::EntityKind::Domain, "acme-login.com");
+        let ip = crate::model::EntityKey::new(crate::model::EntityKind::Ip, "203.0.113.7");
+        batch.relate(&domain, "resolves_to", &ip, Some(key));
+        app.store
+            .apply_batch(
+                crate::storage::ApplyContext {
+                    investigation_id,
+                    page_id: Some(page.id),
+                    job_id: None,
+                },
+                &batch,
+            )
+            .expect("applies");
+        app.store
+            .create_finding(crate::storage::NewFinding {
+                investigation_id,
+                page_id: Some(page.id),
+                title: "acme-login.com is phishing infra".into(),
+                details: "SAN mimics acme.com".into(),
+                confidence: crate::model::Confidence::Medium,
+                provenance: crate::model::Provenance::Agent,
+                source_ids: Vec::new(),
+            })
+            .expect("finding");
+        let mut run = crate::model::AgentRun {
+            id: uuid::Uuid::new_v4(),
+            investigation_id,
+            seq: 0,
+            thread_id: uuid::Uuid::new_v4(),
+            page_id: Some(page.id),
+            agent_name: "codex".into(),
+            program: "codex".into(),
+            args: Vec::new(),
+            question: "Is this phishing?".into(),
+            response: String::new(),
+            status: crate::model::JobStatus::Succeeded,
+            error: None,
+            focus: None,
+            context_artifact_id: None,
+            job_id: None,
+            model: None,
+            cost_usd: None,
+            created_at: crate::model::now(),
+            finished_at: Some(crate::model::now()),
+        };
+        app.store.insert_agent_run(&mut run).expect("run");
+        app.store
+            .insert_proposals(
+                investigation_id,
+                run.id,
+                vec![(
+                    crate::model::AgentAction::AddFinding {
+                        title: "mail.acme-login.com uses the same MX".into(),
+                        details: "Registered 3 days before the campaign".into(),
+                        confidence: Some("medium".into()),
+                        sources: vec!["S-1".into()],
+                    },
+                    crate::model::ProposalStatus::Pending,
+                    None,
+                )],
+            )
+            .expect("proposals");
+        app.open_investigation(investigation_id)
+            .expect("reload workspace");
+        (directory, app)
+    }
+
+    fn render_snapshot(app: &App, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal.draw(|frame| draw(frame, app)).expect("draw");
+        let buffer = terminal.backend().buffer();
+        let area = buffer.area();
+        let mut rows = Vec::new();
+        for y in 0..area.height {
+            let mut row = String::new();
+            for x in 0..area.width {
+                row.push_str(buffer[(x, y)].symbol());
+            }
+            rows.push(row.trim_end().to_string());
+        }
+        rows.join("\n")
+    }
+
+    fn assert_screen_snapshot(name: &str, app: &App, width: u16, height: u16) -> Option<String> {
+        let actual = render_snapshot(app, width, height);
+        let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push(format!("tests/golden/cockpit/{name}_{width}x{height}.txt"));
+        let expected = std::fs::read_to_string(&path).unwrap_or_default();
+        if expected.is_empty() {
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("golden dir");
+            std::fs::write(&path, &actual).expect("write golden");
+            return Some(path.display().to_string());
+        }
+        assert_eq!(
+            actual, expected,
+            "snapshot mismatch for {} at {width}x{height}\n--- actual ---\n{actual}",
+            name
+        );
+        None
+    }
+
+    #[test]
+    fn graph_time_lens_draws_the_timeline() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenGraph).expect("graph");
+        assert!(!app.is_time_lens());
+        let graph = render_snapshot(&app, 80, 24);
+        assert!(
+            graph.contains("Neighborhood") || graph.contains("Facets") || graph.contains("Graph"),
+            "{graph}"
+        );
+        assert!(!graph.contains("Time lens"));
+        app.dispatch(Action::ToggleTimeLens).expect("t");
+        assert_eq!(app.view, View::Graph);
+        assert!(app.is_time_lens());
+        let lens = render_snapshot(&app, 80, 24);
+        assert!(lens.contains("Time lens"), "{lens}");
+        assert!(!lens.contains("Neighborhood"), "{lens}");
+    }
+
+    #[test]
+    fn cockpit_snapshots_at_minimum_and_wide() {
+        let (_directory, mut app) = snapshot_app();
+        let mut wrote = Vec::new();
+        for (name, action) in [
+            ("case", Action::OpenOverview),
+            ("entities", Action::OpenEntities),
+            ("evidence", Action::OpenEvidence),
+            ("graph", Action::OpenGraph),
+            ("review", Action::OpenReview),
+            ("jobs", Action::OpenJobs),
+        ] {
+            app.dispatch(action).expect("view");
+            app.pane = crate::app::Pane::Main;
+            for (width, height) in [(80, 24), (140, 40)] {
+                wrote.extend(assert_screen_snapshot(name, &app, width, height));
+            }
+        }
+        app.open_review_lane();
+        app.dispatch(Action::Arm).expect("arm");
+        assert!(app.review_armed);
+        wrote.extend(assert_screen_snapshot("review_armed", &app, 80, 24));
+        wrote.extend(assert_screen_snapshot("review_armed", &app, 140, 40));
+        assert!(
+            wrote.is_empty(),
+            "wrote snapshots; re-run to confirm: {}",
+            wrote.join(", ")
         );
     }
 }

@@ -28,7 +28,17 @@ impl App {
 
     pub fn listed_suggestions(&self) -> Vec<ResolutionSuggestion> {
         match &self.workspace {
-            Some(workspace) => suggest_resolutions(&workspace.data),
+            Some(workspace) => suggest_resolutions(&workspace.data)
+                .into_iter()
+                .filter(|suggestion| {
+                    let mut key = suggestion.entity_ids.clone();
+                    key.sort();
+                    !self
+                        .dismissed_suggestions
+                        .iter()
+                        .any(|dismissed| dismissed == &key)
+                })
+                .collect(),
             None => Vec::new(),
         }
     }
@@ -104,21 +114,16 @@ impl App {
             .filter(|id| ids.contains(id))
             .or_else(|| ids.first().copied())
             .unwrap_or(ids[0]);
-        self.pending_resolve = Some(PendingResolve {
+        self.pending_merges.push(PendingResolve {
             entity_ids: ids.clone(),
             canonical_id,
             reason: "manual merge".into(),
         });
-        let labels = self.format_entity_labels(&ids);
-        self.overlay = Overlay::Confirm {
-            title: "Merge entities".into(),
-            message: format!(
-                "Merge {} into {}? This is reversible. Sources stay cited.",
-                labels,
-                self.format_entity_labels(&[canonical_id])
-            ),
-            command: "confirm_resolve".into(),
-        };
+        self.open_review_lane();
+        self.status = format!(
+            "Merge of {} proposed. Review it, then Shift+A and y. Enter never writes.",
+            self.format_entity_labels(&ids)
+        );
     }
 
     pub(crate) fn confirm_resolve(&mut self) -> Result<()> {
@@ -146,7 +151,9 @@ impl App {
         if self.view == View::Graph {
             self.rebuild_graph_after_restore();
         }
-        self.status = "Entities resolved. Object View shows constituents. u unresolves.".into();
+        self.status =
+            "Entities resolved. Object View shows constituents. Palette Unresolve entity reverses this."
+                .into();
         Ok(())
     }
 
@@ -208,41 +215,11 @@ impl App {
             self.status = "No resolution suggestions.".into();
             return;
         }
-        self.overlay = Overlay::Suggestions { selected: 0 };
+        self.open_review_lane();
         self.status = format!(
-            "{} suggestion(s). Enter proposes a merge; nothing auto-merges.",
+            "{} suggestion(s) in Review. Shift+A then y writes. Nothing auto-merges.",
             suggestions.len()
         );
-    }
-
-    pub(crate) fn apply_highlighted_suggestion(&mut self) {
-        let Overlay::Suggestions { selected } = self.overlay else {
-            return;
-        };
-        let Some(suggestion) = self.listed_suggestions().get(selected).cloned() else {
-            self.status = "No suggestion selected.".into();
-            return;
-        };
-        let canonical_id = suggestion.entity_ids.first().copied();
-        let Some(canonical_id) = canonical_id else {
-            self.status = "Suggestion has no entities.".into();
-            return;
-        };
-        self.pending_resolve = Some(PendingResolve {
-            entity_ids: suggestion.entity_ids.clone(),
-            canonical_id,
-            reason: suggestion.reason.clone(),
-        });
-        self.overlay = Overlay::Confirm {
-            title: "Accept suggestion".into(),
-            message: format!(
-                "{} (score {}). Merge {}? Accept is required.",
-                suggestion.reason,
-                suggestion.score,
-                self.format_entity_labels(&suggestion.entity_ids)
-            ),
-            command: "confirm_resolve".into(),
-        };
     }
 
     pub(crate) fn apply_resolve_action(&mut self, action: &AgentAction) -> Result<()> {

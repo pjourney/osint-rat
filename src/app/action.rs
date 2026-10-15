@@ -61,8 +61,18 @@ pub enum Action {
     OpenTimeline,
     /// Jump to the Agent screen.
     OpenAgent,
-    /// Jump to Overview.
+    /// Jump to Case (home).
     OpenOverview,
+    /// Jump to Evidence (findings + sources).
+    OpenEvidence,
+    /// Jump to Review.
+    OpenReview,
+    /// Toggle the time lens on Evidence or Graph.
+    ToggleTimeLens,
+    /// Zoom the Board (Inspector hidden until any key).
+    ToggleZoom,
+    /// Leave Board zoom.
+    Unzoom,
     /// Open Object View: highlighted entity on Entities, otherwise the current page.
     OpenObjectView,
     /// Open the Graph screen from the current entity (or the first entity).
@@ -103,9 +113,9 @@ pub enum Action {
     Accept,
     /// Reject the highlighted agent proposal.
     Reject,
-    /// Arm the proposals overlay so `y` can accept. Shift+A.
+    /// Arm Review (or the proposals overlay) so `y` can accept. Shift+A.
     Arm,
-    /// Drop the armed accept on the proposals overlay.
+    /// Drop the armed accept. Any key other than `y` after `A`.
     Disarm,
     /// A progress or completion event from a background job.
     Job(JobEvent),

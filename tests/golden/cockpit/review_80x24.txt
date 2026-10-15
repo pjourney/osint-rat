@@ -1,0 +1,24 @@
+ os-int ▸ acme-phish ▸ Review  unm…  ◆ 1 to review  ✓ jobs  agent ◇ Claude Code
+ Rail         │▌AI PROPOSES ONLY
+ 1 Case        nothing is written until you accept
+ 2 Entities    X-1 Q-1 · codex
+ 3 Evidence    ▌◆? + Finding: mail.acme-login.com uses the same MX
+ 4 Graph
+▌5 Review 1
+ 6 Jobs
+
+
+
+
+
+
+ Inspector · Will write
++ Finding  ◆ AI
+  mail.acme-login.com uses the same MX
+  confidence  medium
+  provenance agent (kept forever)
+  Registered 3 days before the campaign
+
+CITED EVIDENCE
+ 1 item(s) waiting. Shift+A then y writes. Enter never writes.    0 jobs
+/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro

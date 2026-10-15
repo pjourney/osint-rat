@@ -20,7 +20,7 @@ os-int-learn import ../examples/demo-case
 os-int-learn open "Example Corp"
 ```
 
-Inside the workbench: `g` Graph, `s` Search Around two hops, `Enter` Object View, `4` cited findings, `6` playbook timeline. From the clone root the import path is `examples/demo-case`.
+Inside the workbench: `g` Graph, `s` Search Around two hops, `Enter` Object View, `3` Evidence (cited findings), `t` time lens (playbook timeline). From the clone root the import path is `examples/demo-case`.
 
 ## Collect a domain, then read it
 
@@ -37,13 +37,13 @@ Inside the workbench:
 
 | Key | What you are looking at |
 | --- | --- |
-| `1` | The `example.com` page: target, entities, findings |
-| `3` | Sources. `S-1` onward are the raw observations |
-| `4` | Findings. `[COL]` marks a collected diagnostic |
-| `5` | Entities such as the domain, its addresses, and its nameservers. `Enter` opens Object View |
-| `g` | Graph of those entities. `s` Search Around two hops (addresses, nameservers, then ASNs) |
-| `6` | Timeline overlay: collection log + imported Events. `[` `]` `f` filter by entity; `l` nearby |
-| `8` | Jobs, if a collector is still running or a previous one failed |
+| `1` | Case: the `example.com` target, at-a-glance counts |
+| `2` | Entities such as the domain, its addresses, and its nameservers. `Enter` opens Object View |
+| `3` | Evidence. Sources (`S-1`) and findings (`●` collected) |
+| `4` / `g` | Graph of those entities. `s` Search Around two hops (addresses, nameservers, then ASNs) |
+| `t` | Time lens on Evidence or Graph: collection log + imported Events |
+| `5` | Review. AI, playbook, and merge proposals wait here |
+| `6` | Jobs, if a collector is still running or a previous one failed |
 | `/` | Search. Try `example.com` or a short id such as `E-1` |
 
 Press `q` to leave the workbench. The case is already saved.
@@ -59,7 +59,7 @@ os-int-learn collect url https://example.com/ --investigation "Example Corp" --c
 
 The first command guesses the kind from `example.com`. The second names the kind as `url` because a bare URL is unambiguous only when you pass it as the value.
 
-In the workbench, press `p` and type `dns`, `rdap`, `http`, `tls`, `ct`, `ip`, `email`, `username`, or `subdomain` to run that one collector against the current page. `i` ingests a STIX, MISP, CSV, JSON, or Evidence Batch file.
+In the workbench, press `Ctrl+K` and type `dns`, `rdap`, `http`, `tls`, `ct`, `ip`, `email`, `username`, or `subdomain` to run that one collector against the current page. Palette **Ingest file** ingests a STIX, MISP, CSV, JSON, or Evidence Batch file.
 
 ## Follow an address the domain just revealed
 
@@ -69,7 +69,7 @@ After the domain collection, open Entities (`5`), note an address, and collect i
 os-int-learn collect ip 192.0.2.15 --investigation "Example Corp"
 ```
 
-Or, in the workbench, add a page (`n`, type **IP address**, enter the address) and press `r`.
+Or, in the workbench, add a page (`n`, type **IP address**, enter the address) and press `c`.
 
 The new page shares the investigation with the domain, so relationships such as `resolves_to` and `announced_by` show up on both.
 
@@ -113,7 +113,7 @@ os-int-learn playbook run domain-infra --investigation "Example Corp" --target e
 os-int-learn watch --playbook domain-infra --investigation "Example Corp" --target example.com --once
 ```
 
-Inside the workbench, `b` opens **Run playbook**. Left/Right cycles bundled ids. Esc leaves the entity selection in place. Palette **Playbook prompt** seeds the agent question; the agent still only proposes. YAML schema and caps: [playbooks.md](playbooks.md).
+Inside the workbench, palette **Run playbook**. Left/Right cycles bundled ids. Esc leaves the entity selection in place. Palette **Playbook prompt** seeds the agent question; the agent still only proposes. YAML schema and caps: [playbooks.md](playbooks.md).
 
 ## Look at a public repository
 
@@ -161,7 +161,7 @@ Switch to Codex in the config file:
 active = "codex"
 ```
 
-Or press `0` for Settings, then `e`, and set the active profile. From any investigation screen, press `a`, ask a question, and press `Ctrl+S`. If the reply contains an `os-int-actions` block, os-int shows each proposed change. `Shift+A` then `y` accepts the selected one. `R` rejects it. An accepted finding keeps the `[AI]` badge.
+Or open the palette (**Configure Agent**) and set the active profile. From any investigation screen, press `a`, ask a question, and press `Ctrl+S`. If the reply contains an `os-int-actions` block, the proposals land in **Review** (`5`). `Shift+A` then `y` accepts the selected one. `x` rejects it. An accepted finding keeps the ◆ glyph.
 
 A generic CLI, with the prompt passed as an argument:
 

@@ -13,25 +13,20 @@ Fuse public sources into objects and links, resolve identities, Search Around th
 ![Search Around](docs/images/search-around.svg)
 
 ```text
-┌ os-int · Example Corp ───────────────────────────────────────── Claude ● ┐
-│ Navigate │ P-1  example.com                         │ example.com        │
-│ Overview │ Domain                                   │                    │
-│ Pages    │                                          │ Entities           │
-│ Sources  │ Target   example.com                     │  E-1  Domain       │
-│ Findings │                                          │  E-4  IP           │
-│ Entities │ Entities on this page                    │                    │
-│ Graph    │   E-1  Domain   example.com              │ Findings           │
-│ Timeline │   E-4  IP       192.0.2.1                │  F-1  [COL] HTTPS  │
-│ Notes    │                                          │                    │
-│ Agent    │ Findings                                 │                    │
-│ Jobs     │   F-1  [COL]  HTTPS redirects to apex    │                    │
-│ Settings │                                          │                    │
-├──────────┴──────────────────────────────────────────┴────────────────────┤
-│ [a] Ask   [/] Search   [p] Palette   [g] Graph   [?] Help                 │
-└───────────────────────────────────────────────────────────────────────────┘
+┌ os-int ▸ Example Corp ▸ Case   TLP:CLEAR            ◆ 0 to review  agent ● ──┐
+│ Rail         │ Board                              │ Inspector              │
+│ 1 Case       │ TARGETS                            │ Props  Sources  Notes  │
+│ 2 Entities   │ DOM example.com          ● 3       │ DOM example.com        │
+│ 3 Evidence   │                                    │ ● 3 facts from 2 srcs  │
+│ 4 Graph      │                                    │                        │
+│ 5 Review     │                                    │ SOURCES                │
+│ 6 Jobs       │                                    │  S-1 ● dns             │
+├──────────────┴────────────────────────────────────┴────────────────────────┤
+│ c collect  n new target  a ask agent  s search around  Ctrl+K commands  ?  │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
-*Sketch of a wide terminal. The live layout drops the right-hand detail pane below 96 columns. Press `?` inside the app for the keyboard overlay.*
+*Sketch of a wide terminal. Below 110 columns the Inspector becomes a bottom drawer. The minimum size is 80×24. Press `?` inside the app for the keyboard overlay, generated from the command registry.*
 
 | | |
 | --- | --- |
@@ -139,12 +134,12 @@ Then, without reading ARCHITECTURE:
 1. Press `g` — Graph of `example.com` and connected infra.
 2. Press `s` — Search Around two hops (addresses, then ASN / organization).
 3. Press `Enter` — Object View: properties, catalogued links, constituent hostname, cited findings.
-4. Press `6` — Timeline, including **Playbook domain-infra**.
-5. Press `4` — Findings. Every row cites a source (`[COL]`).
+4. Press `t` — Time lens on Evidence / Graph, including **Playbook domain-infra**.
+5. Press `3` — Evidence. Every finding cites a source (`●` / `[COL]`).
 
 Shell equivalent: `os-int-demo search-around "Example Corp" E-1 --hops 2`.
 
-To collect a live case instead, press `n` on the welcome screen, add a domain page, and press `r` (or `os-int collect domain example.com --investigation "Example Corp"`). `collect` creates the investigation and the page when they do not already exist.
+To collect a live case instead, press `n` on the welcome screen, add a domain page, and press `c` (or `os-int collect domain example.com --investigation "Example Corp"`). `collect` creates the investigation and the page when they do not already exist.
 
 ## Success metrics
 
@@ -189,34 +184,30 @@ Short references are per-investigation sequence numbers (`S-12`). UUIDs are the 
 
 ## Moving around
 
-The screen has a navigation column, a main pane, and (on a wide terminal) a detail pane. `Tab` and `Shift+Tab` move between panes. `j` / `k` or the arrow keys move the selection. `Enter` opens the selection.
+The screen is **Rail**, **Board**, and **Inspector**. `Tab` / `h` `l` move between panes. `j` / `k` or the arrow keys move the selection. `Enter` opens the selection and never writes.
 
 | Key | Action |
 | --- | --- |
 | `q` | Quit, or close an overlay |
 | `Esc` | Back, or close an overlay |
 | `Ctrl+C` | Quit from anywhere |
-| `/` or `Ctrl+F` | Search pages, entities, findings, sources, artifacts, and agent runs |
-| `p` or `Ctrl+P` | Command palette |
-| `a` | Ask the active agent |
-| `n` | New investigation, page, or finding, depending on the screen |
-| `e` | Edit the current page notes in `$EDITOR`, or open agent and theme settings |
-| `r` | Run the default collectors for the current page |
-| `i` | Ingest a STIX / MISP / CSV / JSON / Evidence Batch file |
-| `b` | Run playbook (bundled YAML or a file) |
-| `v` | Object View: highlighted entity, or the current page |
+| `/` or `Ctrl+F` | Filter the current table, or search the case |
+| `Ctrl+K` or `:` | Command palette |
+| `a` | Ask the active agent. Results land in Review |
+| `n` | New investigation, target, or finding, depending on the screen |
+| `e` | Edit the current page notes in `$EDITOR` |
+| `c` | Collect on the selected target (passive collectors only) |
 | `g` | Graph: entities as nodes, relationships as edges |
 | `s` | Search Around from the current selection |
-| `+` / `-` | Graph: more / fewer hops (re-query from the original seed) |
-| `[` / `]` | Graph: move the facet cursor |
-| `f` | Graph: apply or toggle the highlighted facet |
-| `x` | Graph: clear facet filters |
-| `c` | Cancel the selected job (Jobs screen) |
-| `?` | Help |
-| `1`–`6` | Overview, Pages, Sources, Findings, Entities, Timeline |
-| `7` `8` `9` `0` | Agent, Jobs, Tools, Settings |
+| `t` | Toggle the time lens on Evidence or Graph |
+| `+` / `-` | Graph hops, or time-lens bucket |
+| `x` | Reject (Review) or clear filters (elsewhere) |
+| `z` | Zoom the Board. Any key returns |
+| `?` | Help generated from the command registry |
+| `1`–`6` | Case, Entities, Evidence, Graph, Review, Jobs |
+| `Shift+A` then `y` | Review: arm, then accept. Any other key disarms. Enter never accepts. |
 
-Graph, Notes, and Artifacts are in the navigation column. On the welcome screen, `o` opens an existing investigation and `d` runs doctor. While an agent proposal is open: `A`, `y`, or `Enter` accepts it; `R` or `n` rejects it; `Esc` dismisses the list.
+Ingest, playbooks, tools, settings, audit, artifacts, nearby, and unresolve live in the palette. On Review, a citation that points at a missing source blocks accept. Accepted AI items keep the ◆ glyph.
 
 The full palette (new page, one collector, add a finding, generate a report, and the rest) is listed in the [user guide](docs/guide.md#command-palette).
 

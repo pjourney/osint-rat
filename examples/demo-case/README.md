@@ -26,8 +26,8 @@ Inside the workbench (no need to read `docs/ARCHITECTURE.md`):
 1. Press `g` — Graph of `example.com` and its infra.
 2. Press `s` — Search Around two hops (addresses, then ASN / organization).
 3. Press `Enter` on the canonical domain — Object View with properties, catalogued links, constituents, and cited findings.
-4. Press `6` — Timeline, including **Playbook domain-infra**.
-5. Press `4` — Findings. Every row has a source citation.
+4. Press `t` — Time lens, including **Playbook domain-infra**.
+5. Press `3` — Evidence. Every finding has a source citation.
 
 The same walkthrough from the shell:
 
