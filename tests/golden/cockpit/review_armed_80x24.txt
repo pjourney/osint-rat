@@ -14,11 +14,11 @@
  Inspector · Will write
 + Finding  ◆ AI
   mail.acme-login.com uses the same MX
-  confidence  medium
-  provenance agent (kept forever)
-  Registered 3 days before the campaign
-
 CITED EVIDENCE
+  ✓ S-1  DNS records for acme-login.…
+RATIONALE
+  Registered 3 days before the campaign
+TRANSCRIPT  Q-1
  Accept 1 AI item? It keeps ◆ agent provenance.   y confirm   any other key canc
  Armed — accept 1 AI item. It keeps ◆ agent provenance. y confirm. Any other key
 / search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro

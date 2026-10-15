@@ -10,8 +10,10 @@ mod table;
 mod theme;
 mod widgets;
 
+pub use glyphs::Glyphs;
 pub use motion::{Animator, MotionMode, TICK, TICK_MS, TimerNeed};
 pub use preview::render_preview;
+pub use table::relative_time_from;
 pub use theme::{ColorDepth, ColorMode, TerminalEnv, Theme, ThemeName};
 
 use std::time::Duration;
@@ -1288,6 +1290,18 @@ mod tests {
     }
 
     #[test]
+    fn theme_cycle_question_reverts_preview_then_opens_help() {
+        let (_directory, mut app) = test_app();
+        app.config.ui.theme = "dark".into();
+        app.dispatch(Action::Command("theme")).expect("theme");
+        app.dispatch(Action::Move(1)).expect("preview light");
+        assert_eq!(app.config.ui.theme, "light");
+        dispatch_key(&mut app, press(crossterm::event::KeyCode::Char('?')));
+        assert!(matches!(app.overlay, crate::app::Overlay::Help));
+        assert_eq!(app.config.ui.theme, "dark", "preview must revert on ?");
+    }
+
+    #[test]
     fn palette_theme_opens_cycle_without_confirm() {
         let (_directory, mut app) = test_app();
         app.dispatch(Action::Palette).expect("palette");
@@ -1552,10 +1566,111 @@ mod tests {
         }
     }
 
-    /// CI threshold: p99 render ≤ 1 ms and ≤ 2% of one core at 120×40 with 3 jobs + the agent.
-    /// Run with `cargo test cockpit_cpu_budget_two_percent -- --ignored --nocapture`.
     #[test]
-    #[ignore = "CI threshold: p99 ≤ 1 ms and ≤ 2% of one core over N 60 ms ticks at 120×40 with 3 jobs + agent"]
+    fn case_home_has_targets_glance_and_next() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenOverview).expect("case");
+        app.pane = crate::app::Pane::Main;
+        let home = app.case_home();
+        assert!(!home.targets.is_empty());
+        assert!(home.entities.total >= 1);
+        let screen = render_snapshot(&app, 80, 24);
+        assert!(screen.contains("TARGETS"), "{screen}");
+        assert!(screen.contains("AT A GLANCE"), "{screen}");
+        assert!(screen.contains("NEXT"), "{screen}");
+        assert!(!screen.contains("braille"), "{screen}");
+    }
+
+    #[test]
+    fn graph_enter_focuses_the_selected_node() {
+        let (_directory, mut app) = snapshot_app();
+        app.dispatch(Action::OpenGraph).expect("graph");
+        let before = app.graph.focus_id;
+        app.dispatch(Action::Select).expect("enter");
+        assert!(app.graph.focus_id.is_some());
+        assert_eq!(app.view, View::Graph);
+        assert_ne!(app.view, View::Object);
+        let _ = before;
+        let screen = render_snapshot(&app, 80, 24);
+        assert!(
+            screen.contains("├")
+                || screen.contains("└")
+                || screen.contains("|-")
+                || screen.contains("DOM"),
+            "tree missing\n{screen}"
+        );
+        assert!(
+            !screen.contains("Neighborhood") || screen.contains("KIND"),
+            "{screen}"
+        );
+        let width = screen
+            .lines()
+            .map(|line| line.chars().count())
+            .max()
+            .unwrap_or(0);
+        assert!(width <= 80, "graph exceeds 80 cols: {width}\n{screen}");
+    }
+
+    #[test]
+    fn review_drawer_keeps_citations_visible_at_80x24() {
+        let (_directory, mut app) = snapshot_app();
+        app.open_review_lane();
+        app.pane = crate::app::Pane::Detail;
+        let screen = render_snapshot(&app, 80, 24);
+        assert!(
+            screen.contains("CITED") || screen.contains("S-1") || screen.contains("S1"),
+            "citations clipped in Review drawer\n{screen}"
+        );
+        assert!(
+            screen.contains("TRANSCRIPT")
+                || screen.contains("Will write")
+                || screen.contains("CITED"),
+            "{screen}"
+        );
+    }
+
+    #[test]
+    fn plain_linear_mode_forces_motion_off_and_has_no_spinner_churn() {
+        let (_directory, mut app) = snapshot_app();
+        app.apply_plain_mode();
+        assert!(app.is_plain_linear());
+        assert_eq!(app.motion.mode(), crate::tui::MotionMode::Off);
+        seed_jobs(&mut app);
+        let first = render_snapshot(&app, 80, 24);
+        let _ = app.dispatch(Action::Tick);
+        let second = render_snapshot(&app, 80, 24);
+        assert_eq!(first, second, "plain mode must not churn");
+        assert!(!first.contains('⠋'), "{first}");
+        assert!(first.contains("RAIL") || first.contains("Case"), "{first}");
+    }
+
+    #[test]
+    fn a11y_snapshots_mono_ascii_motion_off() {
+        let (_directory, mut app) = snapshot_app();
+        app.config.ui.theme = "mono".into();
+        app.config.ui.ascii = true;
+        app.motion = crate::tui::Animator::new(crate::tui::MotionMode::Off);
+        let mut wrote = Vec::new();
+        for (name, action) in [
+            ("case_plain", Action::OpenOverview),
+            ("graph_plain", Action::OpenGraph),
+            ("review_plain", Action::OpenReview),
+        ] {
+            app.dispatch(action).expect("view");
+            app.pane = crate::app::Pane::Main;
+            wrote.extend(assert_screen_snapshot(name, &app, 80, 24));
+        }
+        assert!(
+            wrote.is_empty(),
+            "wrote snapshots; re-run to confirm: {}",
+            wrote.join(", ")
+        );
+    }
+
+    /// Release-only: p99 render ≤ 1 ms and ≤ 2% of one core at 120×40 with 3 jobs + the agent.
+    /// Debug `cargo test` skips this. Run `cargo test --release cockpit_cpu_budget_two_percent`.
+    #[cfg(not(debug_assertions))]
+    #[test]
     fn cockpit_cpu_budget_two_percent() {
         let (_directory, mut app) = snapshot_app();
         app.motion = crate::tui::Animator::new(crate::tui::MotionMode::Full);

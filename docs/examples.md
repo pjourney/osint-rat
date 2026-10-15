@@ -20,7 +20,7 @@ os-int-learn import ../examples/demo-case
 os-int-learn open "Example Corp"
 ```
 
-Inside the workbench: `g` Graph, `s` Search Around two hops, `Enter` Object View, `3` Evidence (cited findings), `t` time lens (playbook timeline). From the clone root the import path is `examples/demo-case`.
+Inside the workbench: `g` Graph, `s` Search Around two hops, `Enter` to focus a node (palette **Object View** for the typed reading), `3` Evidence (cited findings), `t` time lens (playbook timeline). From the clone root the import path is `examples/demo-case`.
 
 ## Collect a domain, then read it
 
@@ -207,7 +207,16 @@ If that data directory already has an investigation with the same id, add `--ren
 
 ```bash
 os-int-learn list
+os-int-learn case "Example Corp"
 os-int-learn report "Example Corp" --format markdown
+```
+
+`case` prints the same home dashboard as Rail `1`: targets, AT A GLANCE, and NEXT. `review list` / `review accept` / `review reject` are the Review lane; accept and reject need `--yes` or an interactive `y`. There is no non-confirmed AI accept.
+
+```bash
+os-int-learn review list "Example Corp"
+os-int-learn review accept "Example Corp" A-1 --yes
+os-int-learn search-around "Example Corp" --entity E-1 --hops 1
 ```
 
 `os-int new "Example Corp"` also creates a case, then opens the workbench and stays there until you quit. Use `collect --investigation` when you want the shell back.

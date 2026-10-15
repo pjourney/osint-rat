@@ -5,15 +5,15 @@
  3 Evidence    ▌◆? + Finding: mail.acme-login.com uses the same MX                                confidence  medium
  4 Graph                                                                                          provenance agent (kept forever)
 ▌5 Review 1                                                                                       Registered 3 days before the campaign
- 6 Jobs
-                                                                                                CITED EVIDENCE
-                                                                                                  ✓ S-1  DNS records for acme-login.com
-
-                                                                                                RATIONALE ◆
-                                                                                                  ┊ Registered 3 days before the campaign
-
+ 6 Jobs                                                                                         CITED EVIDENCE
+                                                                                                  ✓ S-1  DNS records for acme-login.…
+                                                                                                RATIONALE
+                                                                                                  Registered 3 days before the campaign
                                                                                                 TRANSCRIPT  Q-1
                                                                                                 Q  Is this phishing?
+
+
+
 
 
 

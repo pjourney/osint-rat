@@ -1,0 +1,24 @@
+ os-int ▸ acme-phish ▸ Graph  unm…  * 1 to review  ok jobs  agent X Claude Code
+ Rail         │>Graph
+ 1 Case        1 hop(s) · 2 nodes · 1 edges · cap 200/400
+ 2 Entities    KIND  DOM 1  IP 1
+ 3 Evidence    Domain:1  IP:1 │ Resolves to:1 │ ANL:1  COL:1
+>4 Graph       x clear   +/- hops   s Search Around   t time lens
+ 5 Review 1    >DOM acme-login.com A
+ 6 Jobs        `- resolves_to --> IP  203.0.113.7 C
+
+
+
+
+
+
+ Inspector · acme-login.com
+TABS  ·Props·  Sources  Notes  History
+DOM  acme-login.com  AC
+A 1 facts · 1 sources
+
+LINKS  (1)
+  -> resolves_to  IP  203.0.113.7
+
+ Graph · 1 hop(s) · 2 nodes · 1 edges. s Search Around, +/- hops, t time lens.
+/ search  Ctrl+K commands  ? help  c collect  a ask agent  g graph  s search aro

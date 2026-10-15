@@ -151,7 +151,7 @@ With no subcommand, os-int opens the terminal interface on your last investigati
 
 An investigation screen is always three panes: **Rail**, **Board**, and **Inspector**. The Rail has six destinations on keys `1`–`6`: Case, Entities, Evidence, Graph, Review, Jobs. The Inspector is a 44-column side pane; below 110 columns it becomes a bottom drawer (40% height). It is never hidden. Below 80 columns the Rail collapses to digits. The minimum comfortable size is 80×24. `z` zooms the Board; any key returns.
 
-Motion only tells you about state: a skippable boot splash on cold start, braille job spinners, a slower ◆ agent pulse, known-size progress bars, a focus pulse, the Inspector drawer slide, graph hop reveals with `+` markers, toasts (refusals always say why), the Review confirm bar (it never auto-confirms), and a radar sweep while a passive collector is observing. `ui.motion = full | reduced | off`. `--plain`, a screen reader (`OS_INT_PLAIN`), `NO_COLOR`, and `TERM=dumb` force off. Idle holds no timer. Palette **Theme** (`:theme`) cycles Cockpit Dark, Light, Mono, Phosphor, and Amber live; `y` saves, Esc reverts, Enter previews.
+Motion only tells you about state: a skippable boot splash on cold start, braille job spinners, a slower ◆ agent pulse, known-size progress bars, a focus pulse, the Inspector drawer slide, graph hop reveals with `+` markers, toasts (refusals always say why), the Review confirm bar (it never auto-confirms), and a radar sweep while a passive collector is observing. `ui.motion = full | reduced | off`. `--plain`, a screen reader (`OS_INT_PLAIN`), `NO_COLOR`, and `TERM=dumb` force off. Idle holds no timer. Palette **Theme** (`:theme`) cycles Cockpit Dark, Light, Mono, Phosphor, and Amber live; `y` saves, Esc reverts. `?` on that overlay reverts the preview and opens help.
 
 Entities and Evidence are real tables (column headers, display-width truncation, `/` filter). `/` accepts `kind:ip`, `src:ct`, `prov:ai`, `sort:-seen`, and free text. Every fact row shows a provenance glyph (`●` collected, `◇` original, `✎` analyst, `◆` accepted AI; ASCII: `C X A *`) and a source count. The Inspector Sources tab is the full source chain for the selected object. History is per-object. Empty boards show a hint, not a fake `(no …)` row. Loading uses skeleton rows. Errors stay in an inline panel until you dismiss them with `x`.
 
@@ -175,7 +175,11 @@ Background work (HTTP, DNS, TLS, subprocesses, agent calls, report rendering) ru
 
 os-int remembers the last view, page, and agent thread for each investigation.
 
-**Review** (`5`) is the only place AI, playbook, and merge proposals wait. Each row previews exactly what it will write and lists cited sources. `Shift+A` then `y` accepts. Enter never writes. A citation that points at a missing source blocks accept. Accepted AI items keep the ◆ glyph permanently.
+**Case** (`1`) is the home dashboard: TARGETS (kind, value, provenance, last collect), AT A GLANCE (entity and finding counts by provenance), and NEXT (proposals waiting, targets never collected). An empty case shows the shared empty widget, not a fake row. **Graph** (`4`) is an edge-labelled tree from the focused node. Heat strokes show how many sources back an edge. Cross-links are marked `(↑ seen)`. `Enter` focuses the selected node. `g` recenters. There is no braille canvas.
+
+**Review** (`5`) is the only place AI, playbook, and merge proposals wait. Each row previews exactly what it will write and lists cited sources. `Shift+A` then `y` accepts. Enter never writes. A citation that points at a missing source blocks accept. Accepted AI items keep the ◆ glyph permanently. The CLI equivalent is `os-int review list|accept|reject` — accept and reject require `--yes` or an interactive `y`. There is no non-confirmed AI accept.
+
+`--plain` (and `OS_INT_PLAIN`) is the screen-reader path: ASCII glyphs, motion off, and a linear Rail / Board / Inspector stack so a reader hears headings in order, not spinner churn.
 
 ### Command palette
 
@@ -217,7 +221,7 @@ Press `Ctrl+K` or `:`, then type to filter. Ingest, playbooks, tools, settings, 
 1. `n` on the welcome screen. Enter a name and an optional description. The description is used as the executive summary of a Markdown report.
 2. `n` again. Pick a page type with `Left` / `Right` and enter the target. The form shows an example for that type (`example.com`, `192.0.2.15`, `AS13335`, …).
 3. `c` on Case to collect on the selected target (passive collectors only).
-4. Open **Entities** (`2`) or **Evidence** (`3`). Sort and filter with `/` (`kind:dom`, `prov:ai`, `sort:-seen`). The Inspector shows the selected record (Props, Sources, Notes, History). Sources lists the chain with provenance glyphs. History is scoped to that object. Press `Enter` on an entity to open **Object View**. Press `g` to open **Graph**, then `s` to Search Around.
+4. Open **Entities** (`2`) or **Evidence** (`3`). Sort and filter with `/` (`kind:dom`, `prov:ai`, `sort:-seen`). The Inspector shows the selected record (Props, Sources, Notes, History). Sources lists the chain with provenance glyphs. History is scoped to that single object. Press `Enter` on an entity to open **Object View**. Press `g` to open **Graph**, then `s` to Search Around. On Graph, `Enter` focuses the node (the tree re-roots); `g` recenters.
 5. `e` edits the current page's notes in your editor (`ui.editor`, then `$VISUAL`, then `$EDITOR`, then `vi`) from Case, Entities (including the Notes tab), or Evidence. os-int suspends the terminal UI, runs the editor, and reloads the note when the editor exits. Notes also live on the Inspector Notes tab.
 6. Add a finding from the palette when you want to record a conclusion. Cite sources by short id (`S-1, S-4`). A finding you add this way is provenance `analyst`.
 
@@ -255,7 +259,7 @@ Graph is a terminal link-analysis canvas (TUI-first; there is no embedded webvie
 - `+` / `-` change hop depth and re-query from the original seed (0–8). `hops` follows the last result's `hops_used`.
 - Press `t` to toggle the **time lens** on Graph, Evidence, or Entities. The facet strip counts the unfiltered set by entity kind, top link types, and provenance. Palette **Previous facet** / **Next facet** / **Apply facet** move and apply a facet; `x` clears filters.
 - Render caps are **200 nodes** and **400 edges**. Crossing either threshold warns and asks for confirm before the first 200 / 400 are drawn. A capped result is labelled in the status line.
-- `Enter` opens Object View for the selected node. `Esc` returns to the screen that opened Graph. The Entities table is unchanged: `Enter` there still opens Object View.
+- `Enter` focuses the selected node (the tree re-roots there). `g` recenters Search Around on that node. Palette **Object View** still opens the typed reading. `Esc` returns to the screen that opened Graph. The Entities table is unchanged: `Enter` there still opens Object View.
 
 Empty investigations do not crash: Graph shows an empty neighborhood and a collect hint.
 
@@ -590,7 +594,9 @@ os-int [OPTIONS] [COMMAND]
 | `--config <file>` | `OS_INT_CONFIG` | Config file to read or create |
 | `--data-dir <dir>` | `OS_INT_DATA_DIR` | Data directory |
 | `--debug` | `RUST_LOG` | Debug-level tracing in the log file |
-| `--plain` | `OS_INT_PLAIN` | ASCII glyphs, no colour, and `ui.motion = off` (screen readers, pipes, `TERM=dumb`) |
+| `--plain` | `OS_INT_PLAIN` | ASCII glyphs, no colour, linear layout, and `ui.motion = off` (screen readers, pipes, `TERM=dumb`) |
+| `--json` | | Machine-readable output for list commands |
+| `--yes` | | Confirm a write without a prompt. Required when stdin is not a TTY |
 | `--version`, `--help` | | Version and command help |
 
 | Command | Purpose |
@@ -624,6 +630,12 @@ os-int [OPTIONS] [COMMAND]
 | `doctor` | Check the database, config, network, logs, and common programs |
 | `config` | Print the resolved config, data, database, and log paths |
 | `theme preview [name\|--all]` | Print cockpit role swatches, a sample strip, and colour-blind ΔE without opening the TUI |
+| `case <name>` | Print the Case home dashboard (targets, glance, NEXT) |
+| `review list <name>` | Print pending Review items |
+| `review accept\|reject <name> <A-n>` | Decide a proposal. Requires `--yes` or an interactive `y` |
+| `jobs <name>` | List jobs |
+| `evidence <name>` | List findings and sources |
+| `tools` | List tools. Active tools print as refused |
 
 `collect` target kinds: `domain`, `ip`, `url`, `email`, `repository`, `file`, `username`, `asn`. Aliases such as `host`, `hostname`, `repo`, and `as` are accepted.
 
@@ -778,10 +790,11 @@ os-int logs a warning at startup for an unknown theme, a timeout of `0`, or a cu
 | `Space` | Entities, Review | Mark a row |
 | `m` | Entities | Propose merge of marked rows → Review |
 | `z` | normal | Zoom the Board. Any key returns |
-| `Enter` | Entities, Graph | Open Object View |
+| `Enter` | Entities | Open Object View |
+| `Enter` | Graph | Focus the selected node (never writes) |
 | `?` | normal, overlays | Help (generated from the command registry) |
 | `1` … `6` | normal | Case, Entities, Evidence, Graph, Review, Jobs |
-| Palette `:theme` | normal | Cycle Dark / Light / Mono / Phosphor / Amber live. `y` saves to config, Esc reverts, Enter previews |
+| Palette `:theme` | normal | Cycle Dark / Light / Mono / Phosphor / Amber live. `y` saves to config, Esc reverts |
 | Palette | normal | Ingest, playbook, tools, settings, audit, artifacts, nearby, unresolve, cancel job, doctor, open investigation, theme |
 | `Shift+A` then `y` | Review | Arm, then accept. Shift is required (Caps Lock `A` does not arm). Any other key disarms. Enter never accepts. A missing citation blocks accept. |
 | `y` | confirm | Confirm a write, including a palette command that writes. Enter never writes. |

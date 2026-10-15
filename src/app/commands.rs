@@ -516,7 +516,7 @@ pub const COMMANDS: &[Command] = &[
         "theme",
         "Theme",
         "",
-        "Cycle cockpit themes live. y saves, Esc reverts, Enter previews.",
+        "Cycle cockpit themes live. y saves, Esc reverts.",
         true,
         false,
         true,

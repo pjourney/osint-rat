@@ -8,6 +8,7 @@
 //! restored when the case is opened again.
 
 pub mod action;
+pub mod case;
 pub mod commands;
 pub mod filter;
 pub mod graph;
@@ -248,7 +249,7 @@ pub enum Overlay {
     Doctor,
     /// Inline `/` filter for the current table. Typing updates the board live.
     TableFilter { query: Input },
-    /// Palette `:theme` live cycle. y saves, Esc reverts, Enter previews.
+    /// Palette `:theme` live cycle. y saves, Esc reverts. Enter does not write.
     ThemeCycle { original: String, index: usize },
 }
 
@@ -377,6 +378,8 @@ pub struct App {
     board_list_cache: RefCell<Option<BoardListCache>>,
     /// Motion engine. Idle holds no timer. Ticks never write.
     pub motion: crate::tui::Animator,
+    /// `--plain` / screen-reader: linear layout, ASCII, motion off.
+    pub plain: bool,
 }
 
 struct BoardListCache {
@@ -455,18 +458,24 @@ impl App {
             workspace_rev: 0,
             board_list_cache: RefCell::new(None),
             motion,
+            plain: false,
         };
         let _ = app.store.mark_interrupted_jobs();
         app
     }
 
     pub fn apply_plain_mode(&mut self) {
+        self.plain = true;
         self.config.ui.ascii = true;
         self.motion = crate::tui::Animator::from_config(
             &self.config,
             &crate::tui::TerminalEnv::from_process(),
             true,
         );
+    }
+
+    pub fn is_plain_linear(&self) -> bool {
+        self.plain
     }
 
     pub fn mark_dirty(&mut self) {
@@ -549,7 +558,7 @@ impl App {
     fn apply_theme_preview(&mut self, index: usize) {
         let name = Self::THEME_CYCLE[index % Self::THEME_CYCLE.len()];
         self.config.ui.theme = name.into();
-        self.status = format!("Theme {name} — y saves, Esc reverts, Enter previews.");
+        self.status = format!("Theme {name} — y saves, Esc reverts.");
         self.mark_dirty();
     }
 
@@ -878,6 +887,9 @@ impl App {
             Action::Select => self.select()?,
             Action::Back => self.cancel(),
             Action::Help => {
+                if matches!(self.overlay, Overlay::ThemeCycle { .. }) {
+                    self.revert_theme_cycle();
+                }
                 self.scroll = 0;
                 self.overlay = Overlay::Help;
             }
@@ -939,7 +951,11 @@ impl App {
             Action::OpenObjectView => self.open_object_view(),
             Action::OpenGraph => {
                 self.merge_marks.clear();
-                self.open_graph();
+                if self.view == View::Graph {
+                    self.recenter_graph();
+                } else {
+                    self.open_graph();
+                }
             }
             Action::SearchAround => self.search_around_from_selection(),
             Action::GraphHops(delta) => self.change_graph_hops(delta),
@@ -2735,6 +2751,10 @@ impl App {
 
     fn handle_job(&mut self, event: JobEvent) -> Result<()> {
         let mut dirty = true;
+        let rebuild_lists = matches!(
+            &event,
+            JobEvent::Started { .. } | JobEvent::Command { .. } | JobEvent::Finished { .. }
+        );
         match event {
             JobEvent::Started { job_id } => {
                 if let Some(job) = self.job_records.get_mut(&job_id) {
@@ -2798,7 +2818,9 @@ impl App {
                 self.finish_job(job_id, outcome)?;
             }
         }
-        self.touch_workspace();
+        if rebuild_lists {
+            self.touch_workspace();
+        }
         if dirty {
             self.mark_dirty();
         }
@@ -4906,6 +4928,56 @@ mod tests {
     }
 
     #[test]
+    fn hallway_create_target_accept_ai_export_without_help() {
+        let (directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Hallway");
+        create_page(&mut app, "acme-login.com", "domain", "acme-login.com");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let mut run = sample_run(investigation_id, Uuid::new_v4(), Uuid::new_v4(), "Phish?");
+        app.store.insert_agent_run(&mut run).expect("run");
+        app.store
+            .insert_proposals(
+                investigation_id,
+                run.id,
+                vec![(
+                    AgentAction::AddFinding {
+                        title: "acme-login.com is phishing infra".into(),
+                        details: "SAN mimics acme.com".into(),
+                        confidence: Some("medium".into()),
+                        sources: Vec::new(),
+                    },
+                    ProposalStatus::Pending,
+                    None,
+                )],
+            )
+            .expect("proposals");
+        app.reload().expect("reload");
+        assert!(!matches!(app.overlay, Overlay::Help));
+        app.view = View::Overview;
+        let home = app.case_home();
+        assert!(!home.targets.is_empty());
+        app.open_review_lane();
+        app.dispatch(Action::Arm).expect("arm");
+        app.dispatch(Action::Accept).expect("accept");
+        let data = app
+            .store
+            .load_investigation(investigation_id)
+            .expect("loads");
+        assert_eq!(data.findings[0].provenance, Provenance::Agent);
+        let dest = directory.path().join("export");
+        let files = crate::files::InvestigationFiles::new(&app.paths, investigation_id);
+        crate::exchange::export_investigation(
+            &mut app.store,
+            investigation_id,
+            files.root(),
+            &dest,
+        )
+        .expect("export");
+        assert!(dest.join("investigation.osint.json").exists() || dest.exists());
+        assert!(!matches!(app.overlay, Overlay::Help));
+    }
+
+    #[test]
     fn review_tick_never_accepts_or_disarms() {
         let (_directory, mut app) = test_app();
         app.motion = crate::tui::Animator::new(crate::tui::MotionMode::Full);
@@ -6789,5 +6861,35 @@ mod tests {
             app.listed_job_ids().is_empty(),
             "failed jobs must drop out of a running filter"
         );
+    }
+
+    #[test]
+    fn job_log_ticks_do_not_rebuild_board_lists() {
+        let (_directory, mut app) = test_app();
+        create_named_investigation(&mut app, "Log Ticks");
+        let investigation_id = app.workspace.as_ref().expect("workspace").id();
+        let mut job = sample_job("DNS", JobStatus::Running, None);
+        job.investigation_id = Some(investigation_id);
+        app.store.insert_job(&mut job).expect("store job");
+        app.job_records.insert(job.id, job.clone());
+        app.view = View::Entities;
+        let _ = app.listed_entities();
+        let rev = app.workspace_rev;
+        app.handle_job(JobEvent::Log {
+            job_id: job.id,
+            line: "looking up".into(),
+            is_error: false,
+        })
+        .expect("log");
+        assert_eq!(
+            app.workspace_rev, rev,
+            "log ticks must not bump workspace_rev"
+        );
+        app.handle_job(JobEvent::Progress {
+            job_id: job.id,
+            message: "page 1/8".into(),
+        })
+        .expect("progress");
+        assert_eq!(app.workspace_rev, rev);
     }
 }
